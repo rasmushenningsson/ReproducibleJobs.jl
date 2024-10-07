@@ -26,7 +26,7 @@ end
 struct Spec
 	ro::ReadOnly{InternalSpec}
 end
-Spec(args...; dedup=default_deduplicator(), kwargs...) =
+create_spec(args...; dedup=default_deduplicator(), kwargs...) =
 	Spec(deduplicate!(dedup, InternalSpec(dedup, args...; kwargs...)))
 
 
