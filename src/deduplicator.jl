@@ -5,6 +5,16 @@ end
 Deduplicator(hash_context::T) where T = Deduplicator{T}(hash_context, Dict{String,Any}())
 
 
+
+
+let deduplicator_singleton = Deduplicator(HashVersion{4}())
+	global default_deduplicator() = deduplicator_singleton
+end
+
+
+
+
+
 # TODO: Figure out the details here.
 deduplicator_copy(::Deduplicator, x) = deepcopy(x)
 
@@ -23,7 +33,11 @@ function deduplicate_type(dedup::Deduplicator, ::Type{T}) where {T}
 	if T isa Union
 		return deduplicate_type(dedup, T.a) || deduplicate_type(dedup, T.b)
 	end
-	return ismutabletype(T)
+	ismutabletype(T) && return true
+	for S in fieldtypes(T)
+		deduplicate_type(dedup, S) && return true
+	end
+	return false
 end
 
 
