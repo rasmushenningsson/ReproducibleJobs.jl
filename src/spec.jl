@@ -3,11 +3,14 @@ struct Spec
 	kwargs::Vector{Pair{Symbol,Any}}
 end
 
-function Spec(args...; dedup=default_deduplicator(), kwargs...)
+function _spec(dedup::Deduplicator, args, kwargs)
 	a = Any[deduplicate!(dedup,x) for x in args]
 	kw = sort!(Pair{Symbol,Any}[k=>deduplicate!(dedup,v) for (k,v) in kwargs]; by=first)
 	Spec(a,kw)
 end
+
+Spec(args...; dedup=default_deduplicator(), kwargs...) = _spec(dedup, args, kwargs)
+deduplicator_copy(dedup::Deduplicator, spec::Spec) = _spec(dedup, spec.args, spec.kwargs)
 
 
 function get_function(spec::Spec)

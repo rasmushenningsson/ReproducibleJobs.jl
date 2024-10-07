@@ -13,17 +13,29 @@ end
 
 
 
-
-
 # TODO: Figure out the details here.
 deduplicator_copy(::Deduplicator, x) = deepcopy(x)
 
 
+# We should consider deduplicating elements in Arrays/Dicts/Tuples/NamedTuples
+# But that makes the return type of `deduplicate!` much harder to infer.
+# So maybe not worth it.
+# deduplicator_copy(dedup::Deduplicator, a::Array) = deduplicate!.(Ref(dedup), a)
+# deduplicator_copy(dedup::Deduplicator, d::Dict{K}) where K =
+# 	Dict{K}((k=>deduplicate!(dedup,v) for (k,v) in d))
+# deduplicator_copy(dedup::Deduplicator, t::Tuple) = deduplicate!.(Ref(dedup), t)
+# deduplicator_copy(dedup::Deduplicator, nt::NamedTuple) =
+# 	NamedTuple((k=>deduplicate!(dedup,v) for (k,v) in nt))
+
+
+
 # "Shortcut" for some simple types, to lower risk of type instabilities in deduplicate!
 deduplicate_type(::Deduplicator, ::Type{<:Union{<:Integer,<:AbstractFloat,String,Symbol}}) = false
+deduplicate_type(::Deduplicator, ::Type{VersionNumber}) = false # Fix for VersionNumber that otherwise runs into Vararg problems below
 
 # Does these result in type instable code in deduplicate? No, nothing bad, we will get a small union.
 function deduplicate_type(dedup::Deduplicator, ::Type{T}) where {T<:Union{Tuple,NamedTuple}}
+	# TODO: handle VarArgs by checking Base.isvarargtype(T.parameters[end])? (fieldtypes errors for Vararg.)
 	for S in fieldtypes(T)
 		deduplicate_type(dedup, S) && return true
 	end

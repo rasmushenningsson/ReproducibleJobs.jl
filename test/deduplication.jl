@@ -7,11 +7,13 @@
 	@test deduplicate!(dedup, :symbol) === :symbol
 	@test deduplicate!(dedup, 11:16) === 11:16
 	@test deduplicate!(dedup, 11:3.5:570) === 11:3.5:570
+	@test deduplicate!(dedup, v"1.2.3") === v"1.2.3"
+	@test deduplicate!(dedup, v"1.2.3-rc1") === v"1.2.3-rc1"
 
 	@test length(dedup.d) == 0
 end
 
-@testset "arrays" begin
+@testset "Array" begin
 	dedup = Deduplicator(HashVersion{4}())
 
 	vi = [4,5,6]
@@ -32,7 +34,7 @@ end
 	@test length(dedup.d) == 2
 end
 
-@testset "tuples" begin
+@testset "Tuple" begin
 	dedup = Deduplicator(HashVersion{4}())
 
 	@test deduplicate!(dedup, (1234,"hello")) === (1234,"hello") # pass-through
@@ -50,7 +52,7 @@ end
 	@test length(dedup.d) == 1
 end
 
-@testset "named tuples" begin
+@testset "NamedTuple" begin
 	dedup = Deduplicator(HashVersion{4}())
 
 	@test deduplicate!(dedup, (;a=1234,b="hello")) === (;a=1234,b="hello") # pass-through
@@ -68,7 +70,7 @@ end
 	@test length(dedup.d) == 1
 end
 
-@testset "read-only" begin
+@testset "ReadOnly" begin
 	dedup = Deduplicator(HashVersion{4}())
 
 	x = [1,5,10]
