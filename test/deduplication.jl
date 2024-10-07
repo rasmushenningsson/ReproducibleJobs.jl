@@ -32,6 +32,42 @@ end
 	@test length(dedup.d) == 2
 end
 
+@testset "tuples" begin
+	dedup = Deduplicator(HashVersion{4}())
+
+	@test deduplicate!(dedup, (1234,"hello")) === (1234,"hello") # pass-through
+	@test length(dedup.d) == 0
+
+	t = (4,[1,6])
+	ro = deduplicate!(dedup, t)
+	@test ro isa ReadOnly
+	@test ro.value == t
+	@test ro.value !== t # ensure a copy was made
+	@test length(dedup.d) == 1
+
+	ro2 = deduplicate!(dedup, deepcopy(t))
+	@test ro2 === ro
+	@test length(dedup.d) == 1
+end
+
+@testset "named tuples" begin
+	dedup = Deduplicator(HashVersion{4}())
+
+	@test deduplicate!(dedup, (;a=1234,b="hello")) === (;a=1234,b="hello") # pass-through
+	@test length(dedup.d) == 0
+
+	nt = (;u=4,v=[1,6])
+	ro = deduplicate!(dedup, nt)
+	@test ro isa ReadOnly
+	@test ro.value == nt
+	@test ro.value !== nt # ensure a copy was made
+	@test length(dedup.d) == 1
+
+	ro2 = deduplicate!(dedup, deepcopy(nt))
+	@test ro2 === ro
+	@test length(dedup.d) == 1
+end
+
 @testset "read-only" begin
 	dedup = Deduplicator(HashVersion{4}())
 
@@ -45,4 +81,5 @@ end
 	@test ro3 !== ro # before dedup
 	ro4 = deduplicate!(dedup, ro3)
 	@test ro4 === ro # after dedup
+	@test length(dedup.d) == 1
 end
