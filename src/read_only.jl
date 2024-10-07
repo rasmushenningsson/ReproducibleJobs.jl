@@ -14,6 +14,8 @@ Base.hash(ro::ReadOnly, h::UInt) = hash(ro.h, h)
 # Needed to supported ReadOnly values with other, nested ReadOnly values inside (without recomputing hash values)
 StableHashTraits.transformer(::Type{<:ReadOnly}) = StableHashTraits.Transformer(pick_fields(:h))
 
-Base.show(io::IO, ::MIME"text/plain", ro::ReadOnly{T}) where T =
-	print(io, "ReadOnly{$T}(", ro.h[1:min(6,end)], ',', ro.value, ')')
+function Base.show(io::IO, ::MIME"text/plain", ro::ReadOnly{T}) where T
+	print(io, ro.value)
+	printstyled(io, ' ', ro.h[1:min(6,end)]; color=:red)
+end
 Base.show(io::IO, ro::ReadOnly) = show(io,MIME"text/plain"(), ro)
