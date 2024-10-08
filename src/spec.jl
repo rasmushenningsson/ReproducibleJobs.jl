@@ -36,6 +36,8 @@ create_spec(args...; deduplicator=default_deduplicator(), kwargs...) =
 	Spec(deduplicate!(deduplicator, InternalSpec(deduplicator, args...; kwargs...)))
 
 
+get_hash(spec::Spec) = get_hash(spec.ro)
+
 _get_internal(spec::Spec) = spec.ro.value
 get_function(spec::Spec) = get_function(_get_internal(spec))
 
@@ -46,7 +48,19 @@ deduplicate!(dedup::Deduplicator, spec::Spec) =	Spec(deduplicate!(dedup, spec.ro
 # --- printing ---
 struct DAGPrintContext{T}
 	x::T # current value
-	hashes::Vector{String} # which hashes we have seen, used to collapse all but the first Spec with a given hash
+	hashes::Set{String} # which hashes we have seen, used to collapse all but the first Spec with a given hash
+	collapsed::Bool
+end
+
+dag_print_context(ctx::DAGPrintContext, x) = DAGPrintContext(x, ctx.hashes, false)
+function dag_print_context(ctx::DAGPrintContext, x::Union{Spec,ReadOnly})
+	h = get_hash(x)
+	if h in ctx.hashes
+		DAGPrintContext(x, ctx.hashes, true)
+	else
+		push!(ctx.hashes, h)
+		DAGPrintContext(x, ctx.hashes, false)
+	end
 end
 
 struct SpecKWArg
@@ -54,17 +68,19 @@ struct SpecKWArg
 	v::Any
 end
 
-AbstractTrees.printnode(io::IO, kv::SpecKWArg; kwargs...) = print(io, kv.k, ": ", kv.v)
-
+function AbstractTrees.printnode(io::IO, ctx::DAGPrintContext{SpecKWArg}; kwargs...)
+	printstyled(io, ctx.x.k, ": "; color=:light_blue)
+	AbstractTrees.printnode(io, ctx.x.v)
+end
 
 # Default to printing without DAGPrintContext
-AbstractTrees.printnode(io::IO, (;x,hashes)::DAGPrintContext; kwargs...) = AbstractTrees.printnode(io, x; kwargs...)
+AbstractTrees.printnode(io::IO, ctx::DAGPrintContext; kwargs...) = AbstractTrees.printnode(io, ctx.x; kwargs...)
 
 # Make pair printing nicer, and use printnode for first and second
-function AbstractTrees.printnode(io::IO, (;x,hashes)::DAGPrintContext{<:Pair}; kwargs...)
-	AbstractTrees.printnode(io, DAGPrintContext(x.first, hashes))
+function AbstractTrees.printnode(io::IO, ctx::DAGPrintContext{<:Pair}; kwargs...)
+	AbstractTrees.printnode(io, ctx.x.first)
 	print(io, " => ")
-	AbstractTrees.printnode(io, DAGPrintContext(x.second, hashes))
+	AbstractTrees.printnode(io, dag_print_context(ctx, ctx.x.second))
 end
 
 function AbstractTrees.printnode(io::IO, ctx::DAGPrintContext{T}; kwargs...) where {T<:Union{Base.Fix1,Base.Fix2}}
@@ -77,28 +93,28 @@ function AbstractTrees.printnode(io::IO, ctx::DAGPrintContext{T}; kwargs...) whe
 end
 
 # Spec printing should show function name
-function AbstractTrees.printnode(io::IO, spec::Spec; kwargs...)
+function AbstractTrees.printnode(io::IO, ctx::DAGPrintContext{Spec}; kwargs...)
+	spec = ctx.x
 	f = get_function(spec)
-	if f === nothing
-		print(io, "Function not specified")
-	else
-		print(io, f)
-	end
+	printstyled(io, f !== nothing ? f : "Function not specified"; bold=true, color=:green)
 	printstyled(io, ' ', spec.ro.h[1:min(6,end)]; color=:red)
+	ctx.collapsed && printstyled(io, " collapsed"; color=:light_black)
 end
 
-AbstractTrees.children((;x,hashes)::DAGPrintContext{<:Pair}) = AbstractTrees.children(DAGPrintContext(x.second, hashes))
-function AbstractTrees.children((;x,hashes)::DAGPrintContext{Spec})
-	x.ro.h in hashes && return ()
-
-	push!(hashes, x.ro.h) # is this the right place?
-	ispec = _get_internal(x)
+AbstractTrees.children(ctx::DAGPrintContext{<:Pair}) = AbstractTrees.children(dag_print_context(ctx, ctx.x.second))
+function AbstractTrees.children(ctx::DAGPrintContext{Spec})
+	ctx.collapsed && return ()
+	ispec = _get_internal(ctx.x)
 	c = vcat(ispec.args, [SpecKWArg(k,v) for (k,v) in ispec.kwargs if k != :versionedfunction]) # skip :versionedfunction since it is shown at top
-	DAGPrintContext.(c, Ref(hashes))
+	dag_print_context.(Ref(ctx), c)
 end
-AbstractTrees.children(ctx::DAGPrintContext) = DAGPrintContext.(AbstractTrees.children(ctx.x), Ref(ctx.hashes))
+function AbstractTrees.children(ctx::DAGPrintContext{<:ReadOnly})
+	ctx.collapsed && return ()
+	[dag_print_context(ctx,p) for p in AbstractTrees.children(ctx.x.value)]
+end
+AbstractTrees.children(ctx::DAGPrintContext) = dag_print_context.(Ref(ctx), AbstractTrees.children(ctx.x))
 
 function Base.show(io::IO, spec::Spec)
 	# TODO: check, get(io,:compact,false)
-	AbstractTrees.print_tree(io, DAGPrintContext(spec,String[]))
+	AbstractTrees.print_tree(io, DAGPrintContext(spec, Set{String}(), false))
 end

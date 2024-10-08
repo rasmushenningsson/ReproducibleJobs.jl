@@ -3,6 +3,8 @@ struct ReadOnly{T}
 	h::String # stable_hash
 end
 
+get_hash(ro::ReadOnly) = ro.h
+
 function Base.:(==)(a::ReadOnly{T}, b::ReadOnly{T}) where T
 	a.h != b.h && return false # early out
 	a === b && return true # early out
