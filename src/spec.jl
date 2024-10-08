@@ -13,7 +13,6 @@ InternalSpec(dedup::Deduplicator, args...; kwargs...) = _internal_spec(dedup, ar
 deduplicator_copy(dedup::Deduplicator, ispec::InternalSpec) =
 	_internal_spec(dedup, ispec.args, ispec.kwargs)
 
-
 function get_function(ispec::InternalSpec)
 	r = searchsorted(ispec.kwargs, :versionedfunction=>nothing; by=first)
 	isempty(r) && return nothing
@@ -22,12 +21,19 @@ function get_function(ispec::InternalSpec)
 end
 
 
+# Pair{Symbol,Any} currently hashes without any type information about the `Any`.
+# And that would make structs with identical contents hash the same way, if they are the value of a kwarg.
+# This is a workaround.
+StableHashTraits.transformer(::Type{<:InternalSpec}) = StableHashTraits.Transformer(x->(x.args, first.(x.kwargs), last.(x.kwargs)))
+
+
+
 
 struct Spec
 	ro::ReadOnly{InternalSpec}
 end
-create_spec(args...; dedup=default_deduplicator(), kwargs...) =
-	Spec(deduplicate!(dedup, InternalSpec(dedup, args...; kwargs...)))
+create_spec(args...; deduplicator=default_deduplicator(), kwargs...) =
+	Spec(deduplicate!(deduplicator, InternalSpec(deduplicator, args...; kwargs...)))
 
 
 _get_internal(spec::Spec) = spec.ro.value
@@ -51,12 +57,26 @@ end
 AbstractTrees.printnode(io::IO, kv::SpecKWArg; kwargs...) = print(io, kv.k, ": ", kv.v)
 
 
-AbstractTrees.printnode(io::IO, (;x,hashes)::DAGPrintContext; kwargs...) = AbstractTrees.printnode(io,x; kwargs...)
+# Default to printing without DAGPrintContext
+AbstractTrees.printnode(io::IO, (;x,hashes)::DAGPrintContext; kwargs...) = AbstractTrees.printnode(io, x; kwargs...)
+
+# Make pair printing nicer, and use printnode for first and second
 function AbstractTrees.printnode(io::IO, (;x,hashes)::DAGPrintContext{<:Pair}; kwargs...)
-	# Avoid showing value twice
-	show(io, first(x))
+	AbstractTrees.printnode(io, DAGPrintContext(x.first, hashes))
 	print(io, " => ")
+	AbstractTrees.printnode(io, DAGPrintContext(x.second, hashes))
 end
+
+function AbstractTrees.printnode(io::IO, ctx::DAGPrintContext{T}; kwargs...) where {T<:Union{Base.Fix1,Base.Fix2}}
+	f = ctx.x
+	print(io, nameof(T), '(')
+	show(io, f.f)
+	print(io, ", ")
+	show(io, f.x)
+	print(io, ')')
+end
+
+# Spec printing should show function name
 function AbstractTrees.printnode(io::IO, spec::Spec; kwargs...)
 	f = get_function(spec)
 	if f === nothing
@@ -67,6 +87,7 @@ function AbstractTrees.printnode(io::IO, spec::Spec; kwargs...)
 	printstyled(io, ' ', spec.ro.h[1:min(6,end)]; color=:red)
 end
 
+AbstractTrees.children((;x,hashes)::DAGPrintContext{<:Pair}) = AbstractTrees.children(DAGPrintContext(x.second, hashes))
 function AbstractTrees.children((;x,hashes)::DAGPrintContext{Spec})
 	x.ro.h in hashes && return ()
 
