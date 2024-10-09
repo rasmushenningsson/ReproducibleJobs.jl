@@ -36,10 +36,19 @@ create_spec(args...; deduplicator=default_deduplicator(), kwargs...) =
 	Spec(deduplicate!(deduplicator, InternalSpec(deduplicator, args...; kwargs...)))
 
 
-get_hash(spec::Spec) = get_hash(spec.ro)
+_get_internal_spec(spec::Spec) = spec.ro.value
 
-_get_internal(spec::Spec) = spec.ro.value
-get_function(spec::Spec) = get_function(_get_internal(spec))
+get_hash(spec::Spec) = get_hash(spec.ro)
+get_function(spec::Spec) = get_function(_get_internal_spec(spec))
+function visit_dependencies(f, spec::Spec)
+	for x in spec.args
+		x isa Spec && f(x)
+	end
+	for (_,x) in spec.kwargs
+		x isa Spec && f(x)
+	end
+end
+
 
 deduplicate!(dedup::Deduplicator, spec::Spec) =	Spec(deduplicate!(dedup, spec.ro))
 
@@ -104,7 +113,7 @@ end
 AbstractTrees.children(ctx::DAGPrintContext{<:Pair}) = AbstractTrees.children(dag_print_context(ctx, ctx.x.second))
 function AbstractTrees.children(ctx::DAGPrintContext{Spec})
 	ctx.collapsed && return ()
-	ispec = _get_internal(ctx.x)
+	ispec = _get_internal_spec(ctx.x)
 	c = vcat(ispec.args, [SpecKWArg(k,v) for (k,v) in ispec.kwargs if k != :versionedfunction]) # skip :versionedfunction since it is shown at top
 	dag_print_context.(Ref(ctx), c)
 end
