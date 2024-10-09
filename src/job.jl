@@ -3,5 +3,4 @@ mutable struct Job
 	# TODO: maybe status and value, or maybe the handle is used for that.
 end
 
-function fetch!(job; scheduler=default_scheduler())
-end
+fetch!(job; scheduler=default_scheduler()) = fetch!(scheduler, job.spec)

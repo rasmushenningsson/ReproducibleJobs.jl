@@ -15,5 +15,6 @@ include("deduplicator.jl")
 include("versioned_function.jl")
 include("spec.jl")
 include("job.jl")
+include("scheduler.jl")
 
 end

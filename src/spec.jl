@@ -13,7 +13,7 @@ InternalSpec(dedup::Deduplicator, args...; kwargs...) = _internal_spec(dedup, ar
 deduplicator_copy(dedup::Deduplicator, ispec::InternalSpec) =
 	_internal_spec(dedup, ispec.args, ispec.kwargs)
 
-function get_function(ispec::InternalSpec)
+function get_versioned_function(ispec::InternalSpec)
 	r = searchsorted(ispec.kwargs, :versionedfunction=>nothing; by=first)
 	isempty(r) && return nothing
 	i = only(r)
@@ -39,12 +39,13 @@ create_spec(args...; deduplicator=default_deduplicator(), kwargs...) =
 _get_internal_spec(spec::Spec) = spec.ro.value
 
 get_hash(spec::Spec) = get_hash(spec.ro)
-get_function(spec::Spec) = get_function(_get_internal_spec(spec))
+get_versioned_function(spec::Spec) = get_versioned_function(_get_internal_spec(spec))
 function visit_dependencies(f, spec::Spec)
-	for x in spec.args
+	ispec = _get_internal_spec(spec)
+	for x in ispec.args
 		x isa Spec && f(x)
 	end
-	for (_,x) in spec.kwargs
+	for (_,x) in ispec.kwargs
 		x isa Spec && f(x)
 	end
 end
@@ -104,7 +105,7 @@ end
 # Spec printing should show function name
 function AbstractTrees.printnode(io::IO, ctx::DAGPrintContext{Spec}; kwargs...)
 	spec = ctx.x
-	f = get_function(spec)
+	f = get_versioned_function(spec)
 	printstyled(io, f !== nothing ? f : "Function not specified"; bold=true, color=:green)
 	printstyled(io, ' ', spec.ro.h[1:min(6,end)]; color=:red)
 	ctx.collapsed && printstyled(io, " collapsed"; color=:light_black)
@@ -124,6 +125,9 @@ end
 AbstractTrees.children(ctx::DAGPrintContext) = dag_print_context.(Ref(ctx), AbstractTrees.children(ctx.x))
 
 function Base.show(io::IO, spec::Spec)
-	# TODO: check, get(io,:compact,false)
-	AbstractTrees.print_tree(io, DAGPrintContext(spec, Set{String}(), false))
+	if get(io,:compact,false)
+		show(io, get_versioned_function(spec))
+	else
+		AbstractTrees.print_tree(io, DAGPrintContext(spec, Set{String}(), false))
+	end
 end
