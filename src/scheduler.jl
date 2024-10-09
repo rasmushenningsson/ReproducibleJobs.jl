@@ -34,7 +34,7 @@ end
 
 
 function fetch!(scheduler::Scheduler, spec::Spec)
-	get!(scheduler.results, spec) do
+	result = get!(scheduler.results, spec) do
 		# first process dependencies
 		upstream = IdDict{Spec,Any}()
 		visit_dependencies(spec) do dep
@@ -42,6 +42,7 @@ function fetch!(scheduler::Scheduler, spec::Spec)
 		end
 		compute(spec, upstream)
 	end
+	result isa Spec ? fetch!(scheduler, result) : result # forward if a Spec was returned
 end
 
 
