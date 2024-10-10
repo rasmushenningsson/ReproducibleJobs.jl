@@ -14,6 +14,7 @@ function cache_load(cache::Cache, fp, spec::Spec)
 	d = load(fp)
 	cached_spec = d["spec"]
 	@assert spec == cached_spec "Job specification did not match job specification in cache" # TODO: Decide what to do on failure - delete the file???
+	touch(fp) # update file timestamp (in case we want to remove old cached files later)
 	return d["value"]
 end
 
