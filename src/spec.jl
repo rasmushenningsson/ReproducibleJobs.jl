@@ -34,12 +34,13 @@ StableHashTraits.transformer(::Type{<:InternalSpec}) = StableHashTraits.Transfor
 
 struct Spec
 	ro::ReadOnly{InternalSpec}
+	use_cache::Bool
 end
-create_spec(args...; deduplicator=default_deduplicator(), kwargs...) =
-	Spec(deduplicate!(deduplicator, InternalSpec(deduplicator, args...; kwargs...)))
+create_spec(args...; deduplicator=default_deduplicator(), use_cache=true, kwargs...) =
+	Spec(deduplicate!(deduplicator, InternalSpec(deduplicator, args...; kwargs...)), use_cache)
 
 
-Base.:(==)(a::Spec, b::Spec) = a.ro == b.ro
+Base.:(==)(a::Spec, b::Spec) = a.use_cache == b.use_cache && a.ro == b.ro
 
 
 _get_internal_spec(spec::Spec) = spec.ro.value
@@ -56,7 +57,7 @@ function visit_dependencies(f, spec::Spec)
 	end
 end
 
-deduplicate!(dedup::Deduplicator, spec::Spec) =	Spec(deduplicate!(dedup, spec.ro))
+deduplicate!(dedup::Deduplicator, spec::Spec) =	Spec(deduplicate!(dedup, spec.ro), spec.use_cache)
 
 
 

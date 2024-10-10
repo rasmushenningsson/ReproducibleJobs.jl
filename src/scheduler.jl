@@ -35,17 +35,34 @@ end
 
 function fetch!(scheduler::Scheduler, spec::Spec)
 	result = get!(scheduler.results, spec) do
-		# first process dependencies
-		upstream = IdDict{Spec,Any}()
-		visit_dependencies(spec) do dep
-			upstream[dep] = fetch!(scheduler, dep)
+		# If it's in the cache, we don't need to fetch! upstream jobs
+		result = nothing
+		if spec.use_cache
+			result = cache_get(spec, nothing)
 		end
 
-		cache_get!(spec) do
-			compute(spec, upstream)
+		if result === nothing # Not found in cache
+			# first process dependencies
+			upstream = IdDict{Spec,Any}()
+			visit_dependencies(spec) do dep
+				upstream[dep] = fetch!(scheduler, dep)
+			end
+
+			if spec.use_cache
+				cache_get!(spec) do
+					compute(spec, upstream)
+				end
+			else
+				@info "Bypassing cache"
+				compute(spec, upstream)
+			end
 		end
 	end
-	result isa Spec ? fetch!(scheduler, result) : result # forward if a Spec was returned
+	if result isa Spec # Forwarding: If a Spec was returned we should process that
+		# NB: We must deduplicate a Spec if it was loaded from file
+		result = fetch!(scheduler, deduplicate!(default_deduplicator(), result)) # TODO: avoid using default_deduplicator() here - get from scheduler somehow
+	end
+	result
 end
 
 

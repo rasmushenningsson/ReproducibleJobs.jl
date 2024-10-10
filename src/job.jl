@@ -15,13 +15,21 @@ function Base.show(io::IO, ::MIME"text/plain", job::Job)
 	println(io, "Job Spec:")
 	show(io, MIME"text/plain"(), job.spec)
 	# println(io)
-	print(io, "Job Result: ")
-	let io = IOContext(io, :compact=>true)
-		if job.result === NotComputed()
-			print(io, cache_haskey(job.spec) ? "Cached on disk" : "Not computed")
-		else
+
+	# TODO: Show better status (also follow forwarding in the Scheduler). Something like:
+	# * Not computed
+	# * Cached on disk
+	# * Waiting for dependencies
+	# * Queued
+	# * Being computed
+	# * Done
+	# * Errored
+	print(io, "Job Status: ", job.result === NotComputed() ? "Not fetched" : "Done")
+	if job.result !== NotComputed()
+		let io = IOContext(io, :compact=>true)
+			println(io)
+			print(io, "Job Result: ")
 			show(io, job.result)
 		end
-
 	end
 end
