@@ -17,7 +17,11 @@ function Base.show(io::IO, ::MIME"text/plain", job::Job)
 	# println(io)
 	print(io, "Job Result: ")
 	let io = IOContext(io, :compact=>true)
-		show(io, job.result)
+		if job.result === NotComputed()
+			print(io, cache_haskey(job.spec) ? "Cached on disk" : "Not computed")
+		else
+			show(io, job.result)
+		end
+
 	end
-	println(io)
 end

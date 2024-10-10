@@ -3,6 +3,9 @@ struct InternalSpec
 	kwargs::Vector{Pair{Symbol,Any}}
 end
 
+Base.:(==)(a::InternalSpec, b::InternalSpec) = a.args == b.args && a.kwargs == b.kwargs
+
+
 function _internal_spec(dedup::Deduplicator, args, kwargs)
 	a = Any[deduplicate!(dedup,x) for x in args]
 	kw = sort!(Pair{Symbol,Any}[k=>deduplicate!(dedup,v) for (k,v) in kwargs]; by=first)
@@ -36,6 +39,9 @@ create_spec(args...; deduplicator=default_deduplicator(), kwargs...) =
 	Spec(deduplicate!(deduplicator, InternalSpec(deduplicator, args...; kwargs...)))
 
 
+Base.:(==)(a::Spec, b::Spec) = a.ro == b.ro
+
+
 _get_internal_spec(spec::Spec) = spec.ro.value
 
 get_hash(spec::Spec) = get_hash(spec.ro)
@@ -49,7 +55,6 @@ function visit_dependencies(f, spec::Spec)
 		x isa Spec && f(x)
 	end
 end
-
 
 deduplicate!(dedup::Deduplicator, spec::Spec) =	Spec(deduplicate!(dedup, spec.ro))
 
@@ -106,7 +111,7 @@ end
 function AbstractTrees.printnode(io::IO, ctx::DAGPrintContext{Spec}; kwargs...)
 	spec = ctx.x
 	f = get_versioned_function(spec)
-	printstyled(io, f !== nothing ? f : "Function not specified"; bold=true, color=:green)
+	printstyled(io, f !== nothing ? f.f : "Function not specified"; bold=true, color=:green)
 	printstyled(io, ' ', spec.ro.h[1:min(6,end)]; color=:red)
 	ctx.collapsed && printstyled(io, " collapsed"; color=:light_black)
 end

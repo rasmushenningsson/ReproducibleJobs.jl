@@ -40,7 +40,10 @@ function fetch!(scheduler::Scheduler, spec::Spec)
 		visit_dependencies(spec) do dep
 			upstream[dep] = fetch!(scheduler, dep)
 		end
-		compute(spec, upstream)
+
+		cache_get!(spec) do
+			compute(spec, upstream)
+		end
 	end
 	result isa Spec ? fetch!(scheduler, result) : result # forward if a Spec was returned
 end
