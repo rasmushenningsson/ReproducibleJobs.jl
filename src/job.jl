@@ -6,9 +6,8 @@ mutable struct Job
 end
 Job(spec::Spec) = Job(spec, NotComputed())
 
-function fetch!(job; scheduler=default_scheduler())
-	job.result = fetch!(scheduler, job.spec)
-end
+fetch!(job; scheduler=default_scheduler(), kwargs...) =
+	job.result = fetch!(scheduler, job.spec; kwargs...)
 
 # --- printing ---
 function Base.show(io::IO, ::MIME"text/plain", job::Job)
