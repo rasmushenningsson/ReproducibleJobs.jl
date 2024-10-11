@@ -36,8 +36,7 @@ struct Spec
 	use_cache::Bool
 end
 
-
-function create_spec(args, kwargs; deduplicator, use_cache)
+function create_spec(args..., ; deduplicator=default_deduplicator(), use_cache=true, kwargs...)
 	ispec = create_internal_spec(deduplicator, args, kwargs)
 	ispec = deduplicate!(deduplicator, ispec)
 	Spec(ispec, use_cache)
@@ -51,6 +50,54 @@ _get_internal_spec(spec::Spec) = spec.ro.value
 
 get_hash(spec::Spec) = get_hash(spec.ro)
 get_versioned_function(spec::Spec) = get_versioned_function(_get_internal_spec(spec))
+
+
+
+# --- WIP ---
+# could_contain_spec(::Type{T}) where T =
+# 	return Spec <: T || T <: Pair  || T <: Tuple || T <: AbstractArray || T <: AbstractDict
+
+# _visit_dependencies(f, x) = nothing
+# _visit_dependencies(f, spec::Spec) = f(spec)
+# function _visit_dependencies(f, a::AbstractArray{T}) where T # TODO: make one-liner
+# 	if could_contain_spec(eltype(a))
+# 		for x in a
+# 			_visit_dependencies(f, x)
+# 		end
+# 	end
+# end
+# function _visit_dependencies(f, p::Pair)
+# 	_visit_dependencies(f, p.first)
+# 	_visit_dependencies(f, p.second)
+# end
+# _visit_dependencies(f, t::Tuple) = _visit_dependencies.(f, t)
+# function _visit_dependencies(f, d::AbstractDict{K,V}) where {K,V}
+# 	if could_contain_spec(keytype(d))
+# 		for k in keys(d)
+# 			_visit_dependencies(f, k)
+# 		end
+# 	end
+# 	if could_contain_spec(valuetype(d))
+# 		for v in values(d)
+# 			_visit_dependencies(f, v)
+# 		end
+# 	end
+# end
+
+# """
+# 	visit_dependencies(f, spec::Spec)
+
+# Call `f` for all `Spec`s contained in `spec`.
+# `AbstractArray`s, `AbstractDict`s, `Tuple`s and `Pair`s will be visited recursively.
+# The recursion stops when a `Spec` is reached, so only direct dependencies are visited.
+# """
+# function visit_dependencies(f, spec::Spec)
+# 	ispec = _get_internal_spec(spec)
+# 	_visit_dependencies(f, ispec.args)
+# 	_visit_dependencies(f, ispec.kwargs)
+# end
+# -----------
+
 function visit_dependencies(f, spec::Spec)
 	ispec = _get_internal_spec(spec)
 	for x in ispec.args
