@@ -32,3 +32,11 @@ function Base.show(io::IO, ::MIME"text/plain", job::Job)
 		end
 	end
 end
+
+_unwrap_job(x) = x isa Job ? x.spec : x
+
+function create_job(args...; deduplicator=default_deduplicator(), use_cache=true, kwargs...)
+	args = _unwrap_job.(args)
+	kwargs = [k=>_unwrap_job(v) for (k,v) in kwargs]
+	Job(create_spec(args, kwargs; deduplicator, use_cache))
+end

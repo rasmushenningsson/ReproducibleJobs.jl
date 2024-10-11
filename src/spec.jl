@@ -6,15 +6,14 @@ end
 Base.:(==)(a::InternalSpec, b::InternalSpec) = a.args == b.args && a.kwargs == b.kwargs
 
 
-function _internal_spec(dedup::Deduplicator, args, kwargs)
+function create_internal_spec(dedup::Deduplicator, args, kwargs)
 	a = Any[deduplicate!(dedup,x) for x in args]
 	kw = sort!(Pair{Symbol,Any}[k=>deduplicate!(dedup,v) for (k,v) in kwargs]; by=first)
 	InternalSpec(a,kw)
 end
 
-InternalSpec(dedup::Deduplicator, args...; kwargs...) = _internal_spec(dedup, args, kwargs)
 deduplicator_copy(dedup::Deduplicator, ispec::InternalSpec) =
-	_internal_spec(dedup, ispec.args, ispec.kwargs)
+	create_internal_spec(dedup, ispec.args, ispec.kwargs)
 
 function get_versioned_function(ispec::InternalSpec)
 	r = searchsorted(ispec.kwargs, :versionedfunction=>nothing; by=first)
@@ -36,8 +35,13 @@ struct Spec
 	ro::ReadOnly{InternalSpec}
 	use_cache::Bool
 end
-create_spec(args...; deduplicator=default_deduplicator(), use_cache=true, kwargs...) =
-	Spec(deduplicate!(deduplicator, InternalSpec(deduplicator, args...; kwargs...)), use_cache)
+
+
+function create_spec(args, kwargs; deduplicator, use_cache)
+	ispec = create_internal_spec(deduplicator, args, kwargs)
+	ispec = deduplicate!(deduplicator, ispec)
+	Spec(ispec, use_cache)
+end
 
 
 Base.:(==)(a::Spec, b::Spec) = a.use_cache == b.use_cache && a.ro == b.ro
