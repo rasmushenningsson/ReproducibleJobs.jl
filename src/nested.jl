@@ -1,3 +1,5 @@
+visit_nested(f, pred, x) = f(x)
+
 function visit_nested(f, pred, a::Array)
 	for x in a
 		pred(x) && visit_nested(f, pred, x) # pred let us handle e.g. an Array{Array{Int}} that we do not need to traverse when looking for Specs
@@ -18,6 +20,9 @@ function visit_nested(f, pred, (k,v)::Pair)
 	pred(k) && visit_nested(f, pred, k)
 	pred(v) && visit_nested(f, pred, v)
 end
+
+visit_nested(f, x) = visit_nested(f, Returns(true), x)
+
 
 copy_nested(f,x) = f(x)
 copy_nested(f,a::Array) = f([copy_nested(f,x) for x in a]) # NB: preserves dims of array, might change eltype

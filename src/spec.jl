@@ -89,6 +89,22 @@ get_versioned_function(spec::Spec) = get_versioned_function(_get_internal_spec(s
 
 
 
+
+
+function visit_dependencies(f, spec::Spec)
+	ispec = _get_internal_spec(spec)
+
+	# TODO: Use predicate version for smart early-outs?
+	visit_nested(ispec.args) do x
+		x isa Spec && f(x)
+	end
+	visit_nested(ispec.kwargs) do x
+		x isa Spec && f(x)
+	end
+end
+
+
+
 # --- WIP ---
 # could_contain_spec(::Type{T}) where T =
 # 	return Spec <: T || T <: Pair  || T <: Tuple || T <: AbstractArray || T <: AbstractDict
@@ -134,15 +150,15 @@ get_versioned_function(spec::Spec) = get_versioned_function(_get_internal_spec(s
 # end
 # -----------
 
-function visit_dependencies(f, spec::Spec)
-	ispec = _get_internal_spec(spec)
-	for x in ispec.args
-		x isa Spec && f(x)
-	end
-	for (_,x) in ispec.kwargs
-		x isa Spec && f(x)
-	end
-end
+# function visit_dependencies(f, spec::Spec)
+# 	ispec = _get_internal_spec(spec)
+# 	for x in ispec.args
+# 		x isa Spec && f(x)
+# 	end
+# 	for (_,x) in ispec.kwargs
+# 		x isa Spec && f(x)
+# 	end
+# end
 
 deduplicate!(dedup::Deduplicator, spec::Spec) =	Spec(deduplicate!(dedup, spec.ro), spec.use_cache)
 
