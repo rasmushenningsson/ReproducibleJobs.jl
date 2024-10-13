@@ -12,6 +12,7 @@ let scheduler_singleton = Scheduler()
 end
 
 
+_unwrap_value(upstream) = Base.Fix2(_unwrap_value, upstream)
 function _unwrap_value(x, upstream)
 	# Manual dispatch since we have few types
 	x isa Spec && return upstream[x]
@@ -25,8 +26,8 @@ function compute(spec::Spec, upstream::IdDict{Spec,Any})
 	vf = get_versioned_function(spec)
 	ispec = _get_internal_spec(spec)
 
-	args = [_unwrap_value(a,upstream) for a in ispec.args]
-	kwargs = [k=>_unwrap_value(v,upstream) for (k,v) in ispec.kwargs if k != :versionedfunction]
+	args = (copy_nested(_unwrap_value(upstream), a) for a in ispec.args)
+	kwargs = (copy_nested(_unwrap_value(upstream), k)=>copy_nested(_unwrap_value(upstream),v) for (k,v) in ispec.kwargs if k != :versionedfunction)
 
 	@info "Running $vf"
 	vf.f(args...; kwargs...)
