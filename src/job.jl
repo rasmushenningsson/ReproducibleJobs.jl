@@ -6,6 +6,11 @@ mutable struct Job
 end
 Job(spec::Spec) = Job(spec, NotComputed())
 
+
+preprocess_standard(job::Job) = job.spec
+
+
+
 fetch!(job; scheduler=default_scheduler(), kwargs...) =
 	job.result = fetch!(scheduler, job.spec; kwargs...)
 

@@ -6,14 +6,20 @@ end
 Base.:(==)(a::InternalSpec, b::InternalSpec) = a.args == b.args && a.kwargs == b.kwargs
 
 
-function create_internal_spec(dedup::Deduplicator, args, kwargs)
-	a = Any[deduplicate!(dedup,x) for x in args]
-	kw = sort!(Pair{Symbol,Any}[k=>deduplicate!(dedup,v) for (k,v) in kwargs]; by=first)
+# function create_internal_spec(dedup::Deduplicator, args, kwargs)
+# 	a = Any[deduplicate!(dedup,x) for x in args]
+# 	kw = sort!(Pair{Symbol,Any}[k=>deduplicate!(dedup,v) for (k,v) in kwargs]; by=first)
+# 	InternalSpec(a,kw)
+# end
+
+function create_internal_spec(f, args, kwargs)
+	a = copy_nested(f, args)
+	kw = copy_nested(f, kwargs)
 	InternalSpec(a,kw)
 end
 
-deduplicator_copy(dedup::Deduplicator, ispec::InternalSpec) =
-	create_internal_spec(dedup, ispec.args, ispec.kwargs)
+# deduplicator_copy(dedup::Deduplicator, ispec::InternalSpec) =
+# 	create_internal_spec(dedup, ispec.args, ispec.kwargs)
 
 function get_versioned_function(ispec::InternalSpec)
 	r = searchsorted(ispec.kwargs, :versionedfunction=>nothing; by=first)
@@ -36,9 +42,38 @@ struct Spec
 	use_cache::Bool
 end
 
-function create_spec(args..., ; deduplicator=default_deduplicator(), use_cache=true, kwargs...)
-	ispec = create_internal_spec(deduplicator, args, kwargs)
-	ispec = deduplicate!(deduplicator, ispec)
+
+deduplicate_type(::Deduplicator, ::Type{Spec}) = false
+
+
+# TODO: We might want to avoid dynamic dispatch for pre-processing to speed it up. But that's for later.
+
+# This are handled by copy_nested and are thus already new copies
+preprocess_standard(a::Array) = a
+preprocess_standard(d::Dict) = d
+preprocess_standard(t::Tuple) = t
+preprocess_standard(p::Pair) = p
+
+# These are already managed, no need to copy
+preprocess_standard(spec::Spec) = spec
+preprocess_standard(ro::ReadOnly) = ro
+
+# Fallback to copy, so deduplicator can store the value
+preprocess_standard(x) = deepcopy(x) # or copy()? but copy might not exist... Or a new function the user can override for their type more easily? Defaulting to copy/deepcopy?
+
+
+
+
+
+# function create_spec(args..., ; deduplicator=default_deduplicator(), use_cache=true, kwargs...)
+# 	ispec = create_internal_spec(deduplicator, args, kwargs)
+# 	ispec = deduplicate!(deduplicator, ispec)
+# 	Spec(ispec, use_cache)
+# end
+
+
+function create_spec(args...; deduplicator=default_deduplicator(), preprocess=deduplicator∘preprocess_standard, use_cache=true, kwargs...)
+	ispec = create_internal_spec(preprocess, args, kwargs)
 	Spec(ispec, use_cache)
 end
 
