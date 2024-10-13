@@ -21,4 +21,6 @@ include("cache.jl")
 include("job.jl")
 include("scheduler.jl")
 
+include("hash_by_value.jl")
+
 end
