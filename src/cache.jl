@@ -31,7 +31,7 @@ function Base.get!(f, cache::Cache, spec::Spec)
 	isfile(fp) && return cache_load(cache, fp, spec)
 
 	value = f()
-	jldsave(fp; spec, value, compress=true)
+	jldsave(fp, true; spec, value) # compress=true
 	return value
 end
 
