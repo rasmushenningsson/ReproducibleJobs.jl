@@ -13,8 +13,8 @@ Base.:(==)(a::InternalSpec, b::InternalSpec) = a.args == b.args && a.kwargs == b
 # end
 
 function create_internal_spec(f, args, kwargs)
-	a = copy_nested(f, args)
-	kw = copy_nested(f, kwargs)
+	a = Any[copy_nested(f,x) for x in args]
+	kw = sort!(Pair{Symbol,Any}[copy_nested(f,p) for p in kwargs]; by=first)
 	InternalSpec(a,kw)
 end
 
@@ -58,8 +58,8 @@ preprocess_standard(p::Pair) = p
 preprocess_standard(spec::Spec) = spec
 preprocess_standard(ro::ReadOnly) = ro
 
-# Fallback to copy, so deduplicator can store the value
-preprocess_standard(x) = deepcopy(x) # or copy()? but copy might not exist... Or a new function the user can override for their type more easily? Defaulting to copy/deepcopy?
+# Fallback to make a copy, so deduplicator can store the value
+preprocess_standard(x) = deepcopy(x) # or copy? but copy might not exist... Or a new function the user can override for their type more easily? Defaulting to copy/deepcopy?
 
 
 
@@ -74,6 +74,7 @@ preprocess_standard(x) = deepcopy(x) # or copy()? but copy might not exist... Or
 
 function create_spec(args...; deduplicator=default_deduplicator(), preprocess=deduplicator∘preprocess_standard, use_cache=true, kwargs...)
 	ispec = create_internal_spec(preprocess, args, kwargs)
+	ispec = deduplicator(ispec)
 	Spec(ispec, use_cache)
 end
 

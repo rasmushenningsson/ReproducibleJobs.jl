@@ -12,6 +12,7 @@ export
 	Job,
 	fetch!
 
+include("nested.jl")
 include("read_only.jl")
 include("deduplicator.jl")
 include("versioned_function.jl")
