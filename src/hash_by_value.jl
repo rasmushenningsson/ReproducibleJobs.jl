@@ -35,34 +35,7 @@ end
 
 
 _replace_evaluated(evaluated) = Base.Fix2(_replace_evaluated, evaluated)
-# _replace_evaluated(x, evaluated) = get(evaluated, x, x) # replaced evaluated specs by the value, and leaves everything else in place
-function _replace_evaluated(x, evaluated)
-	# @info "_replace_evaluated"
-	# @show evaluated
-	# @show x
-	# # @show objectid.(keys(evaluated))
-
-	# y = only(keys(evaluated))
-	# @show objectid(y)
-	# @show objectid(x)
-
-	# @show y.use_cache
-	# @show x.use_cache
-
-	# @show objectid(y.ro)
-	# @show objectid(x.ro)
-
-	# @show y.ro === x.ro
-
-	# @show y.ro.h
-	# @show x.ro.h
-
-	# @show y.ro.value
-	# @show x.ro.value
-
-
-	get(evaluated, x, x) # replaced evaluated specs by the value, and leaves everything else in place
-end
+_replace_evaluated(x, evaluated) = get(evaluated, x, x) # replaced evaluated specs by the value, and leaves everything else in place
 
 
 function hash_by_value_eval(original::Barrier, specs::Pair{Barrier,<:Any}...)
