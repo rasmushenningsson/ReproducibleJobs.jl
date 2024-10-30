@@ -171,16 +171,56 @@ struct DAGPrintContext{T}
 	collapsed::Bool
 end
 
-dag_print_context(ctx::DAGPrintContext, x) = DAGPrintContext(x, ctx.hashes, false)
-function dag_print_context(ctx::DAGPrintContext, x::Union{Spec,ReadOnly})
+should_collapse(::Set{String}, x) = should_collapse(x)
+function should_collapse(hashes::Set{String}, x::Union{Spec,ReadOnly})
 	h = get_hash(x)
-	if h in ctx.hashes
-		DAGPrintContext(x, ctx.hashes, true)
+	if h in hashes
+		true
 	else
-		push!(ctx.hashes, h)
-		DAGPrintContext(x, ctx.hashes, false)
+		push!(hashes, h)
+		false
 	end
 end
+should_collapse(::Any) = true
+
+
+# TODO: find a better name
+function subtype_collapse(::Type{T}) where T
+	Spec <: T && return false
+	ReadOnly <: T && return false
+	AbstractArray <: T && return false
+	AbstractDict <: T && return false
+	Tuple <: T && return false
+	NamedTuple <: T && return false
+	return true
+end
+
+should_collapse(::AbstractArray{T}) where T = subtype_collapse(T)
+should_collapse(::AbstractDict{T1,T2}) where {T1,T2} = subtype_collapse(T1) && subtype_collapse(T2)
+should_collapse(::T) where T<:Union{<:Tuple,<:NamedTuple,<:Pair} = all(subtype_collapse, fieldtypes(T))
+
+dag_print_context(ctx::DAGPrintContext, x) = DAGPrintContext(x, ctx.hashes, should_collapse(ctx.hashes, x))
+
+
+# print_collapsed(io::IO, x) = print(io, x)
+
+
+# # dag_print_context(ctx::DAGPrintContext, x) = DAGPrintContext(x, ctx.hashes, false)
+# dag_print_context(ctx::DAGPrintContext, x) = DAGPrintContext(x, ctx.hashes, true)
+
+# function dag_print_context(ctx::DAGPrintContext, x::AbstractArray{T})
+# 	DAGPrintContext(x, ctx.hashes, true)
+# end
+
+# function dag_print_context(ctx::DAGPrintContext, x::Union{Spec,ReadOnly})
+# 	h = get_hash(x)
+# 	if h in ctx.hashes
+# 		DAGPrintContext(x, ctx.hashes, true)
+# 	else
+# 		push!(ctx.hashes, h)
+# 		DAGPrintContext(x, ctx.hashes, false)
+# 	end
+# end
 
 struct SpecKWArg
 	k::Symbol
@@ -189,17 +229,33 @@ end
 
 function AbstractTrees.printnode(io::IO, ctx::DAGPrintContext{SpecKWArg}; kwargs...)
 	printstyled(io, ctx.x.k, ": "; color=:light_blue)
-	AbstractTrees.printnode(io, ctx.x.v)
+	# AbstractTrees.printnode(io, ctx.x.v)
+	AbstractTrees.printnode(io, dag_print_context(ctx,ctx.x.v))
 end
 
 # Default to printing without DAGPrintContext
-AbstractTrees.printnode(io::IO, ctx::DAGPrintContext; kwargs...) = AbstractTrees.printnode(io, ctx.x; kwargs...)
+# AbstractTrees.printnode(io::IO, ctx::DAGPrintContext; kwargs...) = AbstractTrees.printnode(io, ctx.x; kwargs...)
+function AbstractTrees.printnode(io::IO, ctx::DAGPrintContext; kwargs...)
+	AbstractTrees.printnode(io, ctx.x; kwargs...)
+end
 
-# Make pair printing nicer, and use printnode for first and second
-function AbstractTrees.printnode(io::IO, ctx::DAGPrintContext{<:Pair}; kwargs...)
-	AbstractTrees.printnode(io, ctx.x.first)
+
+function _printnode(io::IO, ctx::DAGPrintContext{<:Pair}; kwargs...)
+	AbstractTrees.printnode(io, dag_print_context(ctx, ctx.x.first))
 	print(io, " => ")
 	AbstractTrees.printnode(io, dag_print_context(ctx, ctx.x.second))
+end
+
+_printnode(io::IO, ctx::DAGPrintContext; kwargs...) = AbstractTrees.printnode(io, ctx.x; kwargs...)
+
+
+function AbstractTrees.printnode(io::IO, ctx::DAGPrintContext{T}; kwargs...) where T<:Union{<:AbstractArray, <:AbstractDict, <:Tuple, <:NamedTuple, <:Pair}
+	# @show ctx.collapsed
+	if ctx.collapsed
+		_printnode(io, ctx; kwargs...)
+	else
+		printstyled(io, "::", T; color=:magenta)
+	end
 end
 
 function AbstractTrees.printnode(io::IO, ctx::DAGPrintContext{T}; kwargs...) where {T<:Union{Base.Fix1,Base.Fix2}}
@@ -220,18 +276,57 @@ function AbstractTrees.printnode(io::IO, ctx::DAGPrintContext{Spec}; kwargs...)
 	ctx.collapsed && printstyled(io, " collapsed"; color=:light_black)
 end
 
-AbstractTrees.children(ctx::DAGPrintContext{<:Pair}) = AbstractTrees.children(dag_print_context(ctx, ctx.x.second))
-function AbstractTrees.children(ctx::DAGPrintContext{Spec})
+function AbstractTrees.printnode(io::IO, ctx::DAGPrintContext{<:ReadOnly}; kwargs...)
+	AbstractTrees.printnode(io, dag_print_context(ctx, ctx.x.value); kwargs...)
+	printstyled(io, ' ', ctx.x.h[1:min(6,end)]; color=:red)
+end
+
+
+
+function _children(ctx::DAGPrintContext{Spec})
 	ctx.collapsed && return ()
 	ispec = _get_internal_spec(ctx.x)
 	c = vcat(ispec.args, [SpecKWArg(k,v) for (k,v) in ispec.kwargs if k != :versionedfunction]) # skip :versionedfunction since it is shown at top
 	dag_print_context.(Ref(ctx), c)
 end
-function AbstractTrees.children(ctx::DAGPrintContext{<:ReadOnly})
+function _children(ctx::DAGPrintContext{<:ReadOnly})
 	ctx.collapsed && return ()
-	[dag_print_context(ctx,p) for p in AbstractTrees.children(ctx.x.value)]
+	AbstractTrees.children(dag_print_context(ctx, ctx.x.value))
 end
-AbstractTrees.children(ctx::DAGPrintContext) = dag_print_context.(Ref(ctx), AbstractTrees.children(ctx.x))
+
+
+_children(ctx::DAGPrintContext{<:Pair}) = (dag_print_context(ctx, ctx.x.first), dag_print_context(ctx, ctx.x.second))
+function _children(ctx::DAGPrintContext{<:Union{<:AbstractArray, <:Tuple}})
+	dag_print_context.(Ref(ctx), ctx.x)
+end
+function _children(ctx::DAGPrintContext{<:AbstractDict})
+	[dag_print_context(ctx,k=>v) for (k,v) in pairs(ctx.x)]
+end
+function _children(ctx::DAGPrintContext{<:NamedTuple})
+	# [dag_print_context(ctx,k=>v) for (k,v) in pairs(ctx.x)]
+	[dag_print_context(ctx,SpecKWArg(k,v)) for (k,v) in pairs(ctx.x)]
+end
+
+
+# function AbstractTrees.children(ctx::DAGPrintContext{<:AbstractArray{T}}) where T
+# end
+
+
+# # This uses AbstractTrees default definitions for what has children
+# _children(ctx::DAGPrintContext) = dag_print_context.(Ref(ctx), AbstractTrees.children(ctx.x))
+
+# Only types selected explicitly have children
+_children(ctx::DAGPrintContext) = ()
+
+
+function AbstractTrees.children(ctx::DAGPrintContext)
+	ctx.collapsed && return ()
+	_children(ctx)
+end
+
+
+
+
 
 function Base.show(io::IO, spec::Spec)
 	if get(io,:compact,false)
