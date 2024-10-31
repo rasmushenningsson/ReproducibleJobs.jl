@@ -186,20 +186,27 @@ end
 should_collapse(::Any) = true
 
 
-# TODO: find a better name
-function subtype_collapse(::Type{T}) where T
-	Spec <: T && return false
-	ReadOnly <: T && return false # Hmm. This doesn't work, right? Because ReadOnly is not concrete.
-	AbstractArray <: T && return false
-	AbstractDict <: T && return false
-	Tuple <: T && return false
-	NamedTuple <: T && return false
+# TODO: find a better name?
+function should_eltype_collapse(::Type{T}) where T
+	T isa Union && return should_eltype_collapse(T.a) && should_eltype_collapse(T.b)
+	T <: Spec && return false
+	T <: ReadOnly && return false
+	T <: AbstractArray && return false
+	T <: AbstractDict && return false
+	# T <: Pair && return false
+	# T <: Tuple && return false
+	# T <: NamedTuple && return false
+	if (T <: Pair) || (T <: Tuple) || (T <: NamedTuple)
+		return all(should_eltype_collapse, fieldtypes(T))
+	end
 	return true
 end
 
-should_collapse(::AbstractArray{T}) where T = subtype_collapse(T)
-should_collapse(::AbstractDict{T1,T2}) where {T1,T2} = subtype_collapse(T1) && subtype_collapse(T2)
-should_collapse(::T) where T<:Union{<:Tuple,<:NamedTuple,<:Pair} = all(subtype_collapse, fieldtypes(T))
+
+
+should_collapse(::AbstractArray{T}) where T = should_eltype_collapse(T)
+should_collapse(::AbstractDict{T1,T2}) where {T1,T2} = should_eltype_collapse(T1) && should_eltype_collapse(T2)
+should_collapse(::T) where T<:Union{<:Tuple,<:NamedTuple,<:Pair} = all(should_eltype_collapse, fieldtypes(T))
 
 dag_print_context(ctx::DAGPrintContext, x; name=Symbol("")) = DAGPrintContext(name, x, ctx.hashes, should_collapse(ctx.hashes, x))
 
