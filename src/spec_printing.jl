@@ -31,9 +31,24 @@ PrintItem(pc::PrintContext, name::Symbol, h, item; children=PrintItem[], item_co
 AbstractTrees.children(x::PrintItem) = x.children
 
 
+_printnode(io::IO, item, item_color) =
+	printstyled(IOContext(io, :limit=>true, :compact=>true, :short=>true), item, ' '; color=item_color) # Not great, but better than no IOContext
+
+function _printnode(io::IO, item::Pair, item_color)
+	_printnode(io, item.first, item_color)
+	print(io, "=> ")
+	_printnode(io, item.second, item_color)
+end
+
+_printnode(io::IO, item::T, item_color) where T<:Union{Base.Fix1,Base.Fix2} =
+	_printnode(io, string(nameof(T), '(', item.f, ", ", item.x, ')'), item_color)
+
+
+
+
 function AbstractTrees.printnode(io::IO, x::PrintItem; kwargs...)
 	x.name != Symbol("") && printstyled(io, x.name, ": "; color=:light_blue)
-	printstyled(io, x.item, ' '; color=x.item_color) # TODO: ensure this is printed compactly (i.e. no line breaks) somehow
+	_printnode(io, x.item, x.item_color)
 	ord = get(x.pc.duplicates, x.h, nothing)
 	if ord !== nothing
 		printstyled(io, "#", ord; color=:red)
@@ -47,6 +62,7 @@ to_print_item!(pc::PrintContext, x::Any) = to_print_item!(pc, x, Symbol(""), not
 
 # Fallback
 to_print_item!(pc::PrintContext, x::Any, name, h) = PrintItem(pc, name, h, x)
+
 
 
 function to_print_item!(pc::PrintContext, x::AbstractArray{T}, name, h) where T
