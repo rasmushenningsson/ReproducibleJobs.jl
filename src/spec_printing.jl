@@ -32,23 +32,45 @@ AbstractTrees.children(x::PrintItem) = x.children
 
 
 _printnode(io::IO, item, item_color) =
-	printstyled(IOContext(io, :limit=>true, :compact=>true, :short=>true), item, ' '; color=item_color) # Not great, but better than no IOContext
+	printstyled(IOContext(io, :limit=>true, :compact=>true, :short=>true), item; color=item_color) # Not great, but better than no IOContext
 
 function _printnode(io::IO, item::Pair, item_color)
 	_printnode(io, item.first, item_color)
-	print(io, "=> ")
+	print(io, " => ")
 	_printnode(io, item.second, item_color)
+end
+function _printnode(io::IO, item::Tuple, item_color)
+	print(io, '(')
+	for (i,x) in enumerate(item)
+		first = i == 1
+		last = i == length(item)
+		first || print(io, ' ')
+		_printnode(io, x, item_color)
+		(first || !last) && print(io, ',')
+	end
+	print(io, ')')
+end
+function _printnode(io::IO, item::NamedTuple, item_color)
+	print(io, '(')
+	for (i,(k,v)) in enumerate(pairs(item))
+		first = i == 1
+		last = i == length(item)
+		first || print(io, ' ')
+		printstyled(io, k, " = "; color=item_color)
+		_printnode(io, v, item_color)
+		(first || !last) && print(io, ',')
+	end
+	print(io, ')')
 end
 
 _printnode(io::IO, item::T, item_color) where T<:Union{Base.Fix1,Base.Fix2} =
-	_printnode(io, string(nameof(T), '(', item.f, ", ", item.x, ')'), item_color)
-
-
+	_printnode(io, string(nameof(T), '(', item.f, ", ", repr(item.x), ')'), item_color)
 
 
 function AbstractTrees.printnode(io::IO, x::PrintItem; kwargs...)
 	x.name != Symbol("") && printstyled(io, x.name, ": "; color=:light_blue)
 	_printnode(io, x.item, x.item_color)
+	print(io, ' ')
 	ord = get(x.pc.duplicates, x.h, nothing)
 	if ord !== nothing
 		printstyled(io, "#", ord; color=:red)
