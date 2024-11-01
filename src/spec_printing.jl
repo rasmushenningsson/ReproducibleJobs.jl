@@ -60,56 +60,44 @@ _printitem(io::IO, item, item_color) =
 	printstyled(IOContext(io, :limit=>true, :compact=>true, :short=>true), item; color=item_color) # Not great, but better than no IOContext
 
 
-function get_max_print(io, suffix_size, min_len=20)
+function get_max_print(io, min_len=20)
 	indent = get(io, :indent, 0)
 	width = get(io, :displaysize, (0,0))[2]
-	max_print = max(min_len, width-suffix_size-1-indent)
+	max_print = max(min_len, width-1-indent)
 end
 
+function _print_limited_string(io::IO, str::AbstractString, suffix, item_color) # TODO: Better name
+	max_print = get_max_print(io)
+
+	if length(str) <= max_print
+		printstyled(io, str; color=item_color)
+	else
+		printstyled(io, @view(str[1:max_print-length(suffix)]), suffix; color=item_color)
+	end
+end
 
 function _printitem(io::IO, a::Array, item_color)
-	max_print = get_max_print(io, 4)
-
 	# This is a bit of a hack.
 	# Print to a string and skip the initial type info.
 	# But otherwise we need to rewrite the entire Array printing, or rely on internals.
 	str = repr(a)
 	i = findfirst('[', str)
 	i !== nothing && (str = @view str[i:end])
-
-	if length(str) <= max_print
-		printstyled(io, str; color=item_color)
-	else
-		printstyled(io, @view(str[1:max_print]), "...]"; color=item_color)
-	end
+	_print_limited_string(io, str, "...]", item_color)
 end
 
-# TODO: Display ... if Dict is too long
-function _printitem(io::IO, d::Dict, item_color)
-	prefix = "Dict("
-
-	max_print = get_max_print(io, 4)
-	@show max_print
-	n_printed = length(prefix)
-
-	io = IOContext(io, :limit=>true, :compact=>true, :short=>true)
-	printstyled(io, prefix; color=item_color)
-	for (i,(k,v)) in enumerate(pairs(d))
-		if i != 1
-			printstyled(io, ", "; color=item_color)
-			n_printed += 2
-		end
-		str = repr(k=>v)
-		if n_printed + length(str) <= max_print
-			printstyled(io, str; color=item_color)
-			n_printed += length(str)
-		else
-			printstyled(io, "..."; color=item_color)
-			break
-		end
-	end
-	printstyled(io, ')'; color=item_color)
+function _printitem(io::IO, a::Dict, item_color)
+	# This is a bit of a hack.
+	# Print to a string and skip the initial type info.
+	# But otherwise we need to rewrite the entire Dict printing, or rely on internals.
+	str = repr(a)
+	str = replace(str, r"^Dict\{.+\}\("=>"Dict("; count=1) # There might be some weird edge case where this doesn't work
+	_print_limited_string(io, str, "...)", item_color)
 end
+
+_printitem(io::IO, d::Dict, item_color) =
+	_print_limited_string(io, repr(d), "...)", item_color)
+
 
 
 
