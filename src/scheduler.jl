@@ -12,6 +12,7 @@ let scheduler_singleton = Scheduler()
 end
 
 
+_unwrap_value(upstream) = Base.Fix2(_unwrap_value, upstream)
 function _unwrap_value(x, upstream)
 	# Manual dispatch since we have few types
 	x isa Spec && return upstream[x]
@@ -25,8 +26,8 @@ function compute(spec::Spec, upstream::IdDict{Spec,Any})
 	vf = get_versioned_function(spec)
 	ispec = _get_internal_spec(spec)
 
-	args = [_unwrap_value(a,upstream) for a in ispec.args]
-	kwargs = [k=>_unwrap_value(v,upstream) for (k,v) in ispec.kwargs if k != :versionedfunction]
+	args = (copy_nested(_unwrap_value(upstream), a) for a in ispec.args)
+	kwargs = (copy_nested(_unwrap_value(upstream), k)=>copy_nested(_unwrap_value(upstream),v) for (k,v) in ispec.kwargs if k != :versionedfunction)
 
 	@info "Running $vf"
 	vf.f(args...; kwargs...)
@@ -39,6 +40,13 @@ function fetch!(scheduler::Scheduler, spec::Spec; forward=true)
 		res = nothing
 		if spec.use_cache
 			res = cache_get(spec, nothing)
+
+			# Since the Spec was loaded from file, it has not been deduplicated in this session, so we need to do that here.
+			# TODO: Ensure deduplication is done deeply!
+			if res isa Spec
+				res = default_deduplicator()(res) # TODO: avoid using default_deduplicator() here - get from scheduler somehow
+			end
+
 		end
 
 		if res === nothing # Not found in cache
@@ -60,12 +68,8 @@ function fetch!(scheduler::Scheduler, spec::Spec; forward=true)
 		res
 	end
 
-	if result isa Spec
-		# NB: We must deduplicate a Spec if it was loaded from file
-		result = deduplicate!(default_deduplicator(), result) # TODO: avoid using default_deduplicator() here - get from scheduler somehow
-		if forward
-			result = fetch!(scheduler, result; forward)
-		end
+	if forward && result isa Spec
+		result = fetch!(scheduler, result; forward)
 	end
 	result
 end
