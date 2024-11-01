@@ -126,8 +126,23 @@ to_print_node!(pc::PrintContext, x::Any, name, h) = create_print_node(pc, name, 
 
 
 
+# TODO: find a better name?
+function _should_collapse(::Type{T}) where T
+	T isa Union && return _should_collapse(T.a) && _should_collapse(T.b)
+	T <: Spec && return false
+	T <: ReadOnly && return false
+	T <: AbstractArray && return false
+	T <: AbstractDict && return false
+	if (T <: Pair) || (T <: Tuple) || (T <: NamedTuple)
+		return all(_should_collapse, fieldtypes(T))
+	end
+	return true
+end
+
+
+
 function to_print_node!(pc::PrintContext, x::Array{T}, name, h) where T
-	if should_eltype_collapse(T)
+	if _should_collapse(T)
 		create_print_node(pc, name, h, x)
 	else
 		create_print_node(pc, name, h, nameof(typeof(x)); children=to_print_node!.(Ref(descend(pc)),x), item_color=:magenta)
@@ -135,8 +150,8 @@ function to_print_node!(pc::PrintContext, x::Array{T}, name, h) where T
 end
 
 function to_print_node!(pc::PrintContext, d::Dict{K,V}, name, h) where {K,V}
-	if should_eltype_collapse(K)
-		if should_eltype_collapse(V)
+	if _should_collapse(K)
+		if _should_collapse(V)
 			create_print_node(pc, name, h, d)
 		else
 			children = [to_print_node!(descend(pc),v,Symbol(string(k)),nothing) for (k,v) in d]
@@ -149,7 +164,7 @@ function to_print_node!(pc::PrintContext, d::Dict{K,V}, name, h) where {K,V}
 end
 
 function to_print_node!(pc::PrintContext, x::T, name, h) where T<:Union{Pair,Tuple}
-	if should_eltype_collapse(T)
+	if _should_collapse(T)
 		create_print_node(pc, name, h, x)
 	else
 		children = [to_print_node!(descend(pc),y) for y in x]
@@ -157,7 +172,7 @@ function to_print_node!(pc::PrintContext, x::T, name, h) where T<:Union{Pair,Tup
 	end
 end
 function to_print_node!(pc::PrintContext, x::T, name, h) where T<:NamedTuple
-	if should_eltype_collapse(T)
+	if _should_collapse(T)
 		create_print_node(pc, name, h, x)
 	else
 		children = [to_print_node!(descend(pc),v,Symbol(string(k)),nothing) for (k,v) in pairs(x)]
@@ -200,7 +215,7 @@ end
 to_print_node(spec::Spec) = to_print_node!(PrintContext(), spec)
 
 
-function print_spec_tree(io::IO, spec::Spec; kwargs...)
+function print_spec(io::IO, spec::Spec; kwargs...)
 	io = IOContext(io, :displaysize=>displaysize(io))
 	tree = to_print_node(spec)
 	AbstractTrees.print_tree(io, tree; kwargs...)

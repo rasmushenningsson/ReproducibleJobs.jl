@@ -10,6 +10,7 @@ export
 	deduplicate!,
 	Spec,
 	Job,
+	print_spec,
 	fetch!
 
 include("nested.jl")
