@@ -128,6 +128,7 @@ to_print_node!(pc::PrintContext, x::Any, name, h) = create_print_node(pc, name, 
 
 function _should_collapse(::Type{T}) where T
 	T isa Union && return _should_collapse(T.a) && _should_collapse(T.b)
+	T <: Barrier && return false
 	T <: Spec && return false
 	T <: ReadOnly && return false
 	T <: AbstractArray && return false
@@ -192,6 +193,9 @@ end
 
 # Unwrap Spec
 to_print_node!(pc::PrintContext, spec::Spec, name, h) = to_print_node!(pc, spec.ro, name, h)
+
+# Unwrap Barrier
+to_print_node!(pc::PrintContext, b::Barrier, name, h) = to_print_node!(pc, b.spec, Symbol(name==Symbol("") ? "{Barrier}" : string(name,' ',"{Barrier}")), h)
 
 # Unwrap ReadOnly
 function to_print_node!(pc::PrintContext, ro::ReadOnly, name, h)
