@@ -49,6 +49,9 @@ preprocess_standard(p::Pair) = p
 preprocess_standard(spec::Spec) = spec
 preprocess_standard(ro::ReadOnly) = ro
 
+preprocess_standard(x::AbstractString) = string(x) # Standardize strings
+preprocess_standard(x::Symbol) = x # symbols are immutable, pass through
+
 # Fallback to make a copy, so deduplicator can store the value
 preprocess_standard(x) = deepcopy(x) # or copy? but copy might not exist... Or a new function the user can override for their type more easily? Defaulting to copy/deepcopy?
 
