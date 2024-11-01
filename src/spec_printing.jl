@@ -99,10 +99,6 @@ function _printitem(io::IO, a::Dict, item_color)
 	_print_limited_string(io, str, "...)", item_color)
 end
 
-_printitem(io::IO, d::Dict, item_color) =
-	_print_limited_string(io, repr(d), "...)", item_color)
-
-
 
 
 function AbstractTrees.printnode(io::IO, x::PrintNode; kwargs...)
