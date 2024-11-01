@@ -11,8 +11,29 @@ end
 printreference(::T) where T = PrintReference(string(nameof(T)))
 printreference(ispec::InternalSpec) = PrintReference(string(get_versioned_function(ispec).f))
 
-
 Base.show(io::IO, ref::PrintReference) = print(io, ref.str)
+
+
+
+struct ItemWrapper{T}
+	item::T
+end
+
+wrap_item(x) = x
+wrap_item(x::Union{<:Base.Fix1,<:Base.Fix2}) = ItemWrapper(x)
+
+wrap_item(x::Union{<:Array,<:Tuple}) = wrap_item.(x)
+wrap_item(p::Pair) = wrap_item(p.first) => wrap_item(p.second)
+wrap_item(d::Dict) = Dict((wrap_item(k)=>wrap_item(v) for (k,v) in pairs(d)))
+wrap_item(nt::NamedTuple) = map(wrap_item, nt)
+
+Base.show(io::IO, w::ItemWrapper) = show(io, x)
+function Base.show(io::IO, w::ItemWrapper{T}) where T<:Union{<:Base.Fix1,<:Base.Fix2}
+	print(io, string(nameof(T), '(', w.item.f, ", ", repr(w.item.x), ')'))
+end
+
+
+
 
 struct PrintNode
 	pc::PrintContext
@@ -22,48 +43,40 @@ struct PrintNode
 	item_color::Symbol # for printstyled - TODO: other printstyled options
 	children::Vector{PrintNode}
 end
-PrintNode(pc::PrintContext, name::Symbol, h, item; children=PrintNode[], item_color=:normal) =
-	PrintNode(pc, name, h, item, item_color, children)
 
+create_print_node(pc::PrintContext, name::Symbol, h, item; children=PrintNode[], item_color=:normal) =
+	PrintNode(pc, name, h, wrap_item(item), item_color, children)
 
 
 AbstractTrees.children(x::PrintNode) = x.children
 
 
+
 _printitem(io::IO, item, item_color) =
 	printstyled(IOContext(io, :limit=>true, :compact=>true, :short=>true), item; color=item_color) # Not great, but better than no IOContext
 
-function _printitem(io::IO, item::Pair, item_color)
-	_printitem(io, item.first, item_color)
-	print(io, " => ")
-	_printitem(io, item.second, item_color)
-end
-function _printitem(io::IO, item::Tuple, item_color)
-	print(io, '(')
-	for (i,x) in enumerate(item)
-		first = i == 1
-		last = i == length(item)
-		first || print(io, ' ')
-		_printitem(io, x, item_color)
-		(first || !last) && print(io, ',')
-	end
-	print(io, ')')
-end
-function _printitem(io::IO, item::NamedTuple, item_color)
-	print(io, '(')
-	for (i,(k,v)) in enumerate(pairs(item))
-		first = i == 1
-		last = i == length(item)
-		first || print(io, ' ')
-		printstyled(io, k, " = "; color=item_color)
-		_printitem(io, v, item_color)
-		(first || !last) && print(io, ',')
-	end
-	print(io, ')')
+# TODO: Display ... if array is too long
+function _printitem(io::IO, a::Array, item_color)
+	# This is a bit of a hack.
+	# Print to a string and skip the initial type info.
+	# But otherwise we need to rewrite the entire Array printing, or rely on internals.
+	str = repr(a)
+	i = findfirst('[', str)
+	i !== nothing && (str = str[i:end])
+	printstyled(io, str; color=item_color)
 end
 
-_printitem(io::IO, item::T, item_color) where T<:Union{Base.Fix1,Base.Fix2} =
-	_printitem(io, string(nameof(T), '(', item.f, ", ", repr(item.x), ')'), item_color)
+# TODO: Display ... if Dict is too long
+function _printitem(io::IO, d::Dict, item_color)
+	io = IOContext(io, :limit=>true, :compact=>true, :short=>true)
+	printstyled(io, "Dict("; color=item_color)
+	for (i,(k,v)) in enumerate(pairs(d))
+		i != 1 && printstyled(io, ", "; color=item_color)
+		printstyled(io, k, " => ", v; color=item_color)
+	end
+	printstyled(io, ')'; color=item_color)
+end
+
 
 
 function AbstractTrees.printnode(io::IO, x::PrintNode; kwargs...)
@@ -82,46 +95,46 @@ to_print_node!(pc::PrintContext, x::Any) = to_print_node!(pc, x, Symbol(""), not
 
 
 # Fallback
-to_print_node!(pc::PrintContext, x::Any, name, h) = PrintNode(pc, name, h, x)
+to_print_node!(pc::PrintContext, x::Any, name, h) = create_print_node(pc, name, h, x)
 
 
 
-function to_print_node!(pc::PrintContext, x::AbstractArray{T}, name, h) where T
+function to_print_node!(pc::PrintContext, x::Array{T}, name, h) where T
 	if should_eltype_collapse(T)
-		PrintNode(pc, name, h, x)
+		create_print_node(pc, name, h, x)
 	else
-		PrintNode(pc, name, h, nameof(typeof(x)); children=to_print_node!.(Ref(pc),x), item_color=:magenta)
+		create_print_node(pc, name, h, nameof(typeof(x)); children=to_print_node!.(Ref(pc),x), item_color=:magenta)
 	end
 end
 
-function to_print_node!(pc::PrintContext, d::AbstractDict{K,V}, name, h) where {K,V}
+function to_print_node!(pc::PrintContext, d::Dict{K,V}, name, h) where {K,V}
 	if should_eltype_collapse(K)
 		if should_eltype_collapse(V)
-			PrintNode(pc, name, h, d)
+			create_print_node(pc, name, h, d)
 		else
 			children = [to_print_node!(pc,v,Symbol(string(k)),nothing) for (k,v) in d]
-			PrintNode(pc, name, h, nameof(typeof(d)); children, item_color=:magenta)
+			create_print_node(pc, name, h, nameof(typeof(d)); children, item_color=:magenta)
 		end
 	else
 		children = [to_print_node!(pc,k=>v) for (k,v) in d]
-		PrintNode(pc, name, h, nameof(typeof(d)); children, item_color=:magenta)
+		create_print_node(pc, name, h, nameof(typeof(d)); children, item_color=:magenta)
 	end
 end
 
 function to_print_node!(pc::PrintContext, x::T, name, h) where T<:Union{Pair,Tuple}
 	if should_eltype_collapse(T)
-		PrintNode(pc, name, h, x)
+		create_print_node(pc, name, h, x)
 	else
 		children = [to_print_node!(pc,y) for y in x]
-		PrintNode(pc, name, h, nameof(typeof(x)); children, item_color=:magenta)
+		create_print_node(pc, name, h, nameof(typeof(x)); children, item_color=:magenta)
 	end
 end
 function to_print_node!(pc::PrintContext, x::T, name, h) where T<:NamedTuple
 	if should_eltype_collapse(T)
-		PrintNode(pc, name, h, x)
+		create_print_node(pc, name, h, x)
 	else
 		children = [to_print_node!(pc,v,Symbol(string(k)),nothing) for (k,v) in pairs(x)]
-		PrintNode(pc, name, h, nameof(typeof(x)); children, item_color=:magenta)
+		create_print_node(pc, name, h, nameof(typeof(x)); children, item_color=:magenta)
 	end
 end
 
@@ -136,7 +149,7 @@ function to_print_node!(pc::PrintContext, ro::ReadOnly, name, h)
 	@assert h === nothing
 	if ro.h in pc.hashes
 		get!(pc.duplicates, ro.h, length(pc.duplicates)+1)
-		PrintNode(pc, name, ro.h, printreference(ro.value); item_color=:blue) # TODO: color differently for Spec?
+		create_print_node(pc, name, ro.h, printreference(ro.value); item_color=:blue) # TODO: color differently for Spec?
 	else
 		# first time we see the node
 		push!(pc.hashes, ro.h)
@@ -152,7 +165,7 @@ function to_print_node!(pc::PrintContext, ispec::InternalSpec, name, h)
 	c2 = [to_print_node!(pc,v,k,nothing) for (k,v) in ispec.kwargs if k != :versionedfunction] # skip :versionedfunction since it is shown as the "item"
 	children = vcat(c1,c2)
 
-	PrintNode(pc, name, h, vf !== nothing ? vf.f : "Function not specified"; children, item_color=:green)
+	create_print_node(pc, name, h, vf !== nothing ? vf.f : "Function not specified"; children, item_color=:green)
 end
 
 
