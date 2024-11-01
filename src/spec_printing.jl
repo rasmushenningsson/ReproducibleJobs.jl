@@ -33,6 +33,7 @@ wrap_item(x::Union{<:Base.Fix1,<:Base.Fix2}) = ItemWrapper(x)
 wrap_item(x::Union{<:Array,<:Tuple}) = wrap_item.(x)
 wrap_item(p::Pair) = wrap_item(p.first) => wrap_item(p.second)
 wrap_item(d::Dict) = Dict((wrap_item(k)=>wrap_item(v) for (k,v) in pairs(d)))
+wrap_item(s::Set) = Set((wrap_item(x) for x in s))
 wrap_item(nt::NamedTuple) = map(wrap_item, nt)
 
 Base.show(io::IO, w::ItemWrapper) = show(io, x)
@@ -131,6 +132,7 @@ function _should_collapse(::Type{T}) where T
 	T <: ReadOnly && return false
 	T <: AbstractArray && return false
 	T <: AbstractDict && return false
+	T <: AbstractSet && return false
 	if (T <: Pair) || (T <: Tuple) || (T <: NamedTuple)
 		return all(_should_collapse, fieldtypes(T))
 	end
@@ -157,6 +159,14 @@ function to_print_node!(pc::PrintContext, d::Dict{K,V}, name, h) where {K,V}
 	else
 		children = [to_print_node!(descend(pc),k=>v) for (k,v) in d]
 		create_print_node(pc, name, h, _typenameof(d); children, item_color=:magenta)
+	end
+end
+function to_print_node!(pc::PrintContext, s::Set{T}, name, h) where T
+	if _should_collapse(T)
+		create_print_node(pc, name, h, s)
+	else
+		children = [to_print_node!(descend(pc),x) for x in s]
+		create_print_node(pc, name, h, _typenameof(s); children, item_color=:magenta)
 	end
 end
 
