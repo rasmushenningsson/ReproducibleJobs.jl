@@ -25,8 +25,8 @@ visit_nested(f, x) = visit_nested(f, Returns(true), x)
 
 
 copy_nested(f,x) = f(x)
-copy_nested(f,a::Array) = f([copy_nested(f,x) for x in a]) # NB: preserves dims of array, might change eltype
-copy_nested(f,d::Dict) = f(Dict((copy_nested(f,k)=>copy_nested(f,v) for (k,v) in d)))
+copy_nested(f,a::AbstractArray) = f([copy_nested(f,x) for x in a]) # NB: preserves dims of array, might change eltype
+copy_nested(f,d::AbstractDict) = f(Dict((copy_nested(f,k)=>copy_nested(f,v) for (k,v) in d)))
 copy_nested(f,t::Tuple) = copy_nested.(f, t)
 copy_nested(f,nt::NamedTuple) = map(x->copy_nested(f,x), nt)
 copy_nested(f,(k,v)::Pair) = copy_nested(f, k)=>copy_nested(f, v)
