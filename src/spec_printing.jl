@@ -1,3 +1,7 @@
+_nameof(::Type{T}) where T = string(first(eachsplit(repr(T),'{')))
+_nameof(::Type{<:NamedTuple}) = "NamedTuple" # is there a better way to avoid @NamedTuple?
+_typenameof(x::T) where T = _nameof(T)
+
 struct PrintContext
 	hashes::Set{String} # hashes seen at least once
 	duplicates::Dict{String,Int} # hashes seen at least twice, mapping to an ordinal
@@ -12,7 +16,7 @@ struct PrintReference
 	str::String # What to print, usually the type of the referenced thing?
 end
 
-printreference(::T) where T = PrintReference(string(nameof(T)))
+printreference(::T) where T = PrintReference(_nameof(T))
 printreference(ispec::InternalSpec) = PrintReference(string(get_versioned_function(ispec).f))
 
 Base.show(io::IO, ref::PrintReference) = print(io, ref.str)
@@ -33,7 +37,7 @@ wrap_item(nt::NamedTuple) = map(wrap_item, nt)
 
 Base.show(io::IO, w::ItemWrapper) = show(io, x)
 function Base.show(io::IO, w::ItemWrapper{T}) where T<:Union{<:Base.Fix1,<:Base.Fix2}
-	print(io, string(nameof(T), '(', w.item.f, ", ", repr(w.item.x), ')'))
+	print(io, string(_nameof(T), '(', w.item.f, ", ", repr(w.item.x), ')'))
 end
 
 
@@ -61,9 +65,9 @@ _printitem(io::IO, item, item_color) =
 
 
 function get_max_print(io, min_len=20)
-	indent = get(io, :indent, 0)
+	n_chars_printed = get(io, :n_chars_printed, 0)
 	width = get(io, :displaysize, (0,0))[2]
-	max_print = max(min_len, width-1-indent)
+	max_print = max(min_len, width-n_chars_printed)
 end
 
 function _print_limited_string(io::IO, str::AbstractString, suffix, item_color) # TODO: Better name
@@ -107,13 +111,12 @@ function AbstractTrees.printnode(io::IO, x::PrintNode; kwargs...)
 		printstyled(io, x.name, ": "; color=:light_blue)
 		indent += length(string(x.name))+2
 	end
-	io = IOContext(io, :indent=>indent)
-	_printitem(io, x.item, x.item_color)
-	print(io, ' ')
+
 	ord = get(x.pc.duplicates, x.h, nothing)
-	if ord !== nothing
-		printstyled(io, "#", ord; color=:blue)
-	end
+	suffix = ord !== nothing ? " #$ord" : ""
+	io = IOContext(io, :n_chars_printed=>indent+length(suffix))
+	_printitem(io, x.item, x.item_color)
+	isempty(suffix) || printstyled(io, suffix; color=:blue)
 end
 
 
@@ -126,7 +129,6 @@ to_print_node!(pc::PrintContext, x::Any, name, h) = create_print_node(pc, name, 
 
 
 
-# TODO: find a better name?
 function _should_collapse(::Type{T}) where T
 	T isa Union && return _should_collapse(T.a) && _should_collapse(T.b)
 	T <: Spec && return false
@@ -140,12 +142,11 @@ function _should_collapse(::Type{T}) where T
 end
 
 
-
 function to_print_node!(pc::PrintContext, x::Array{T}, name, h) where T
 	if _should_collapse(T)
 		create_print_node(pc, name, h, x)
 	else
-		create_print_node(pc, name, h, nameof(typeof(x)); children=to_print_node!.(Ref(descend(pc)),x), item_color=:magenta)
+		create_print_node(pc, name, h, _typenameof(x); children=to_print_node!.(Ref(descend(pc)),x), item_color=:magenta)
 	end
 end
 
@@ -155,11 +156,11 @@ function to_print_node!(pc::PrintContext, d::Dict{K,V}, name, h) where {K,V}
 			create_print_node(pc, name, h, d)
 		else
 			children = [to_print_node!(descend(pc),v,Symbol(string(k)),nothing) for (k,v) in d]
-			create_print_node(pc, name, h, nameof(typeof(d)); children, item_color=:magenta)
+			create_print_node(pc, name, h, _typenameof(d); children, item_color=:magenta)
 		end
 	else
 		children = [to_print_node!(descend(pc),k=>v) for (k,v) in d]
-		create_print_node(pc, name, h, nameof(typeof(d)); children, item_color=:magenta)
+		create_print_node(pc, name, h, _typenameof(d); children, item_color=:magenta)
 	end
 end
 
@@ -168,7 +169,7 @@ function to_print_node!(pc::PrintContext, x::T, name, h) where T<:Union{Pair,Tup
 		create_print_node(pc, name, h, x)
 	else
 		children = [to_print_node!(descend(pc),y) for y in x]
-		create_print_node(pc, name, h, nameof(typeof(x)); children, item_color=:magenta)
+		create_print_node(pc, name, h, _typenameof(x); children, item_color=:magenta)
 	end
 end
 function to_print_node!(pc::PrintContext, x::T, name, h) where T<:NamedTuple
@@ -176,7 +177,7 @@ function to_print_node!(pc::PrintContext, x::T, name, h) where T<:NamedTuple
 		create_print_node(pc, name, h, x)
 	else
 		children = [to_print_node!(descend(pc),v,Symbol(string(k)),nothing) for (k,v) in pairs(x)]
-		create_print_node(pc, name, h, nameof(typeof(x)); children, item_color=:magenta)
+		create_print_node(pc, name, h, _typenameof(x); children, item_color=:magenta)
 	end
 end
 
