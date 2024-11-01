@@ -8,6 +8,8 @@ Job(spec::Spec) = Job(spec, NotComputed())
 
 
 preprocess_standard(job::Job) = job.spec
+barrier(job::Job) = barrier(job.spec)
+
 
 
 

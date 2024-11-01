@@ -11,12 +11,6 @@ hash_by_value(spec::Spec) = HashByValue(spec)
 hash_by_value(job::Job) = HashByValue(job.spec)
 
 
-struct Barrier
-	spec::Spec
-end
-Base.:(==)(a::Barrier, b::Barrier) = a.spec == b.spec
-preprocess_standard(x::Barrier) = x
-
 
 struct PreprocessHashByValue{F}
 	f::F
@@ -66,6 +60,6 @@ function create_hash_by_value_spec(args...; deduplicator=default_deduplicator(),
 	if isempty(specs)
 		inner_spec
 	else
-		create_spec(Barrier(inner_spec), (Barrier.(specs) .=> specs)...; deduplicator, preprocess, use_cache, versionedfunction=VersionedFunction(hash_by_value_eval,v"0.0.1"))
+		create_spec(barrier(inner_spec), (barrier.(specs) .=> specs)...; deduplicator, preprocess, use_cache, versionedfunction=VersionedFunction(hash_by_value_eval,v"0.0.1"))
 	end
 end
