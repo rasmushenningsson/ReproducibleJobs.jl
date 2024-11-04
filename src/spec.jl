@@ -57,9 +57,6 @@ preprocess_standard(x::Symbol) = x # symbols are immutable, pass through
 preprocess_standard(f::VersionedFunction) = f
 preprocess_standard(f::Union{<:Base.Fix1,<:Base.Fix2}) = f
 
-# Fallback to make a copy, so deduplicator can store the value
-# preprocess_standard(x) = deepcopy(x) # or copy? but copy might not exist... Or a new function the user can override for their type more easily? Defaulting to copy/deepcopy?
-
 preprocess_standard(x) = preprocess_copy(x)
 
 
