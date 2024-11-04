@@ -84,9 +84,7 @@ get_versioned_function(spec::Spec) = get_versioned_function(_get_internal_spec(s
 
 
 
-function visit_dependencies(f, spec::Spec)
-	ispec = _get_internal_spec(spec)
-
+function visit_dependencies(f, ispec::InternalSpec)
 	# TODO: Use predicate version for smart early-outs?
 	visit_nested(ispec.args) do x
 		x isa Spec && f(x)
@@ -95,6 +93,7 @@ function visit_dependencies(f, spec::Spec)
 		x isa Spec && f(x)
 	end
 end
+visit_dependencies(f, spec::Spec) = visit_dependencies(f, _get_internal_spec(spec))
 
 
 
