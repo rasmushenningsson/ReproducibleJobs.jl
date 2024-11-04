@@ -27,7 +27,7 @@ function compute(spec::Spec, upstream::IdDict{Spec,Any})
 	ispec = _get_internal_spec(spec)
 
 	args = (copy_nested(_unwrap_value(upstream), a) for a in ispec.args)
-	kwargs = (copy_nested(_unwrap_value(upstream), k)=>copy_nested(_unwrap_value(upstream),v) for (k,v) in ispec.kwargs if k != :versionedfunction)
+	kwargs = (copy_nested(_unwrap_value(upstream), k)=>copy_nested(_unwrap_value(upstream),v) for (k,v) in ispec.kwargs if !startswith(string(k),"__"))
 
 	@info "Running $vf"
 	vf.f(args...; kwargs...)

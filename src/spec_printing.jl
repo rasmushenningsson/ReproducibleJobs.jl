@@ -222,7 +222,7 @@ function to_print_node!(pc::PrintContext, ispec::InternalSpec, name, h)
 	vf = get_versioned_function(ispec)
 
 	c1 = to_print_node!.(Ref(descend(pc)), ispec.args)
-	c2 = [to_print_node!(descend(pc),v,k,nothing) for (k,v) in ispec.kwargs if k != :versionedfunction] # skip :versionedfunction since it is shown as the "item"
+	c2 = [to_print_node!(descend(pc),v,k,nothing) for (k,v) in ispec.kwargs if !startswith(string(k),"__")] # skip "hidden" kwargs
 	children = vcat(c1,c2)
 
 	create_print_node(pc, name, h, vf !== nothing ? vf.f : "Function not specified"; children, item_color=:green)

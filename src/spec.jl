@@ -13,7 +13,7 @@ function create_internal_spec(f, args, kwargs)
 end
 
 function get_versioned_function(ispec::InternalSpec)
-	r = searchsorted(ispec.kwargs, :versionedfunction=>nothing; by=first)
+	r = searchsorted(ispec.kwargs, :__versionedfunction=>nothing; by=first)
 	isempty(r) && return nothing
 	i = only(r)
 	return last(ispec.kwargs[i])::VersionedFunction

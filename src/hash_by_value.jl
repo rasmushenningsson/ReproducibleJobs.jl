@@ -41,9 +41,9 @@ function hash_by_value_eval(original::Barrier, specs::Pair{Barrier,<:Any}...)
 	vf = get_versioned_function(original.spec)
 
 	args = (copy_nested(_replace_evaluated(evaluated), a) for a in ispec.args)
-	kwargs = (copy_nested(_replace_evaluated(evaluated), k)=>copy_nested(_replace_evaluated(evaluated),v) for (k,v) in ispec.kwargs if k != :versionedfunction)
+	kwargs = (copy_nested(_replace_evaluated(evaluated), k)=>copy_nested(_replace_evaluated(evaluated),v) for (k,v) in ispec.kwargs if k != :__versionedfunction)
 
-	create_spec(args...; kwargs..., original.spec.use_cache, versionedfunction=vf) # TODO: pass on deduplicator somehow
+	create_spec(args...; kwargs..., original.spec.use_cache, __versionedfunction=vf) # TODO: pass on deduplicator somehow
 end
 
 
@@ -60,6 +60,6 @@ function create_hash_by_value_spec(args...; deduplicator=default_deduplicator(),
 	if isempty(specs)
 		inner_spec
 	else
-		create_spec(barrier(inner_spec), (barrier.(specs) .=> specs)...; deduplicator, preprocess, use_cache, versionedfunction=VersionedFunction(hash_by_value_eval,v"0.0.1"))
+		create_spec(barrier(inner_spec), (barrier.(specs) .=> specs)...; deduplicator, preprocess, use_cache, __versionedfunction=VersionedFunction(hash_by_value_eval,v"0.0.1"))
 	end
 end
