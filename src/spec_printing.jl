@@ -23,12 +23,19 @@ Base.show(io::IO, ref::PrintReference) = print(io, ref.str)
 
 
 
+"""
+	ItemWrapper{T}
+
+Items wrapped in a an ItemWrapper object are printed using `show` by default, and printing can be customized.
+"""
 struct ItemWrapper{T}
 	item::T
 end
 
 wrap_item(x) = x
+
 wrap_item(x::Union{<:Base.Fix1,<:Base.Fix2}) = ItemWrapper(x)
+wrap_item(x::AbstractString) = ItemWrapper(x)
 
 wrap_item(x::Union{<:Array,<:Tuple}) = wrap_item.(x)
 wrap_item(p::Pair) = wrap_item(p.first) => wrap_item(p.second)
@@ -36,7 +43,7 @@ wrap_item(d::Dict) = Dict((wrap_item(k)=>wrap_item(v) for (k,v) in pairs(d)))
 wrap_item(s::Set) = Set((wrap_item(x) for x in s))
 wrap_item(nt::NamedTuple) = map(wrap_item, nt)
 
-Base.show(io::IO, w::ItemWrapper) = show(io, x)
+Base.show(io::IO, w::ItemWrapper) = show(io, w.item)
 function Base.show(io::IO, w::ItemWrapper{T}) where T<:Union{<:Base.Fix1,<:Base.Fix2}
 	print(io, string(_nameof(T), '(', w.item.f, ", ", repr(w.item.x), ')'))
 end
