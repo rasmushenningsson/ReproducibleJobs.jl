@@ -4,6 +4,7 @@ using StableHashTraits
 using Scratch: @get_scratch!
 using JLD2: jldsave, load
 import AbstractTrees # for pretty printing
+using CodecZlib
 
 export
 	Deduplicator,
