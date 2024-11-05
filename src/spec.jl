@@ -1,6 +1,10 @@
 struct InternalSpec
 	args::Vector{Any}
 	kwargs::Vector{Pair{Symbol,Any}}
+	function InternalSpec(args, kwargs)
+		@assert issorted(kwargs; by=first)
+		new(args, kwargs)
+	end
 end
 
 Base.:(==)(a::InternalSpec, b::InternalSpec) = a.args == b.args && a.kwargs == b.kwargs
@@ -12,12 +16,21 @@ function create_internal_spec(f, args, kwargs)
 	InternalSpec(a,kw)
 end
 
-function get_versioned_function(ispec::InternalSpec)
-	r = searchsorted(ispec.kwargs, :__versionedfunction=>nothing; by=first)
+
+function _get_kwarg_index(ispec::InternalSpec, name::Symbol)
+	r = searchsorted(ispec.kwargs, name=>nothing; by=first)
 	isempty(r) && return nothing
-	i = only(r)
-	return last(ispec.kwargs[i])::VersionedFunction
+	only(r)
 end
+
+function _get_kwarg(ispec::InternalSpec, name::Symbol, default=nothing)
+	i = _get_kwarg_index(ispec,name)
+	i !== nothing ? last(ispec.kwargs[i]) : default
+end
+
+get_versioned_function(ispec::InternalSpec, default=nothing) =
+	_get_kwarg(ispec, :__versionedfunction, default)::Union{Nothing,VersionedFunction}
+
 
 
 # Pair{Symbol,Any} currently hashes without any type information about the `Any`.
@@ -67,6 +80,18 @@ preprocess_standard(x) = preprocess_copy(x)
 
 function create_spec(args...; deduplicator=default_deduplicator(), preprocess=deduplicator∘preprocess_standard, use_cache=true, kwargs...)
 	ispec = create_internal_spec(preprocess, args, kwargs)
+
+	# TODO: revise naming of everything here
+	should_prefetch = false
+	visit_dependencies(ispec) do x
+		should_prefetch = should_prefetch || any(isequal(:__fetched=>true), _get_internal_spec(x).kwargs)
+	end
+	if should_prefetch
+		push!(ispec.kwargs, :__preprocess_spec=>VersionedFunction(setup_prefetching_spec,v"0.0.1"))
+		sort!(ispec.kwargs; by=first) # Must be sorted. But better if it was done elsewhere?
+	end
+
+
 	ispec = deduplicator(ispec)
 	Spec(ispec, use_cache)
 end
@@ -83,15 +108,17 @@ get_versioned_function(spec::Spec) = get_versioned_function(_get_internal_spec(s
 
 
 
+# TODO: Use predicate version for smart early-outs?
+function visit_dependencies(f, v::Vector)
+	visit_nested(v) do x
+		x isa Spec && f(x)
+	end
+end
+
 
 function visit_dependencies(f, ispec::InternalSpec)
-	# TODO: Use predicate version for smart early-outs?
-	visit_nested(ispec.args) do x
-		x isa Spec && f(x)
-	end
-	visit_nested(ispec.kwargs) do x
-		x isa Spec && f(x)
-	end
+	visit_dependencies(f, ispec.args)
+	visit_dependencies(f, ispec.kwargs)
 end
 visit_dependencies(f, spec::Spec) = visit_dependencies(f, _get_internal_spec(spec))
 

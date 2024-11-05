@@ -34,6 +34,16 @@ function compute(spec::Spec, upstream::IdDict{Spec,Any})
 end
 
 
+function _preprocess_spec(spec::Spec)
+	ispec = _get_internal_spec(spec)
+	i = _get_kwarg_index(ispec, :__preprocess_spec)
+	i === nothing && return spec # No preprocessing
+	vf = ispec.kwargs[i].second::VersionedFunction
+	kwargs = ispec.kwargs[vcat(1:i-1, i+1:end)]
+	vf.f(ispec.args, kwargs; spec.use_cache) # Should we pass a Spec or InternalSpec or just args + kwargs?
+end
+
+
 function fetch!(scheduler::Scheduler, spec::Spec; forward=true)
 	result = get!(scheduler.results, spec) do
 		# If it's in the cache, we don't need to fetch! upstream jobs
@@ -46,11 +56,12 @@ function fetch!(scheduler::Scheduler, spec::Spec; forward=true)
 			if res isa Spec
 				res = default_deduplicator()(res) # TODO: avoid using default_deduplicator() here - get from scheduler somehow
 			end
-
 		end
 
 		if res === nothing # Not found in cache
-			# first process dependencies
+			spec = _preprocess_spec(spec) # first preprocess spec (if needed)
+
+			# then fetch dependencies
 			upstream = IdDict{Spec,Any}()
 			visit_dependencies(spec) do dep
 				upstream[dep] = fetch!(scheduler, dep) # always forward in here

@@ -1,5 +1,5 @@
-_nameof(::Type{T}) where T = string(first(eachsplit(repr(T),'{')))
-_nameof(::Type{<:NamedTuple}) = "NamedTuple" # is there a better way to avoid @NamedTuple?
+_nameof(::Type{T}) where T = Symbol(first(eachsplit(repr(T),'{')))
+_nameof(::Type{<:NamedTuple}) = Symbol("NamedTuple") # is there a better way to avoid @NamedTuple?
 _typenameof(x::T) where T = _nameof(T)
 
 struct PrintContext
@@ -21,6 +21,14 @@ printreference(ispec::InternalSpec) = PrintReference(string(get_versioned_functi
 
 Base.show(io::IO, ref::PrintReference) = print(io, ref.str)
 
+
+struct PrintFetched
+	f::Any
+end
+function Base.show(io::IO, x::PrintFetched)
+	show(io, x.f)
+	print(io, " (fetched)")
+end
 
 
 """
@@ -219,13 +227,24 @@ end
 
 
 function to_print_node!(pc::PrintContext, ispec::InternalSpec, name, h)
-	vf = get_versioned_function(ispec)
-
 	c1 = to_print_node!.(Ref(descend(pc)), ispec.args)
 	c2 = [to_print_node!(descend(pc),v,k,nothing) for (k,v) in ispec.kwargs if !startswith(string(k),"__")] # skip "hidden" kwargs
 	children = vcat(c1,c2)
 
-	create_print_node(pc, name, h, vf !== nothing ? vf.f : "Function not specified"; children, item_color=:green)
+	vf = get_versioned_function(ispec)
+	if vf !== nothing
+		f = vf.f
+		item_color = :green
+	else
+		f = Symbol("Function not specified")
+		item_color = :red
+	end
+
+	if _get_kwarg(ispec, :__fetched, false)
+		f = PrintFetched(f)
+	end
+
+	create_print_node(pc, name, h, f; children, item_color)
 end
 
 
