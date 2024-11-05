@@ -33,14 +33,13 @@ function compute(spec::Spec, upstream::IdDict{Spec,Any})
 	vf.f(args...; kwargs...)
 end
 
-
-function _preprocess_spec(spec::Spec)
-	ispec = _get_internal_spec(spec)
-	i = _get_kwarg_index(ispec, :__preprocess_spec)
-	i === nothing && return spec # No preprocessing
-	vf = ispec.kwargs[i].second::VersionedFunction
-	kwargs = ispec.kwargs[vcat(1:i-1, i+1:end)]
-	vf.f(ispec.args, kwargs; spec.use_cache) # Should we pass a Spec or InternalSpec or just args + kwargs?
+function fetch_dependencies!(scheduler, spec)
+	# Fetch dependencies
+	upstream = IdDict{Spec,Any}()
+	visit_dependencies(spec) do dep
+		upstream[dep] = fetch!(scheduler, dep) # always forward in here
+	end
+	upstream
 end
 
 
@@ -58,22 +57,20 @@ function fetch!(scheduler::Scheduler, spec::Spec; forward=true)
 		end
 
 		if res === nothing # Not found in cache
-			original_spec = spec
-			spec = _preprocess_spec(spec) # first preprocess spec (if needed)
+			preprocess_fun = _get_kwarg(spec, :__preprocess_spec, nothing)
 
-			# then fetch dependencies
-			upstream = IdDict{Spec,Any}()
-			visit_dependencies(spec) do dep
-				upstream[dep] = fetch!(scheduler, dep) # always forward in here
+			if preprocess_fun !== nothing
+				# Preprocess without fetching dependencies
+				res = (preprocess_fun::VersionedFunction).f(spec)
+			else
+				upstream = fetch_dependencies!(scheduler, spec)
+				res = compute(spec, upstream)
 			end
 
 			if spec.use_cache
-				res = cache_get!(original_spec) do
-					compute(spec, upstream)
-				end
+				cache_insert!(spec, res) # No need to check cache here, that was done above.
 			else
 				@info "Bypassing cache"
-				res = compute(spec, upstream)
 			end
 		end
 		res

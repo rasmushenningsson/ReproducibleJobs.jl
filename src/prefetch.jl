@@ -35,9 +35,6 @@ function replace_fetched(original::Barrier, specs::Pair{Barrier,<:Any}...)
 	args = (copy_nested(_replace_fetched(fetched), a) for a in ispec.args)
 	kwargs = (copy_nested(_replace_fetched(fetched), k)=>copy_nested(_replace_fetched(fetched),v) for (k,v) in ispec.kwargs if k != :__versionedfunction)
 
-	# TODO: We need to ensure the __preprocess_spec is no longer here.
-	#       But that seems like the job of the caller really.
-
 	create_spec(args...; kwargs..., original.spec.use_cache, __versionedfunction=vf) # TODO: pass on deduplicator somehow
 end
 
@@ -60,14 +57,16 @@ end
 _process_fetched(::Any, ::Vector{Spec}, x::Any) = x
 
 
-function setup_prefetching_spec(args, kwargs; use_cache, deduplicator=default_deduplicator()) # TODO: ensure deduplicator is actually passed
+function setup_prefetching_spec(spec; deduplicator=default_deduplicator()) # TODO: ensure deduplicator is actually passed
 	fetched = Spec[]
 
-	args = copy_nested(_process_fetched(deduplicator, fetched), args)
-	kwargs = copy_nested(_process_fetched(deduplicator, fetched), kwargs)
-	# sort!(kwargs; by=first) # Not needed, the copy_nested above cannot change the order
-	ispec = deduplicator(InternalSpec(args, kwargs))
-	original = barrier(Spec(ispec, use_cache))
+	ispec = _get_internal_spec(spec)
+	args = copy_nested(_process_fetched(deduplicator, fetched), ispec.args)
+	kwargs = copy_nested(_process_fetched(deduplicator, fetched), ispec.kwargs)
+	filter!(!isequal(:__preprocess_spec=>VersionedFunction(setup_prefetching_spec,v"0.0.1")), kwargs)
+	# sort!(kwargs; by=first) # Not needed, the copy_nested and filtering above cannot change the order
+	ispec2 = deduplicator(InternalSpec(args, kwargs))
+	original = barrier(Spec(ispec2, spec.use_cache))
 
-	create_spec(original, (barrier.(fetched) .=> fetched)...; deduplicator, use_cache, __versionedfunction=VersionedFunction(replace_fetched,v"0.0.1"))
+	create_spec(original, (barrier.(fetched) .=> fetched)...; deduplicator, spec.use_cache, __versionedfunction=VersionedFunction(replace_fetched,v"0.0.1"))
 end

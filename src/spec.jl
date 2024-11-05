@@ -103,6 +103,7 @@ Base.:(==)(a::Spec, b::Spec) = a.use_cache == b.use_cache && a.ro == b.ro
 _get_internal_spec(spec::Spec) = spec.ro.value
 
 get_hash(spec::Spec) = get_hash(spec.ro)
+_get_kwarg(spec::Spec, name::Symbol, args...) = _get_kwarg(_get_internal_spec(spec), name, args...)
 get_versioned_function(spec::Spec) = get_versioned_function(_get_internal_spec(spec))
 
 

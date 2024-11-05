@@ -35,7 +35,16 @@ function Base.get!(f, cache::Cache, spec::Spec)
 	return value
 end
 
+function cache_insert!(cache::Cache, spec::Spec, value)
+	fp = spec2path(cache, spec)
+	isfile(fp) && error("cache_insert! expects a spec that is not already in the cache. Got $spec with hash $(spec.ro.h).")
+
+	jldsave(fp, true; spec, value) # compress=true
+	return value
+end
+
 
 cache_haskey(spec::Spec) = haskey(get_cache(), spec)
 cache_get(spec, default) = get(get_cache(), spec, default)
 cache_get!(f, spec) = get!(f, get_cache(), spec)
+cache_insert!(spec, value) = cache_insert!(get_cache(), spec, value)
