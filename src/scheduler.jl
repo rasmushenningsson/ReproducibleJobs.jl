@@ -52,13 +52,13 @@ function fetch!(scheduler::Scheduler, spec::Spec; forward=true)
 			res = cache_get(spec, nothing)
 
 			# Since the Spec was loaded from file, it has not been deduplicated in this session, so we need to do that here.
-			# TODO: Ensure deduplication is done deeply!
 			if res isa Spec
 				res = default_deduplicator()(res) # TODO: avoid using default_deduplicator() here - get from scheduler somehow
 			end
 		end
 
 		if res === nothing # Not found in cache
+			original_spec = spec
 			spec = _preprocess_spec(spec) # first preprocess spec (if needed)
 
 			# then fetch dependencies
@@ -68,7 +68,7 @@ function fetch!(scheduler::Scheduler, spec::Spec; forward=true)
 			end
 
 			if spec.use_cache
-				res = cache_get!(spec) do
+				res = cache_get!(original_spec) do
 					compute(spec, upstream)
 				end
 			else

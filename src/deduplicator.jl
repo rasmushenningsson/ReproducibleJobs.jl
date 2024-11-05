@@ -36,11 +36,21 @@ end
 
 # If the user provides a ReadOnly, we trust the hash of that.
 # But we still need to insert in the Dict. (TODO: make this recursive!)
+# function (dedup::Deduplicator)(ro::ReadOnly{T}) where T
+# 	y = get!(dedup.d, ro.h) do
+# 		ro.value
+# 	end
+# 	ReadOnly{T}(y, ro.h)
+# end
+
+
 function (dedup::Deduplicator)(ro::ReadOnly{T}) where T
-	y = get!(dedup.d, ro.h) do
-		ro.value
-	end
-	ReadOnly{T}(y, ro.h)
+	y = get(dedup.d, ro.h, nothing)
+	y !== nothing && return ReadOnly{T}(y, ro.h)
+
+	ro2 = dedup(ro.value)
+	@warn ro.h == ro2.h "Rehashing ReadOnly resulted in a new hash! (new: $(ro2.h), old: $(ro.h))"
+	ro2
 end
 
 
