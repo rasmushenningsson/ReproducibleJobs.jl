@@ -16,8 +16,8 @@ _unwrap_value(upstream) = Base.Fix2(_unwrap_value, upstream)
 function _unwrap_value(x, upstream)
 	# Manual dispatch since we have few types
 	x isa Spec && return upstream[x]
-	# x isa ReadOnly && return x.value
-	x isa ReadOnly && return copy_nested(_unwrap_value(upstream), x.value) # Unwrap inside
+	x isa ReadOnly && return x.value
+	# x isa ReadOnly && return copy_nested(_unwrap_value(upstream), x.value) # Unwrap inside
 	x
 end
 
@@ -27,8 +27,9 @@ function compute(spec::Spec, upstream::IdDict{Spec,Any})
 	vf = get_versioned_function(spec)
 	ispec = _get_internal_spec(spec)
 
-	args = (copy_nested(_unwrap_value(upstream), a) for a in ispec.args)
-	kwargs = (copy_nested(_unwrap_value(upstream), k)=>copy_nested(_unwrap_value(upstream),v) for (k,v) in ispec.kwargs if !startswith(string(k),"__"))
+	unwrapper = _unwrap_value(upstream)
+	args = (copy_nested(unwrapper, a) for a in ispec.args)
+	kwargs = (copy_nested(unwrapper, k)=>copy_nested(unwrapper,v) for (k,v) in ispec.kwargs if !startswith(string(k),"__"))
 
 	@info "Running $vf"
 	vf.f(args...; kwargs...)
