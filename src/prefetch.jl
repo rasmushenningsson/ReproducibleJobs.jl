@@ -23,6 +23,16 @@ end
 _replace_fetched(fetched) = Base.Fix1(_replace_fetched, fetched)
 _replace_fetched(fetched, x) = get(fetched, x, x) # replaced fetched specs by the value, and leaves everything else in place
 
+
+# TODO: Is this needed, or should copy_nested be changed so it traverses into ReadOnly?
+function _replace_fetched(fetched, ro::ReadOnly)
+	x = copy_nested(_replace_fetched(fetched), ro.value)
+	deduplicator = default_deduplicator() # TODO: ensure deduplicator is actually passed
+	h = bytes2hex(stable_hash(x, deduplicator.hash_context)) # TODO: use utility function here
+	ReadOnly(x,h)
+end
+
+
 # TODO: Find a better name
 function replace_fetched(original::Barrier, specs::Pair{Barrier,<:Any}...)
 	fetched = IdDict((k.spec=>v for (k,v) in specs))
@@ -40,6 +50,16 @@ end
 
 
 _process_fetched(deduplicator, fetched::Vector{Spec}) = x->_process_fetched(deduplicator, fetched, x)
+
+
+# TODO: Is this needed, or should copy_nested be changed so it traverses into ReadOnly?
+function _process_fetched(deduplicator, fetched::Vector{Spec}, ro::ReadOnly)
+	x = copy_nested(_process_fetched(deduplicator, fetched), ro.value)
+	h = bytes2hex(stable_hash(x, deduplicator.hash_context)) # TODO: use utility function here
+	ReadOnly(x,h)
+end
+
+
 function _process_fetched(deduplicator, fetched::Vector{Spec}, spec::Spec)
 	if any(isequal(:__fetched=>true), _get_internal_spec(spec).kwargs)
 		# remove __fetched from the spec and push it to the list of specs to process

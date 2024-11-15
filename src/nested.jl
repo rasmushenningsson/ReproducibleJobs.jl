@@ -1,5 +1,8 @@
 visit_nested(f, pred, x) = f(x)
 
+# Hmm. Is this desired?
+visit_nested(f, pred, ro::ReadOnly) = visit_nested(f, pred, ro.value)
+
 function visit_nested(f, pred, a::Union{<:Array,<:Tuple,<:NamedTuple,<:Set})
 	for x in a
 		pred(x) && visit_nested(f, pred, x) # pred let us handle e.g. an Array{Array{Int}} that we do not need to traverse when looking for Specs
@@ -16,10 +19,14 @@ function visit_nested(f, pred, (k,v)::Pair)
 	pred(v) && visit_nested(f, pred, v)
 end
 
+
 visit_nested(f, x) = visit_nested(f, Returns(true), x)
 
 
 copy_nested(f,x) = f(x)
+
+# TODO: Should copy_nested go into ReadOnly? Always? Sometimes?
+
 copy_nested(f,a::AbstractArray) = f([copy_nested(f,x) for x in a]) # NB: preserves dims of array, might change eltype
 copy_nested(f,d::AbstractDict) = f(Dict((copy_nested(f,k)=>copy_nested(f,v) for (k,v) in d)))
 copy_nested(f,s::AbstractSet) = f(Set((copy_nested(f,x) for x in s)))

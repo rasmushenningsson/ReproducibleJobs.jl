@@ -49,7 +49,7 @@ function (dedup::Deduplicator)(ro::ReadOnly{T}) where T
 	y !== nothing && return ReadOnly{T}(y, ro.h)
 
 	ro2 = dedup(ro.value)
-	@warn ro.h == ro2.h "Rehashing ReadOnly resulted in a new hash! (new: $(ro2.h), old: $(ro.h))"
+	ro.h == ro2.h || @warn "Rehashing ReadOnly resulted in a new hash! (new: $(ro2.h), old: $(ro.h))"
 	ro2
 end
 
