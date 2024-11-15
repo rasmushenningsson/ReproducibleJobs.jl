@@ -1,7 +1,8 @@
 visit_nested(f, pred, x) = f(x)
 
 # Hmm. Is this desired?
-visit_nested(f, pred, ro::ReadOnly) = visit_nested(f, pred, ro.value)
+# visit_nested(f, pred, ro::ReadOnly) = visit_nested(f, pred, ro.value)
+# NB: visit_nested should not go into ReadOnlys, they are considered "leaves"
 
 function visit_nested(f, pred, a::Union{<:Array,<:Tuple,<:NamedTuple,<:Set})
 	for x in a
@@ -25,7 +26,7 @@ visit_nested(f, x) = visit_nested(f, Returns(true), x)
 
 copy_nested(f,x) = f(x)
 
-# TODO: Should copy_nested go into ReadOnly? Always? Sometimes?
+# NB: copy_nested should not go into ReadOnlys, they are considered "leaves"
 
 copy_nested(f,a::AbstractArray) = f([copy_nested(f,x) for x in a]) # NB: preserves dims of array, might change eltype
 copy_nested(f,d::AbstractDict) = f(Dict((copy_nested(f,k)=>copy_nested(f,v) for (k,v) in d)))

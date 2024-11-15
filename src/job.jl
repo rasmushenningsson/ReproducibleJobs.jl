@@ -7,7 +7,8 @@ end
 Job(spec::Spec) = Job(spec, NotComputed())
 
 
-preprocess_standard(job::Job) = job.spec
+# preprocess_standard(job::Job) = job.spec
+preprocess(job::Job) = job.spec
 barrier(job::Job) = barrier(job.spec)
 fetched(job::Job) = fetched(job.spec)
 
