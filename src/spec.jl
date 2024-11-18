@@ -10,11 +10,11 @@ end
 Base.:(==)(a::InternalSpec, b::InternalSpec) = a.args == b.args && a.kwargs == b.kwargs
 
 
-function create_internal_spec(f, args, kwargs)
-	a = Any[copy_nested(f,x) for x in args]
-	kw = sort!(Pair{Symbol,Any}[copy_nested(f,p) for p in kwargs]; by=first)
-	InternalSpec(a,kw)
-end
+# function create_internal_spec(f, args, kwargs)
+# 	a = Any[copy_nested(f,x) for x in args]
+# 	kw = sort!(Pair{Symbol,Any}[copy_nested(f,p) for p in kwargs]; by=first)
+# 	InternalSpec(a,kw)
+# end
 
 
 function _get_kwarg_index(ispec::InternalSpec, name::Symbol)
@@ -50,51 +50,42 @@ end
 deduplicate_type(::Deduplicator, ::Type{Spec}) = false
 
 
-preprocess_copy(x) = copy(x)
-
-
-# TODO: We might want to avoid dynamic dispatch for pre-processing to speed it up. But that's for later.
-
-# This are handled by copy_nested and are thus already new copies
-preprocess_standard(a::Array) = a
-preprocess_standard(d::Dict) = d
-preprocess_standard(t::Tuple) = t
-preprocess_standard(p::Pair) = p
-
-# These are already managed, no need to copy
-preprocess_standard(spec::Spec) = spec
-preprocess_standard(ro::ReadOnly) = ro
-
-preprocess_standard(x::AbstractString) = string(x) # Standardize strings
-preprocess_standard(x::Symbol) = x # symbols are immutable, pass through
-preprocess_standard(f::VersionedFunction) = f
-preprocess_standard(f::Union{<:Base.Fix1,<:Base.Fix2}) = f
-
-preprocess_standard(x) = preprocess_copy(x)
+_is_leaf_type(::Type{Spec}) = false
+preprocess(spec::Spec) = spec # Already managed, no need to copy
 
 
 
 
 
+function create_spec(args...; deduplicator=default_deduplicator(), use_cache=true, kwargs...)
+	# ispec = create_internal_spec(preprocess(deduplicator), args, kwargs)
+
+	f = preprocessor(deduplicator)
+	a = Any[copy_nested(f,x) for x in args]
+	kw = Pair{Symbol,Any}[copy_nested(f,p) for p in kwargs]
 
 
-function create_spec(args...; deduplicator=default_deduplicator(), preprocess=deduplicator∘preprocess_standard, use_cache=true, kwargs...)
-	ispec = create_internal_spec(preprocess, args, kwargs)
-
-	# TODO: revise naming of everything here
 	should_prefetch = false
-	visit_dependencies(ispec) do x
+	# TODO: avoid duplicate code
+	visit_dependencies(a) do x
 		should_prefetch = should_prefetch || any(isequal(:__fetched=>true), _get_internal_spec(x).kwargs)
 	end
-	if should_prefetch
-		push!(ispec.kwargs, :__preprocess_spec=>VersionedFunction(setup_prefetching_spec,v"0.0.1"))
-		sort!(ispec.kwargs; by=first) # Must be sorted. But better if it was done elsewhere?
+	visit_dependencies(kw) do x
+		should_prefetch = should_prefetch || any(isequal(:__fetched=>true), _get_internal_spec(x).kwargs)
 	end
 
+	if should_prefetch
+		push!(kw, :__preprocess_spec=>VersionedFunction(setup_prefetching_spec,v"0.0.1"))
+	end
 
+	sort!(kw; by=first)
+
+	ispec = InternalSpec(a, kw)
 	ispec = deduplicator(ispec)
 	Spec(ispec, use_cache)
 end
+
+
 
 
 Base.:(==)(a::Spec, b::Spec) = a.use_cache == b.use_cache && a.ro == b.ro
@@ -115,8 +106,6 @@ function visit_dependencies(f, v::Vector)
 		x isa Spec && f(x)
 	end
 end
-
-
 function visit_dependencies(f, ispec::InternalSpec)
 	visit_dependencies(f, ispec.args)
 	visit_dependencies(f, ispec.kwargs)

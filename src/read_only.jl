@@ -5,6 +5,10 @@ end
 
 get_hash(ro::ReadOnly) = ro.h
 
+_is_leaf_type(::Type{<:ReadOnly}) = false
+preprocess(ro::ReadOnly) = ro # Already managed, no need to copy
+
+
 function Base.:(==)(a::ReadOnly{T}, b::ReadOnly{T}) where T
 	a.h != b.h && return false # early out
 	a === b && return true # early out

@@ -1,6 +1,7 @@
 module CacheBySpec
 
 using StableHashTraits
+using ReadOnlyArrays
 using Scratch: @get_scratch!
 using JLD2: jldsave, load
 import AbstractTrees # for pretty printing
@@ -20,6 +21,7 @@ include("read_only.jl")
 include("nested.jl")
 include("deduplicator.jl")
 include("versioned_function.jl")
+include("preprocessor.jl")
 include("spec.jl")
 include("barrier.jl")
 include("prefetch.jl")
