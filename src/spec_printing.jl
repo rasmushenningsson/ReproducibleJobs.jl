@@ -17,7 +17,7 @@ struct PrintReference
 end
 
 printreference(::T) where T = PrintReference(_nameof(T))
-printreference(ispec::InternalSpec) = PrintReference(string(get_versioned_function(ispec).f))
+printreference(sa::SpecArgs) = PrintReference(string(get_versioned_function(sa).f))
 
 Base.show(io::IO, ref::PrintReference) = print(io, ref.str)
 
@@ -226,12 +226,12 @@ function to_print_node!(pc::PrintContext, ro::ReadOnly, name, h)
 end
 
 
-function to_print_node!(pc::PrintContext, ispec::InternalSpec, name, h)
-	c1 = to_print_node!.(Ref(descend(pc)), ispec.args)
-	c2 = [to_print_node!(descend(pc),v,k,nothing) for (k,v) in ispec.kwargs if !startswith(string(k),"__")] # skip "hidden" kwargs
+function to_print_node!(pc::PrintContext, sa::SpecArgs, name, h)
+	c1 = to_print_node!.(Ref(descend(pc)), sa.args)
+	c2 = [to_print_node!(descend(pc),v,k,nothing) for (k,v) in sa.kwargs if !startswith(string(k),"__")] # skip "hidden" kwargs
 	children = vcat(c1,c2)
 
-	vf = get_versioned_function(ispec)
+	vf = get_versioned_function(sa)
 	if vf !== nothing
 		f = vf.f
 		item_color = :green
@@ -240,7 +240,7 @@ function to_print_node!(pc::PrintContext, ispec::InternalSpec, name, h)
 		item_color = :red
 	end
 
-	if _get_kwarg(ispec, :__fetched, false)
+	if _get_kwarg(sa, :__fetched, false)
 		f = PrintFetched(f)
 	end
 

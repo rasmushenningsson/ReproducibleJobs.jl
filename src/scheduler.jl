@@ -24,11 +24,11 @@ end
 # Maps spec and dependencies to f, args, kwargs so function can be called
 function compute(spec::Spec, upstream::IdDict{Spec,Any})
 	vf = get_versioned_function(spec)
-	ispec = _get_internal_spec(spec)
+	sa = _get_spec_args(spec)
 
 	unwrapper = _unwrap_value(upstream)
-	args = (copy_nested(unwrapper, a) for a in ispec.args)
-	kwargs = (copy_nested(unwrapper, k)=>copy_nested(unwrapper,v) for (k,v) in ispec.kwargs if !startswith(string(k),"__"))
+	args = (copy_nested(unwrapper, a) for a in sa.args)
+	kwargs = (copy_nested(unwrapper, k)=>copy_nested(unwrapper,v) for (k,v) in sa.kwargs if !startswith(string(k),"__"))
 
 	@info "Running $vf"
 	vf.f(args...; kwargs...)

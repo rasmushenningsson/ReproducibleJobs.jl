@@ -1,48 +1,48 @@
-struct InternalSpec
+struct SpecArgs
 	args::Vector{Any}
 	kwargs::Vector{Pair{Symbol,Any}}
-	function InternalSpec(args, kwargs)
+	function SpecArgs(args, kwargs)
 		@assert issorted(kwargs; by=first)
 		new(args, kwargs)
 	end
 end
 
-Base.:(==)(a::InternalSpec, b::InternalSpec) = a.args == b.args && a.kwargs == b.kwargs
+Base.:(==)(a::SpecArgs, b::SpecArgs) = a.args == b.args && a.kwargs == b.kwargs
 
 
-# function create_internal_spec(f, args, kwargs)
+# function create_spec_args(f, args, kwargs)
 # 	a = Any[copy_nested(f,x) for x in args]
 # 	kw = sort!(Pair{Symbol,Any}[copy_nested(f,p) for p in kwargs]; by=first)
-# 	InternalSpec(a,kw)
+# 	SpecArgs(a,kw)
 # end
 
 
-function _get_kwarg_index(ispec::InternalSpec, name::Symbol)
-	r = searchsorted(ispec.kwargs, name=>nothing; by=first)
+function _get_kwarg_index(sa::SpecArgs, name::Symbol)
+	r = searchsorted(sa.kwargs, name=>nothing; by=first)
 	isempty(r) && return nothing
 	only(r)
 end
 
-function _get_kwarg(ispec::InternalSpec, name::Symbol, default=nothing)
-	i = _get_kwarg_index(ispec,name)
-	i !== nothing ? last(ispec.kwargs[i]) : default
+function _get_kwarg(sa::SpecArgs, name::Symbol, default=nothing)
+	i = _get_kwarg_index(sa,name)
+	i !== nothing ? last(sa.kwargs[i]) : default
 end
 
-get_versioned_function(ispec::InternalSpec, default=nothing) =
-	_get_kwarg(ispec, :__versionedfunction, default)::Union{Nothing,VersionedFunction}
+get_versioned_function(sa::SpecArgs, default=nothing) =
+	_get_kwarg(sa, :__versionedfunction, default)::Union{Nothing,VersionedFunction}
 
 
 
 # Pair{Symbol,Any} currently hashes without any type information about the `Any`.
 # And that would make structs with identical contents hash the same way, if they are the value of a kwarg.
 # This is a workaround.
-StableHashTraits.transformer(::Type{<:InternalSpec}) = StableHashTraits.Transformer(x->(x.args, first.(x.kwargs), last.(x.kwargs)))
+StableHashTraits.transformer(::Type{<:SpecArgs}) = StableHashTraits.Transformer(x->(x.args, first.(x.kwargs), last.(x.kwargs)))
 
 
 
 
 struct Spec
-	ro::ReadOnly{InternalSpec}
+	ro::ReadOnly{SpecArgs}
 	use_cache::Bool
 end
 
@@ -58,7 +58,7 @@ preprocess(spec::Spec) = spec # Already managed, no need to copy
 
 
 function create_spec(args...; deduplicator=default_deduplicator(), use_cache=true, kwargs...)
-	# ispec = create_internal_spec(preprocess(deduplicator), args, kwargs)
+	# sa = create_spec_args(preprocess(deduplicator), args, kwargs)
 
 	f = preprocessor(deduplicator)
 	a = Any[copy_nested(f,x) for x in args]
@@ -68,10 +68,10 @@ function create_spec(args...; deduplicator=default_deduplicator(), use_cache=tru
 	should_prefetch = false
 	# TODO: avoid duplicate code
 	visit_dependencies(a) do x
-		should_prefetch = should_prefetch || any(isequal(:__fetched=>true), _get_internal_spec(x).kwargs)
+		should_prefetch = should_prefetch || any(isequal(:__fetched=>true), _get_spec_args(x).kwargs)
 	end
 	visit_dependencies(kw) do x
-		should_prefetch = should_prefetch || any(isequal(:__fetched=>true), _get_internal_spec(x).kwargs)
+		should_prefetch = should_prefetch || any(isequal(:__fetched=>true), _get_spec_args(x).kwargs)
 	end
 
 	if should_prefetch
@@ -80,9 +80,9 @@ function create_spec(args...; deduplicator=default_deduplicator(), use_cache=tru
 
 	sort!(kw; by=first)
 
-	ispec = InternalSpec(a, kw)
-	ispec = deduplicator(ispec)
-	Spec(ispec, use_cache)
+	sa = SpecArgs(a, kw)
+	sa = deduplicator(sa)
+	Spec(sa, use_cache)
 end
 
 
@@ -91,11 +91,11 @@ end
 Base.:(==)(a::Spec, b::Spec) = a.use_cache == b.use_cache && a.ro == b.ro
 
 
-_get_internal_spec(spec::Spec) = spec.ro.value
+_get_spec_args(spec::Spec) = spec.ro.value
 
 get_hash(spec::Spec) = get_hash(spec.ro)
-_get_kwarg(spec::Spec, name::Symbol, args...) = _get_kwarg(_get_internal_spec(spec), name, args...)
-get_versioned_function(spec::Spec) = get_versioned_function(_get_internal_spec(spec))
+_get_kwarg(spec::Spec, name::Symbol, args...) = _get_kwarg(_get_spec_args(spec), name, args...)
+get_versioned_function(spec::Spec) = get_versioned_function(_get_spec_args(spec))
 
 
 
@@ -106,11 +106,11 @@ function visit_dependencies(f, v::Vector)
 		x isa Spec && f(x)
 	end
 end
-function visit_dependencies(f, ispec::InternalSpec)
-	visit_dependencies(f, ispec.args)
-	visit_dependencies(f, ispec.kwargs)
+function visit_dependencies(f, sa::SpecArgs)
+	visit_dependencies(f, sa.args)
+	visit_dependencies(f, sa.kwargs)
 end
-visit_dependencies(f, spec::Spec) = visit_dependencies(f, _get_internal_spec(spec))
+visit_dependencies(f, spec::Spec) = visit_dependencies(f, _get_spec_args(spec))
 
 
 
