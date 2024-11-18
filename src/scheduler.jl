@@ -17,7 +17,6 @@ function _unwrap_value(x, upstream)
 	# Manual dispatch since we have few types
 	x isa Spec && return upstream[x]
 	x isa ReadOnly && return x.value
-	# x isa ReadOnly && return copy_nested(_unwrap_value(upstream), x.value) # Unwrap inside
 	x
 end
 
