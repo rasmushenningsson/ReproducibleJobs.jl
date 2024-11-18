@@ -7,6 +7,5 @@ barrier(spec::Spec) = Barrier(spec)
 barrier(x) = x # only applicable for Specs
 
 Base.:(==)(a::Barrier, b::Barrier) = a.spec == b.spec
-# preprocess_standard(b::Barrier) = b
 preprocess(b::Barrier) = b
 deduplicate!(dedup::Deduplicator, b::Barrier) = Barrier(dedup(b.spec))

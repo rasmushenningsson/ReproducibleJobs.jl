@@ -50,32 +50,11 @@ end
 deduplicate_type(::Deduplicator, ::Type{Spec}) = false
 
 
-# preprocess_standard(spec::Spec) = spec # Already managed, no need to copy
-
 _is_leaf_type(::Type{Spec}) = false
 preprocess(spec::Spec) = spec # Already managed, no need to copy
 
 
 
-
-
-# function create_spec(args...; deduplicator=default_deduplicator(), preprocess=deduplicator∘preprocess_standard, use_cache=true, kwargs...)
-# 	ispec = create_internal_spec(preprocess, args, kwargs)
-
-# 	# TODO: revise naming of everything here
-# 	should_prefetch = false
-# 	visit_dependencies(ispec) do x
-# 		should_prefetch = should_prefetch || any(isequal(:__fetched=>true), _get_internal_spec(x).kwargs)
-# 	end
-# 	if should_prefetch
-# 		push!(ispec.kwargs, :__preprocess_spec=>VersionedFunction(setup_prefetching_spec,v"0.0.1"))
-# 		sort!(ispec.kwargs; by=first) # Must be sorted. But better if it was done elsewhere?
-# 	end
-
-
-# 	ispec = deduplicator(ispec)
-# 	Spec(ispec, use_cache)
-# end
 
 
 function create_spec(args...; deduplicator=default_deduplicator(), use_cache=true, kwargs...)

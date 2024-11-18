@@ -5,8 +5,6 @@ end
 
 get_hash(ro::ReadOnly) = ro.h
 
-# preprocess_standard(ro::ReadOnly) = ro # Already managed, no need to copy
-
 _is_leaf_type(::Type{<:ReadOnly}) = false
 preprocess(ro::ReadOnly) = ro # Already managed, no need to copy
 
