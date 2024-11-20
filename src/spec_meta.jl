@@ -1,4 +1,8 @@
-is_preprocessing(spec::Spec) = is_preprocessing(get_versioned_function(spec).f, spec)
+function is_preprocessing(spec::Spec)
+	vf = get_versioned_function(spec)
+	@assert vf !== nothing
+	is_preprocessing(vf.f, spec)
+end
 
 # One of these can be customized to tell that a function is preprocessing a spec
 is_preprocessing(f, ::Spec) = is_preprocessing(f)

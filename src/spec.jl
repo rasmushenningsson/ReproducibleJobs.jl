@@ -10,11 +10,11 @@ end
 Base.:(==)(a::SpecArgs, b::SpecArgs) = a.args == b.args && a.kwargs == b.kwargs
 
 
-# function create_spec_args(f, args, kwargs)
-# 	a = Any[copy_nested(f,x) for x in args]
-# 	kw = sort!(Pair{Symbol,Any}[copy_nested(f,p) for p in kwargs]; by=first)
-# 	SpecArgs(a,kw)
-# end
+function create_spec_args(f, args, kwargs)
+	a = Any[copy_nested(f,x) for x in args]
+	kw = sort!(Pair{Symbol,Any}[k=>copy_nested(f,v) for (k,v) in kwargs]; by=first)
+	SpecArgs(a,kw)
+end
 
 
 function _get_kwarg_index(sa::SpecArgs, name::Symbol)
@@ -60,29 +60,7 @@ preprocess(spec::Spec) = spec # Already managed, no need to copy
 
 
 function create_spec(args...; deduplicator=default_deduplicator(), use_cache=true, kwargs...)
-	# sa = create_spec_args(preprocess(deduplicator), args, kwargs)
-
-	f = preprocessor(deduplicator)
-	a = Any[copy_nested(f,x) for x in args]
-	kw = Pair{Symbol,Any}[k=>copy_nested(f,v) for (k,v) in kwargs]
-
-
-	should_prefetch = false
-	# TODO: avoid duplicate code
-	visit_dependencies(a) do x
-		should_prefetch = should_prefetch || any(isequal(:__fetched=>true), _get_spec_args(x).kwargs)
-	end
-	visit_dependencies(kw) do x
-		should_prefetch = should_prefetch || any(isequal(:__fetched=>true), _get_spec_args(x).kwargs)
-	end
-
-	if should_prefetch
-		push!(kw, :__preprocess_spec=>VersionedFunction(setup_prefetching_spec,v"0.0.1"))
-	end
-
-	sort!(kw; by=first)
-
-	sa = SpecArgs(a, kw)
+	sa = create_spec_args(preprocessor(deduplicator), args, kwargs)
 	sa = deduplicator(sa)
 	Spec(sa, use_cache)
 end

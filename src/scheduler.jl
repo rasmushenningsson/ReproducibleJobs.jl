@@ -50,7 +50,7 @@ function compute(spec::Spec, upstream::IdDict{Spec,Any})
 
 	@info "Running $vf"
 	res = vf.f(args...; kwargs...)
-	@assert res !== nothing "Computation of $spec returned nothing"
+	@assert res !== nothing "Computation of $(get_versioned_function(spec)) returned nothing"
 	res
 end
 
@@ -72,12 +72,14 @@ function _process!(scheduler::Scheduler, spec::Spec)
 	# TODO: avoid code repetions below
 
 	if is_preprocessing(spec)
+		@info "Preprocessing $(get_versioned_function(spec))"
 		deps = get_dependencies(spec)::Vector{Spec}
 		deps = fetch_dependencies!(scheduler, deps)
 		return res = compute(spec, deps)
 	end
 
 	if !spec.fully_forwarded
+		@info "Forwarding subspecs for $(get_versioned_function(spec))"
 		# find all dependencies (including those marked for prefetch (how about specs marked as other things?))
 		# fully forward each dependency
 		# replace dependencies with fully forwarded
@@ -98,13 +100,14 @@ function _process!(scheduler::Scheduler, spec::Spec)
 
 	prefetch_deps = get_prefetch_dependencies(spec)
 	if !isempty(prefetch_deps)
+		@info "Prefetching subspecs for $(get_versioned_function(spec))"
 		prefetch_deps = fetch_dependencies!(scheduler, prefetch_deps)
 
 		replacer = _arg_replacer(prefetch_deps)
 
 		sa = spec.ro.value
 		args = Any[copy_nested(replacer, a) for a in sa.args]
-		kwargs = Pair{Symbol,Any}[k=>copy_nested(replacer,v) for (k,v) in sa.kwargs if !startswith(string(k),"__")]
+		kwargs = Pair{Symbol,Any}[k=>copy_nested(replacer,v) for (k,v) in sa.kwargs]
 
 		sa_prefetched = SpecArgs(args, kwargs)
 		sa_prefetched = default_deduplicator()(sa_prefetched) # TODO: avoid using default_deduplicator() here - we need to get it from somewhere
