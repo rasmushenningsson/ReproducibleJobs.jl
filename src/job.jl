@@ -13,7 +13,7 @@ fetched(job::Job) = fetched(job.spec)
 
 
 
-fetch!(job; scheduler=default_scheduler(), kwargs...) =
+fetch!(job::Job; scheduler=default_scheduler(), kwargs...) =
 	job.result = fetch!(scheduler, job.spec; kwargs...)
 
 # --- printing ---

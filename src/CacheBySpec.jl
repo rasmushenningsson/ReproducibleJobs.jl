@@ -15,6 +15,8 @@ export
 	Job,
 	print_spec,
 	fetch!,
+	forward!,
+	forward_once!,
 	fetched
 
 include("read_only.jl")
@@ -23,6 +25,7 @@ include("deduplicator.jl")
 include("versioned_function.jl")
 include("preprocessor.jl")
 include("spec.jl")
+include("spec_meta.jl")
 include("barrier.jl")
 include("prefetch.jl")
 include("spec_printing.jl")

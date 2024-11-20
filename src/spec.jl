@@ -44,7 +44,9 @@ StableHashTraits.transformer(::Type{<:SpecArgs}) = StableHashTraits.Transformer(
 struct Spec
 	ro::ReadOnly{SpecArgs}
 	use_cache::Bool
+	fully_forwarded::Bool
 end
+Spec(ro::ReadOnly{SpecArgs}, use_cache::Bool) = Spec(ro, use_cache, false)
 
 
 deduplicate_type(::Deduplicator, ::Type{Spec}) = false
