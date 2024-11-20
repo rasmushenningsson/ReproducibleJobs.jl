@@ -109,11 +109,6 @@ function _process!(scheduler::Scheduler, spec::Spec)
 		sa_prefetched = SpecArgs(args, kwargs)
 		sa_prefetched = default_deduplicator()(sa_prefetched) # TODO: avoid using default_deduplicator() here - we need to get it from somewhere
 		return Spec(sa_prefetched, spec.use_cache, spec.fully_forwarded)
-
-
-		# find all dependencies that should be prefetched
-		# fetch dependencies
-		# replace dependencies with fetched results
 	end
 
 	if spec.use_cache
@@ -124,43 +119,6 @@ function _process!(scheduler::Scheduler, spec::Spec)
 		@info "Bypassing cache"
 		return _fetch_and_compute!(scheduler, spec)
 	end
-
-
-	# result = get!(scheduler.results, spec) do
-	# 	# If it's in the cache, we don't need to fetch! upstream jobs
-	# 	if spec.use_cache
-	# 		res = cache_get(spec, nothing)
-	# 		if res !== nothing
-	# 			if res isa Spec
-	# 				# Since the Spec was loaded from file, it has not been deduplicated in this session, so we need to do that here.
-	# 				res = default_deduplicator()(res) # TODO: avoid using default_deduplicator() here - get from scheduler somehow
-	# 			end
-	# 			return res
-	# 		end
-	# 	end
-
-	# 	# Not found in cache
-
-
-
-
-
-	# 	# @show is_preprocessing(spec)
-
-	# 	deps = get_dependencies(spec)::Vector{Spec}
-	# 	deps = fetch_dependencies!(scheduler, deps)
-
-	# 	res = compute(spec, deps)
-
-	# 	if spec.use_cache
-	# 		cache_insert!(spec, res) # No need to check cache here, that was done above.
-	# 	else
-	# 		@info "Bypassing cache"
-	# 	end
-
-	# 	return res
-	# end
-
 end
 
 function process!(scheduler::Scheduler, spec::Spec, mode::Symbol)
@@ -171,11 +129,9 @@ function process!(scheduler::Scheduler, spec::Spec, mode::Symbol)
 			return spec
 		end
 
-		# res = _process!(scheduler, spec)
 		res = get!(scheduler.results, spec) do
 			_process!(scheduler, spec)
 		end
-
 
 		res isa Spec || return res
 		spec = res::Spec
@@ -189,60 +145,6 @@ fetch!(scheduler::Scheduler, spec::Spec) = process!(scheduler, spec, :compute)
 forward!(scheduler::Scheduler, spec::Spec) = process!(scheduler, spec, :forward)
 forward_once!(scheduler::Scheduler, spec::Spec) = process!(scheduler, spec, :forward_once)
 
-
-# function fetch!(scheduler::Scheduler, spec::Spec; forward=true)
-# 	result = get!(scheduler.results, spec) do
-# 		# If it's in the cache, we don't need to fetch! upstream jobs
-# 		res = nothing
-# 		if spec.use_cache
-# 			res = cache_get(spec, nothing)
-
-# 			# Since the Spec was loaded from file, it has not been deduplicated in this session, so we need to do that here.
-# 			if res isa Spec
-# 				res = default_deduplicator()(res) # TODO: avoid using default_deduplicator() here - get from scheduler somehow
-# 			end
-# 		end
-
-# 		if res === nothing # Not found in cache
-# 			# @show is_preprocessing(spec)
-
-
-# 			deps = get_dependencies(spec)::Vector{Spec}
-# 			deps = fetch_dependencies!(scheduler, deps)
-
-# 			res = compute(spec, deps)
-
-# 			if spec.use_cache
-# 				cache_insert!(spec, res) # No need to check cache here, that was done above.
-# 			else
-# 				@info "Bypassing cache"
-# 			end
-
-
-# 			# preprocess_fun = _get_kwarg(spec, :__preprocess_spec, nothing)
-
-# 			# if preprocess_fun !== nothing
-# 			# 	# Preprocess without fetching dependencies
-# 			# 	res = (preprocess_fun::VersionedFunction).f(spec)
-# 			# else
-# 			# 	upstream = fetch_dependencies!(scheduler, spec)
-# 			# 	res = compute(spec, upstream)
-# 			# end
-
-# 			# if spec.use_cache
-# 			# 	cache_insert!(spec, res) # No need to check cache here, that was done above.
-# 			# else
-# 			# 	@info "Bypassing cache"
-# 			# end
-# 		end
-# 		res
-# 	end
-
-# 	if forward && result isa Spec
-# 		result = fetch!(scheduler, result; forward)
-# 	end
-# 	result
-# end
 
 
 # --- printing ---
