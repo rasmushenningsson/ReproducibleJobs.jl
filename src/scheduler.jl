@@ -12,6 +12,22 @@ let scheduler_singleton = Scheduler()
 end
 
 
+
+_arg_replacer(upstream) = Base.Fix1(_arg_replacer, upstream)
+_arg_replacer(upstream, x) = get(upstream, x, x) # replaces prefetched specs by the value, and leaves everything else in place
+
+
+function get_prefetch_dependencies(spec)
+	deps = Spec[]
+	visit_dependencies(spec) do x
+		# TODO: ensure that the __fetched flag is no longer set
+		any(isequal(:__fetched=>true), _get_spec_args(x).kwargs) && push!(deps, x)
+	end
+	deps
+end
+
+
+
 _unwrap_value(upstream) = Base.Fix2(_unwrap_value, upstream)
 function _unwrap_value(x, upstream)
 	# Manual dispatch since we have few types
@@ -20,31 +36,8 @@ function _unwrap_value(x, upstream)
 	x
 end
 
-
-# # Maps spec and dependencies to f, args, kwargs so function can be called
-# function compute(spec::Spec, upstream::IdDict{Spec,Any})
-# 	vf = get_versioned_function(spec)
-# 	sa = _get_spec_args(spec)
-
-# 	unwrapper = _unwrap_value(upstream)
-# 	args = (copy_nested(unwrapper, a) for a in sa.args)
-# 	kwargs = (copy_nested(unwrapper, k)=>copy_nested(unwrapper,v) for (k,v) in sa.kwargs if !startswith(string(k),"__"))
-
-# 	@info "Running $vf"
-# 	vf.f(args...; kwargs...)
-# end
-
-# function fetch_dependencies!(scheduler, spec)
-# 	# Fetch dependencies
-# 	upstream = IdDict{Spec,Any}()
-# 	visit_dependencies(spec) do dep
-# 		upstream[dep] = fetch!(scheduler, dep) # always forward in here
-# 	end
-# 	upstream
-# end
-
-# fetch_dependencies!(scheduler, deps) = deps .=> fetch!.(scheduler, deps)
 fetch_dependencies!(scheduler, deps) = IdDict{Spec,Any}(dep=>fetch!(scheduler, dep) for dep in deps)
+forward_dependencies!(scheduler, deps) = IdDict{Spec,Any}(dep=>forward!(scheduler, dep) for dep in deps)
 
 
 function compute(spec::Spec, upstream::IdDict{Spec,Any})
@@ -60,7 +53,6 @@ function compute(spec::Spec, upstream::IdDict{Spec,Any})
 	@assert res !== nothing "Computation of $spec returned nothing"
 	res
 end
-
 
 
 function _fetch_and_compute!(scheduler, spec)
@@ -82,27 +74,55 @@ function _process!(scheduler::Scheduler, spec::Spec)
 	if is_preprocessing(spec)
 		deps = get_dependencies(spec)::Vector{Spec}
 		deps = fetch_dependencies!(scheduler, deps)
-		res = compute(spec, deps)
-	elseif !spec.fully_forwarded
+		return res = compute(spec, deps)
+	end
+
+	if !spec.fully_forwarded
 		# find all dependencies (including those marked for prefetch (how about specs marked as other things?))
 		# fully forward each dependency
 		# replace dependencies with fully forwarded
 
-		# DUMMY IMPLEMENTATION
-		return Spec(spec.ro, spec.use_cache, true)
-	elseif false # should_prefetch(spec)
+		forwarded_deps = get_dependencies(spec)::Vector{Spec}
+		forwarded_deps = forward_dependencies!(scheduler, forwarded_deps)
+
+		replacer = _arg_replacer(forwarded_deps)
+
+		sa = spec.ro.value
+		args = Any[copy_nested(replacer, a) for a in sa.args]
+		kwargs = Pair{Symbol,Any}[k=>copy_nested(replacer,v) for (k,v) in sa.kwargs]
+
+		sa_forwarded = SpecArgs(args, kwargs)
+		sa_forwarded = default_deduplicator()(sa_forwarded) # TODO: avoid using default_deduplicator() here - we need to get it from somewhere
+		return Spec(sa_forwarded, spec.use_cache, true)
+	end
+
+	prefetch_deps = get_prefetch_dependencies(spec)
+	if !isempty(prefetch_deps)
+		prefetch_deps = fetch_dependencies!(scheduler, prefetch_deps)
+
+		replacer = _arg_replacer(prefetch_deps)
+
+		sa = spec.ro.value
+		args = Any[copy_nested(replacer, a) for a in sa.args]
+		kwargs = Pair{Symbol,Any}[k=>copy_nested(replacer,v) for (k,v) in sa.kwargs if !startswith(string(k),"__")]
+
+		sa_prefetched = SpecArgs(args, kwargs)
+		sa_prefetched = default_deduplicator()(sa_prefetched) # TODO: avoid using default_deduplicator() here - we need to get it from somewhere
+		return Spec(sa_prefetched, spec.use_cache, spec.fully_forwarded)
+
+
 		# find all dependencies that should be prefetched
 		# fetch dependencies
 		# replace dependencies with fetched results
-	else
-		if spec.use_cache
-			cache_get!(spec) do
-				_fetch_and_compute!(scheduler, spec)
-			end
-		else
-			@info "Bypassing cache"
+	end
+
+	if spec.use_cache
+		return cache_get!(spec) do
 			_fetch_and_compute!(scheduler, spec)
 		end
+	else
+		@info "Bypassing cache"
+		return _fetch_and_compute!(scheduler, spec)
 	end
 
 

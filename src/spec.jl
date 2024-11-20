@@ -64,7 +64,8 @@ function create_spec(args...; deduplicator=default_deduplicator(), use_cache=tru
 
 	f = preprocessor(deduplicator)
 	a = Any[copy_nested(f,x) for x in args]
-	kw = Pair{Symbol,Any}[copy_nested(f,p) for p in kwargs]
+	# kw = Pair{Symbol,Any}[copy_nested(f,p) for p in kwargs]
+	kw = Pair{Symbol,Any}[k=>copy_nested(f,v) for (k,v) in kwargs]
 
 
 	should_prefetch = false
