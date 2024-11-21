@@ -7,6 +7,7 @@ using JLD2: jldsave, load
 import AbstractTrees # for pretty printing
 using CodecZlib
 using SHA
+import Dates # for printing of timestamped paths
 
 export
 	Deduplicator,

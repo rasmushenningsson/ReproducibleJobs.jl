@@ -8,6 +8,13 @@ copy_arg(ts::TimestampedFilePath) = ts # Already managed, no need to copy
 
 
 
+function Base.show(io::IO, ts::TimestampedFilePath)
+	# print(io, '"', ts.path, "\"@", Dates.unix2datetime(ts.timestamp))
+	print(io, '"', ts.path, '"')
+	printstyled(io, '@', Dates.unix2datetime(ts.timestamp); color=:light_black)
+end
+
+
 struct ChecksummedFilePath
 	path::String
 	timestamp::Float64
