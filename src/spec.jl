@@ -44,7 +44,7 @@ StableHashTraits.transformer(::Type{<:SpecArgs}) = StableHashTraits.Transformer(
 struct Spec
 	ro::ReadOnly{SpecArgs}
 	use_cache::Bool
-	fully_forwarded::Bool
+	forwarding_complete::Bool
 end
 Spec(ro::ReadOnly{SpecArgs}, use_cache::Bool) = Spec(ro, use_cache, false)
 

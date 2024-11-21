@@ -14,20 +14,8 @@ end
 
 
 
-_arg_replacer(upstream) = Base.Fix1(_arg_replacer, upstream)
-_arg_replacer(upstream, x) = get(upstream, x, x) # replaces prefetched specs by the value, and leaves everything else in place
-
-
-function get_prefetch_dependencies(spec)
-	deps = Spec[]
-	visit_dependencies(spec) do x
-		# TODO: ensure that the __fetched flag is no longer set
-		any(isequal(:__fetched=>true), _get_spec_args(x).kwargs) && push!(deps, x)
-	end
-	deps
-end
-
-
+_arg_replacer(upstream) = Base.Fix2(_arg_replacer, upstream)
+_arg_replacer(x, upstream) = get(upstream, x, x) # replaces prefetched specs by the value, and leaves everything else in place
 
 _unwrap_value(upstream) = Base.Fix2(_unwrap_value, upstream)
 function _unwrap_value(x, upstream)
@@ -38,7 +26,12 @@ function _unwrap_value(x, upstream)
 end
 
 fetch_dependencies!(scheduler, deps) = IdDict{Spec,Any}(dep=>fetch!(scheduler, dep) for dep in deps)
-forward_dependencies!(scheduler, deps) = IdDict{Spec,Any}(dep=>forward!(scheduler, dep) for dep in deps)
+
+
+# TODO: find a better name?
+function forward_prefetch_dependencies!(scheduler, deps)
+	IdDict{Spec,Any}(dep=>forward_or_prefetch!(scheduler, dep) for dep in deps)
+end
 
 
 
@@ -79,9 +72,8 @@ end
 function _process!(scheduler::Scheduler, spec::Spec)
 	# Possibilities:
 	# 1. We need to preprocess: possibly fetch and then compute(spec, fetched)
-	# 2. We need to forward subspecs and replace subspecs with forwarded subspecs
-	# 3. We need to prefetch and replace prefetched specs with results
-	# 4. We need to fetch and compute (and cache if needed)
+	# 2. We need to forward/prefetch subspecs and replace subspecs with forwarded/prefetched subspecs
+	# 3. We need to fetch and compute (and cache if needed)
 
 	# TODO: avoid code repetions below
 
@@ -92,15 +84,9 @@ function _process!(scheduler::Scheduler, spec::Spec)
 		return preprocess(spec, deps)::Spec
 	end
 
-	if !spec.fully_forwarded
-		@info "Forwarding subspecs for $(get_versioned_function(spec))"
-		# find all dependencies (including those marked for prefetch (how about specs marked as other things?))
-		# fully forward each dependency
-		# replace dependencies with fully forwarded
-
+	if !spec.forwarding_complete
 		forwarded_deps = get_dependencies(spec)::Vector{Spec}
-		forwarded_deps = forward_dependencies!(scheduler, forwarded_deps)
-
+		forwarded_deps = forward_prefetch_dependencies!(scheduler, forwarded_deps)
 		replacer = _arg_replacer(forwarded_deps)
 
 		sa = spec.ro.value
@@ -110,22 +96,6 @@ function _process!(scheduler::Scheduler, spec::Spec)
 		sa_forwarded = SpecArgs(args, kwargs)
 		sa_forwarded = default_deduplicator()(sa_forwarded) # TODO: avoid using default_deduplicator() here - we need to get it from somewhere
 		return Spec(sa_forwarded, spec.use_cache, true)
-	end
-
-	prefetch_deps = get_prefetch_dependencies(spec)
-	if !isempty(prefetch_deps)
-		@info "Prefetching subspecs for $(get_versioned_function(spec))"
-		prefetch_deps = fetch_dependencies!(scheduler, prefetch_deps)
-
-		replacer = _arg_replacer(prefetch_deps)
-
-		sa = spec.ro.value
-		args = Any[copy_nested(replacer, a) for a in sa.args]
-		kwargs = Pair{Symbol,Any}[k=>copy_nested(replacer,v) for (k,v) in sa.kwargs]
-
-		sa_prefetched = SpecArgs(args, kwargs)
-		sa_prefetched = default_deduplicator()(sa_prefetched) # TODO: avoid using default_deduplicator() here - we need to get it from somewhere
-		return Spec(sa_prefetched, spec.use_cache, spec.fully_forwarded)
 	end
 
 	if spec.use_cache
@@ -142,7 +112,7 @@ function process!(scheduler::Scheduler, spec::Spec, mode::Symbol)
 	@assert mode in (:forward_once,:forward,:compute)
 
 	while true
-		if spec.fully_forwarded && mode in (:forward_once, :forward)
+		if spec.forwarding_complete && mode in (:forward_once, :forward)
 			return spec
 		end
 
@@ -161,6 +131,12 @@ end
 fetch!(scheduler::Scheduler, spec::Spec) = process!(scheduler, spec, :compute)
 forward!(scheduler::Scheduler, spec::Spec) = process!(scheduler, spec, :forward)
 forward_once!(scheduler::Scheduler, spec::Spec) = process!(scheduler, spec, :forward_once)
+
+# TODO: find a better name?
+function forward_or_prefetch!(scheduler, spec)
+	mode = _get_kwarg(spec, :__fetched, false) ? :compute : :forward
+	process!(scheduler, spec, mode)
+end
 
 
 
