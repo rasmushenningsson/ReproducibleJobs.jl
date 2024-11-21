@@ -1,4 +1,4 @@
-preprocess_copy(x) = copy(x)
+# preprocess_copy(x) = copy(x)
 
 
 # TODO: We might want to avoid dynamic below to speed it up. But that's for later.
@@ -52,21 +52,40 @@ end
 
 
 
-preprocessor(dedup::Deduplicator) = Base.Fix1(preprocess, dedup)
+# preprocessor(dedup) = Base.Fix1(preprocess, dedup)
 
-function preprocess(dedup::Deduplicator, a::Array)
-	r = ReadOnlyArray(a)
-	_is_leaf(r) ? dedup(r) : r
-end
-preprocess(dedup::Deduplicator, d::Dict) = _is_leaf(d) ? dedup(d) : d
-preprocess(dedup::Deduplicator, s::Set) = _is_leaf(s) ? dedup(s) : s
+# function preprocess(dedup, a::Array)
+# 	r = ReadOnlyArray(a)
+# 	_is_leaf(r) ? dedup(r) : r
+# end
+# preprocess(dedup, d::Dict) = _is_leaf(d) ? dedup(d) : d
+# preprocess(dedup, s::Set) = _is_leaf(s) ? dedup(s) : s
 
-preprocess(::Deduplicator, x::Any) = preprocess(x)
+# preprocess(::Any, x::Any) = preprocess(x)
 
-preprocess(x::AbstractString) = string(x) # Standardize strings
-preprocess(x::Symbol) = x # symbols are immutable, pass through
-preprocess(f::VersionedFunction) = f
-preprocess(f::Union{<:Base.Fix1,<:Base.Fix2}) = f # TODO: revise (or revise in copy_nested)
+# preprocess(x::AbstractString) = string(x) # Standardize strings
+# preprocess(x::Symbol) = x # symbols are immutable, pass through
+# preprocess(f::VersionedFunction) = f
+# preprocess(f::Union{<:Base.Fix1,<:Base.Fix2}) = f # TODO: revise (or revise in copy_nested)
 
 
-preprocess(x::Any) = preprocess_copy(x)
+# preprocess(x::Any) = preprocess_copy(x)
+
+
+
+
+preprocess(a::Array) = ReadOnlyArray(a)
+preprocess(x::Any) = x
+
+preprocess_copy(x::Union{<:ReadOnlyArray,<:Dict,<:Set}) = x # already copied in copy_nested
+preprocess_copy(x::AbstractString) = string(x) # Standardize strings
+preprocess_copy(x::Symbol) = x # symbols are immutable, pass through
+preprocess_copy(f::VersionedFunction) = f
+preprocess_copy(f::Union{<:Base.Fix1,<:Base.Fix2}) = f # TODO: revise (or revise in copy_nested)
+preprocess_copy(x) = copy(x)
+
+deduplicate_leaves(dedup::Deduplicator) = Base.Fix1(deduplicate_leaves, dedup)
+deduplicate_leaves(dedup::Deduplicator, x::Union{<:ReadOnlyArray,<:Dict,<:Set}) =
+	_is_leaf(x) ? dedup(x) : x
+deduplicate_leaves(::Deduplicator, x::Any) = x
+

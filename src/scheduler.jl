@@ -25,13 +25,33 @@ function _unwrap_value(x, upstream)
 	x
 end
 
-fetch_dependencies!(scheduler, deps) = IdDict{Spec,Any}(dep=>fetch!(scheduler, dep) for dep in deps)
+
+function fetch_dependency!(scheduler, spec)
+	res = fetch!(scheduler, spec)
+	# Preprocess - but do not copy nor deduplicate! The result can be large and is just used for the computation at hand
+	# It's important that preprocess is done to get the same exact inputs as if the spec was prefetched
+	res = copy_nested(preprocess, res)
+end
+
+fetch_dependencies!(scheduler, deps) = IdDict{Spec,Any}(dep=>fetch_dependency!(scheduler,dep) for dep in deps)
 
 
 # TODO: find a better name?
-function forward_prefetch_dependencies!(scheduler, deps)
-	IdDict{Spec,Any}(dep=>forward_or_prefetch!(scheduler, dep) for dep in deps)
+function forward_or_prefetch!(scheduler, spec)
+	prefetch = _get_kwarg(spec, :__fetched, false)
+	res = process!(scheduler, spec, prefetch ? :compute : :forward)
+
+	if prefetch
+		# NB: Same as when creating spec except no preprocess_copy, because that cannot have a reasonable default
+		f = deduplicate_leaves(default_deduplicator())∘preprocess # TODO: avoid using default_deduplicator() here - we need to get it from somewhere
+		res = copy_nested(f, res)
+	end
+	res
 end
+
+# TODO: find a better name?
+forward_prefetch_dependencies!(scheduler, deps) =
+	IdDict{Spec,Any}(dep=>forward_or_prefetch!(scheduler, dep) for dep in deps)
 
 
 
@@ -131,13 +151,6 @@ end
 fetch!(scheduler::Scheduler, spec::Spec) = process!(scheduler, spec, :compute)
 forward!(scheduler::Scheduler, spec::Spec) = process!(scheduler, spec, :forward)
 forward_once!(scheduler::Scheduler, spec::Spec) = process!(scheduler, spec, :forward_once)
-
-# TODO: find a better name?
-function forward_or_prefetch!(scheduler, spec)
-	mode = _get_kwarg(spec, :__fetched, false) ? :compute : :forward
-	process!(scheduler, spec, mode)
-end
-
 
 
 # --- printing ---
