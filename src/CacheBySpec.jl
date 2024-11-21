@@ -19,7 +19,10 @@ export
 	forward,
 	forward_once!,
 	forward_once,
-	prefetch
+	prefetch,
+	ifelse_spec,
+	ifelse_job
+
 
 include("read_only.jl")
 include("nested.jl")

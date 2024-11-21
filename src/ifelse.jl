@@ -12,5 +12,7 @@ function get_dependencies(::typeof(ifelse_eval), spec::Spec)
 	deps
 end
 
-create_ifelse_spec(cond, x, y; kwargs...) =
+ifelse_spec(cond, x, y; kwargs...) =
 	create_spec(cond, x, y; __versionedfunction=VersionedFunction(ifelse_eval,v"0.1.0"), kwargs...)
+
+ifelse_job(args...; kwargs...) = Job(ifelse_spec(args...; kwargs...))
