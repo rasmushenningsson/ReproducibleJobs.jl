@@ -17,7 +17,8 @@ struct PrintReference
 end
 
 printreference(::T) where T = PrintReference(_nameof(T))
-printreference(sa::SpecArgs) = PrintReference(string(get_versioned_function(sa).f))
+printreference(sa::SpecArgs; prefetch) =
+	PrintReference(string(get_versioned_function(sa).f, prefetch ? " (prefetched)" : ""))
 
 Base.show(io::IO, ref::PrintReference) = print(io, ref.str)
 
@@ -27,7 +28,7 @@ struct PrintFetched
 end
 function Base.show(io::IO, x::PrintFetched)
 	show(io, x.f)
-	print(io, " (fetched)")
+	print(io, " (prefetched)")
 end
 
 
@@ -206,23 +207,23 @@ end
 
 
 # Unwrap Spec
-to_print_node!(pc::PrintContext, spec::Spec, name, h) = to_print_node!(pc, spec.ro, name, h)
+to_print_node!(pc::PrintContext, spec::Spec, name, h) = to_print_node!(pc, spec.ro, name, h; spec.prefetch)
 
 # Unwrap ReadOnly
-function to_print_node!(pc::PrintContext, ro::ReadOnly, name, h)
+function to_print_node!(pc::PrintContext, ro::ReadOnly, name, h; kwargs...)
 	@assert h === nothing
 	if ro.h in pc.hashes
 		get!(pc.duplicates, ro.h, length(pc.duplicates)+1)
-		create_print_node(pc, name, ro.h, printreference(ro.value); item_color=:blue) # TODO: color differently for Spec?
+		create_print_node(pc, name, ro.h, printreference(ro.value; kwargs...); item_color=:blue) # TODO: color differently for Spec?
 	else
 		# first time we see the node
 		push!(pc.hashes, ro.h)
-		to_print_node!(pc, ro.value, name, ro.h)
+		to_print_node!(pc, ro.value, name, ro.h; kwargs...)
 	end
 end
 
 
-function to_print_node!(pc::PrintContext, sa::SpecArgs, name, h)
+function to_print_node!(pc::PrintContext, sa::SpecArgs, name, h; prefetch)
 	c1 = to_print_node!.(Ref(descend(pc)), sa.args)
 	c2 = [to_print_node!(descend(pc),v,k,nothing) for (k,v) in sa.kwargs if !startswith(string(k),"__")] # skip "hidden" kwargs
 	children = vcat(c1,c2)
@@ -236,10 +237,9 @@ function to_print_node!(pc::PrintContext, sa::SpecArgs, name, h)
 		item_color = :red
 	end
 
-	# TODO: fix printing for prefetched
-	# if _get_kwarg(sa, :__fetched, false)
-	# 	f = PrintFetched(f)
-	# end
+	if prefetch
+		f = PrintFetched(f)
+	end
 
 	create_print_node(pc, name, h, f; children, item_color)
 end
