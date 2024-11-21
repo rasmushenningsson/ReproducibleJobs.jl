@@ -1,5 +1,7 @@
 _nameof(::Type{T}) where T = Symbol(first(eachsplit(repr(T),'{')))
 _nameof(::Type{<:NamedTuple}) = Symbol("NamedTuple") # is there a better way to avoid @NamedTuple?
+_nameof(::Type{<:ReadOnlyArray{V,N,T}}) where {V,N,T} = _nameof(T)
+
 _typenameof(x::T) where T = _nameof(T)
 
 struct PrintContext
@@ -46,10 +48,10 @@ wrap_item(x) = x
 wrap_item(x::Union{<:Base.Fix1,<:Base.Fix2}) = ItemWrapper(x)
 wrap_item(x::AbstractString) = ItemWrapper(x)
 
-wrap_item(x::Union{<:Array,<:Tuple}) = wrap_item.(x)
+wrap_item(x::Union{<:AbstractArray,<:Tuple}) = wrap_item.(x)
 wrap_item(p::Pair) = wrap_item(p.first) => wrap_item(p.second)
-wrap_item(d::Dict) = Dict((wrap_item(k)=>wrap_item(v) for (k,v) in pairs(d)))
-wrap_item(s::Set) = Set((wrap_item(x) for x in s))
+wrap_item(d::AbstractDict) = Dict((wrap_item(k)=>wrap_item(v) for (k,v) in pairs(d)))
+wrap_item(s::AbstractSet) = Set((wrap_item(x) for x in s))
 wrap_item(nt::NamedTuple) = map(wrap_item, nt)
 
 Base.show(io::IO, w::ItemWrapper) = show(io, w.item)
@@ -97,7 +99,7 @@ function _print_limited_string(io::IO, str::AbstractString, suffix, item_color) 
 	end
 end
 
-function _printitem(io::IO, a::Array, item_color)
+function _printitem(io::IO, a::AbstractArray, item_color)
 	# This is a bit of a hack.
 	# Print to a string and skip the initial type info.
 	# But otherwise we need to rewrite the entire Array printing, or rely on internals.
@@ -107,7 +109,7 @@ function _printitem(io::IO, a::Array, item_color)
 	_print_limited_string(io, str, "...]", item_color)
 end
 
-function _printitem(io::IO, a::Dict, item_color)
+function _printitem(io::IO, a::AbstractDict, item_color)
 	# This is a bit of a hack.
 	# Print to a string and skip the initial type info.
 	# But otherwise we need to rewrite the entire Dict printing, or rely on internals.
@@ -156,7 +158,7 @@ function _should_collapse(::Type{T}) where T
 end
 
 
-function to_print_node!(pc::PrintContext, x::Array{T}, name, h) where T
+function to_print_node!(pc::PrintContext, x::AbstractArray{T}, name, h) where T
 	if _should_collapse(T)
 		create_print_node(pc, name, h, x)
 	else
@@ -164,7 +166,7 @@ function to_print_node!(pc::PrintContext, x::Array{T}, name, h) where T
 	end
 end
 
-function to_print_node!(pc::PrintContext, d::Dict{K,V}, name, h) where {K,V}
+function to_print_node!(pc::PrintContext, d::AbstractDict{K,V}, name, h) where {K,V}
 	if _should_collapse(K)
 		if _should_collapse(V)
 			create_print_node(pc, name, h, d)
@@ -177,7 +179,7 @@ function to_print_node!(pc::PrintContext, d::Dict{K,V}, name, h) where {K,V}
 		create_print_node(pc, name, h, _typenameof(d); children, item_color=:magenta)
 	end
 end
-function to_print_node!(pc::PrintContext, s::Set{T}, name, h) where T
+function to_print_node!(pc::PrintContext, s::AbstractSet{T}, name, h) where T
 	if _should_collapse(T)
 		create_print_node(pc, name, h, s)
 	else
