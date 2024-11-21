@@ -12,6 +12,11 @@ let scheduler_singleton = Scheduler()
 end
 
 
+
+
+_arg_replacer(upstream) = Base.Fix2(_arg_replacer, upstream)
+_arg_replacer(x, upstream) = get(upstream, x, x) # replaces prefetched specs by the value, and leaves everything else in place
+
 _unwrap_value(upstream) = Base.Fix2(_unwrap_value, upstream)
 function _unwrap_value(x, upstream)
 	# Manual dispatch since we have few types
@@ -21,7 +26,44 @@ function _unwrap_value(x, upstream)
 end
 
 
-# Maps spec and dependencies to f, args, kwargs so function can be called
+function fetch_dependency!(scheduler, spec)
+	res = fetch!(scheduler, spec)
+	# Process args - but do not copy nor deduplicate! The result can be large and is just used for the computation at hand
+	# It's important that process_arg is done to get the same exact inputs as if the spec was prefetched
+	res = copy_nested(process_arg, res)
+end
+
+fetch_dependencies!(scheduler, deps) = IdDict{Spec,Any}(dep=>fetch_dependency!(scheduler,dep) for dep in deps)
+
+
+# TODO: find a better name?
+function forward_or_prefetch!(scheduler, spec)
+	res = process!(scheduler, spec, spec.prefetch ? :compute : :forward)
+
+	if spec.prefetch
+		# NB: Same as when creating spec except no copy_arg, because that cannot have a reasonable default
+		f = deduplicate_leaves(default_deduplicator())∘process_arg # TODO: avoid using default_deduplicator() here - we need to get it from somewhere
+		res = copy_nested(f, res)
+	end
+	res
+end
+
+# TODO: find a better name?
+forward_prefetch_dependencies!(scheduler, deps) =
+	IdDict{Spec,Any}(dep=>forward_or_prefetch!(scheduler, dep) for dep in deps)
+
+
+
+function preprocess(spec::Spec, upstream::IdDict{Spec,Any})
+	vf = get_versioned_function(spec)
+
+	@info "Preprocessing $vf"
+	res = vf.f(spec, upstream)
+	@assert res !== nothing "Preprocessing of $vf returned nothing"
+	res
+end
+
+
 function compute(spec::Spec, upstream::IdDict{Spec,Any})
 	vf = get_versioned_function(spec)
 	sa = _get_spec_args(spec)
@@ -31,57 +73,82 @@ function compute(spec::Spec, upstream::IdDict{Spec,Any})
 	kwargs = (copy_nested(unwrapper, k)=>copy_nested(unwrapper,v) for (k,v) in sa.kwargs if !startswith(string(k),"__"))
 
 	@info "Running $vf"
-	vf.f(args...; kwargs...)
+	res = vf.f(args...; kwargs...)
+	@assert res !== nothing "Computation of $vf returned nothing"
+	res
 end
 
-function fetch_dependencies!(scheduler, spec)
-	# Fetch dependencies
-	upstream = IdDict{Spec,Any}()
-	visit_dependencies(spec) do dep
-		upstream[dep] = fetch!(scheduler, dep) # always forward in here
+
+function _fetch_and_compute!(scheduler, spec)
+	deps = get_dependencies(spec)::Vector{Spec}
+	deps = fetch_dependencies!(scheduler, deps)
+	res = compute(spec, deps)
+	@assert !(res isa Spec)
+	res
+end
+
+
+function _process!(scheduler::Scheduler, spec::Spec)
+	# Possibilities:
+	# 1. We need to preprocess: possibly fetch and then compute(spec, fetched)
+	# 2. We need to forward/prefetch subspecs and replace subspecs with forwarded/prefetched subspecs
+	# 3. We need to fetch and compute (and cache if needed)
+
+	# TODO: avoid code repetions below
+
+	if is_preprocessing(spec)
+		deps = get_dependencies(spec)::Vector{Spec}
+		deps = fetch_dependencies!(scheduler, deps)
+		return preprocess(spec, deps)::Spec
 	end
-	upstream
+
+	if !spec.forwarding_complete
+		forwarded_deps = get_dependencies(spec)::Vector{Spec}
+		forwarded_deps = forward_prefetch_dependencies!(scheduler, forwarded_deps)
+		replacer = _arg_replacer(forwarded_deps)
+
+		sa = spec.ro.value
+		args = Any[copy_nested(replacer, a) for a in sa.args]
+		kwargs = Pair{Symbol,Any}[k=>copy_nested(replacer,v) for (k,v) in sa.kwargs]
+
+		sa_forwarded = SpecArgs(args, kwargs)
+		sa_forwarded = default_deduplicator()(sa_forwarded) # TODO: avoid using default_deduplicator() here - we need to get it from somewhere
+		return Spec(sa_forwarded, spec.use_cache, true, spec.prefetch)
+	end
+
+	if spec.use_cache
+		return cache_get!(spec) do
+			_fetch_and_compute!(scheduler, spec)
+		end
+	else
+		@info "Bypassing cache"
+		return _fetch_and_compute!(scheduler, spec)
+	end
 end
 
+function process!(scheduler::Scheduler, spec::Spec, mode::Symbol)
+	@assert mode in (:forward_once,:forward,:compute)
 
-function fetch!(scheduler::Scheduler, spec::Spec; forward=true)
-	result = get!(scheduler.results, spec) do
-		# If it's in the cache, we don't need to fetch! upstream jobs
-		res = nothing
-		if spec.use_cache
-			res = cache_get(spec, nothing)
-
-			# Since the Spec was loaded from file, it has not been deduplicated in this session, so we need to do that here.
-			if res isa Spec
-				res = default_deduplicator()(res) # TODO: avoid using default_deduplicator() here - get from scheduler somehow
-			end
+	while true
+		if spec.forwarding_complete && mode in (:forward_once, :forward)
+			return spec
 		end
 
-		if res === nothing # Not found in cache
-			preprocess_fun = _get_kwarg(spec, :__preprocess_spec, nothing)
-
-			if preprocess_fun !== nothing
-				# Preprocess without fetching dependencies
-				res = (preprocess_fun::VersionedFunction).f(spec)
-			else
-				upstream = fetch_dependencies!(scheduler, spec)
-				res = compute(spec, upstream)
-			end
-
-			if spec.use_cache
-				cache_insert!(spec, res) # No need to check cache here, that was done above.
-			else
-				@info "Bypassing cache"
-			end
+		res = get!(scheduler.results, spec) do
+			_process!(scheduler, spec)
 		end
-		res
-	end
 
-	if forward && result isa Spec
-		result = fetch!(scheduler, result; forward)
+		res isa Spec || return res
+		spec = res::Spec
+
+		mode == :forward_once && return spec
 	end
-	result
 end
+
+
+fetch!(scheduler::Scheduler, spec::Spec) = process!(scheduler, spec, :compute)
+forward!(scheduler::Scheduler, spec::Spec) = process!(scheduler, spec, :forward)
+forward_once!(scheduler::Scheduler, spec::Spec) = process!(scheduler, spec, :forward_once)
 
 
 # --- printing ---

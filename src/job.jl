@@ -7,14 +7,23 @@ end
 Job(spec::Spec) = Job(spec, NotComputed())
 
 
-preprocess(job::Job) = job.spec
-barrier(job::Job) = barrier(job.spec)
-fetched(job::Job) = fetched(job.spec)
+process_arg(job::Job) = job.spec
+_prefetch(job::Job) = _prefetch(job.spec)
 
 
 
-fetch!(job; scheduler=default_scheduler(), kwargs...) =
-	job.result = fetch!(scheduler, job.spec; kwargs...)
+fetch!(job::Job; scheduler=default_scheduler()) =
+	job.result = fetch!(scheduler, job.spec)
+
+function forward(job::Job; scheduler=default_scheduler())
+	spec = forward!(scheduler, job.spec)
+	spec === job.spec ? job : Job(spec)
+end
+function forward_once(job::Job; scheduler=default_scheduler())
+	spec = forward_once!(scheduler, job.spec)
+	spec === job.spec ? job : Job(spec)
+end
+
 
 # --- printing ---
 function Base.show(io::IO, ::MIME"text/plain", job::Job)

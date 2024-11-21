@@ -15,16 +15,22 @@ export
 	Job,
 	print_spec,
 	fetch!,
-	fetched
+	forward!,
+	forward,
+	forward_once!,
+	forward_once,
+	prefetch,
+	ifelse_job,
+	checksummedfilepath_job
+
 
 include("read_only.jl")
 include("nested.jl")
 include("deduplicator.jl")
 include("versioned_function.jl")
-include("preprocessor.jl")
+include("arg_processing.jl")
 include("spec.jl")
-include("barrier.jl")
-include("prefetch.jl")
+include("spec_meta.jl")
 include("spec_printing.jl")
 include("cache.jl")
 include("job.jl")

@@ -1,6 +1,3 @@
-preprocess_copy(x) = copy(x)
-
-
 # TODO: We might want to avoid dynamic below to speed it up. But that's for later.
 
 # _is_leaf_type is only called for concrete types
@@ -52,21 +49,19 @@ end
 
 
 
-preprocessor(dedup::Deduplicator) = Base.Fix1(preprocess, dedup)
 
-function preprocess(dedup::Deduplicator, a::Array)
-	r = ReadOnlyArray(a)
-	_is_leaf(r) ? dedup(r) : r
-end
-preprocess(dedup::Deduplicator, d::Dict) = _is_leaf(d) ? dedup(d) : d
-preprocess(dedup::Deduplicator, s::Set) = _is_leaf(s) ? dedup(s) : s
+process_arg(a::Array) = ReadOnlyArray(a)
+process_arg(x::Any) = x
 
-preprocess(::Deduplicator, x::Any) = preprocess(x)
+copy_arg(x::Union{<:ReadOnlyArray,<:Dict,<:Set}) = x # already copied in copy_nested
+copy_arg(x::AbstractString) = string(x) # Standardize strings
+copy_arg(x::Symbol) = x # symbols are immutable, pass through
+copy_arg(f::VersionedFunction) = f
+copy_arg(f::Union{<:Base.Fix1,<:Base.Fix2}) = f # TODO: revise (or revise in copy_nested)
+copy_arg(x) = copy(x)
 
-preprocess(x::AbstractString) = string(x) # Standardize strings
-preprocess(x::Symbol) = x # symbols are immutable, pass through
-preprocess(f::VersionedFunction) = f
-preprocess(f::Union{<:Base.Fix1,<:Base.Fix2}) = f # TODO: revise (or revise in copy_nested)
+deduplicate_leaves(dedup::Deduplicator) = Base.Fix1(deduplicate_leaves, dedup)
+deduplicate_leaves(dedup::Deduplicator, x::Union{<:ReadOnlyArray,<:Dict,<:Set}) =
+	_is_leaf(x) ? dedup(x) : x
+deduplicate_leaves(::Deduplicator, x::Any) = x
 
-
-preprocess(x::Any) = preprocess_copy(x)

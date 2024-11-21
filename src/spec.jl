@@ -10,11 +10,11 @@ end
 Base.:(==)(a::SpecArgs, b::SpecArgs) = a.args == b.args && a.kwargs == b.kwargs
 
 
-# function create_spec_args(f, args, kwargs)
-# 	a = Any[copy_nested(f,x) for x in args]
-# 	kw = sort!(Pair{Symbol,Any}[copy_nested(f,p) for p in kwargs]; by=first)
-# 	SpecArgs(a,kw)
-# end
+function create_spec_args(f, args, kwargs)
+	a = Any[copy_nested(f,x) for x in args]
+	kw = sort!(Pair{Symbol,Any}[k=>copy_nested(f,v) for (k,v) in kwargs]; by=first)
+	SpecArgs(a,kw)
+end
 
 
 function _get_kwarg_index(sa::SpecArgs, name::Symbol)
@@ -44,45 +44,23 @@ StableHashTraits.transformer(::Type{<:SpecArgs}) = StableHashTraits.Transformer(
 struct Spec
 	ro::ReadOnly{SpecArgs}
 	use_cache::Bool
+	forwarding_complete::Bool
+	prefetch::Bool
 end
 
 
 deduplicate_type(::Deduplicator, ::Type{Spec}) = false
 
-
 _is_leaf_type(::Type{Spec}) = false
-preprocess(spec::Spec) = spec # Already managed, no need to copy
+copy_arg(spec::Spec) = spec # Already managed, no need to copy
 
 
-
-
-
-function create_spec(args...; deduplicator=default_deduplicator(), use_cache=true, kwargs...)
-	# sa = create_spec_args(preprocess(deduplicator), args, kwargs)
-
-	f = preprocessor(deduplicator)
-	a = Any[copy_nested(f,x) for x in args]
-	kw = Pair{Symbol,Any}[copy_nested(f,p) for p in kwargs]
-
-
-	should_prefetch = false
-	# TODO: avoid duplicate code
-	visit_dependencies(a) do x
-		should_prefetch = should_prefetch || any(isequal(:__fetched=>true), _get_spec_args(x).kwargs)
-	end
-	visit_dependencies(kw) do x
-		should_prefetch = should_prefetch || any(isequal(:__fetched=>true), _get_spec_args(x).kwargs)
-	end
-
-	if should_prefetch
-		push!(kw, :__preprocess_spec=>VersionedFunction(setup_prefetching_spec,v"0.0.1"))
-	end
-
-	sort!(kw; by=first)
-
-	sa = SpecArgs(a, kw)
+function create_spec(args...; deduplicator=default_deduplicator(), use_cache=true, prefetch=false, kwargs...)
+	f = deduplicate_leaves(deduplicator)∘copy_arg∘process_arg
+	# sa = create_spec_args(preprocessor(deduplicator), args, kwargs)
+	sa = create_spec_args(f, args, kwargs)
 	sa = deduplicator(sa)
-	Spec(sa, use_cache)
+	Spec(sa, use_cache, false, prefetch)
 end
 
 
@@ -114,7 +92,14 @@ visit_dependencies(f, spec::Spec) = visit_dependencies(f, _get_spec_args(spec))
 
 
 
-deduplicate!(dedup::Deduplicator, spec::Spec) =	Spec(deduplicate!(dedup, spec.ro), spec.use_cache)
+deduplicate!(dedup::Deduplicator, spec::Spec) = Spec(deduplicate!(dedup, spec.ro), spec.use_cache, spec.forwarding_complete, spec.prefetch)
+
+
+
+
+_prefetch(spec::Spec) = Spec(spec.ro, spec.use_cache, spec.forwarding_complete, true)
+_prefetch(x) = x
+prefetch(x::Any) = copy_nested(_prefetch, x)
 
 
 
