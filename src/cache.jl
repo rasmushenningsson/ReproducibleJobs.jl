@@ -6,7 +6,11 @@ let cache = Cache(@get_scratch!("CacheBySpec"))
 	global get_cache() = cache
 end
 
-spec2path(cache::Cache, spec::Spec) = joinpath(cache.dir, string(get_hash(spec),".jld2"))
+function spec2path(cache::Cache, spec::Spec)
+	@assert spec.use_cache
+	@assert spec.forwarding_complete
+	joinpath(cache.dir, string(get_hash(spec),".jld2"))
+end
 
 
 function cache_load(cache::Cache, fp, spec::Spec)
@@ -37,7 +41,7 @@ end
 
 function cache_insert!(cache::Cache, spec::Spec, value)
 	fp = spec2path(cache, spec)
-	isfile(fp) && error("cache_insert! expects a spec that is not already in the cache. Got $spec with hash $(spec.ro.h).")
+	isfile(fp) && error("cache_insert! expects a spec that is not already in the cache. Got $(get_versioned_function(spec)) with hash $(spec.ro.h).")
 
 	jldsave(fp, true; spec, value) # compress=true
 	return value
