@@ -96,6 +96,13 @@ deduplicate!(dedup::Deduplicator, spec::Spec) = Spec(deduplicate!(dedup, spec.ro
 
 
 
+
+_prefetch(spec::Spec) = Spec(spec.ro, spec.use_cache, spec.forwarding_complete, true)
+_prefetch(x) = x
+prefetch(x::Any) = copy_nested(_prefetch, x)
+
+
+
 # --- printing ---
 function Base.show(io::IO, spec::Spec)
 	if get(io,:compact,false)
