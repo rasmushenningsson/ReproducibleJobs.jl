@@ -1,6 +1,3 @@
-# preprocess_copy(x) = copy(x)
-
-
 # TODO: We might want to avoid dynamic below to speed it up. But that's for later.
 
 # _is_leaf_type is only called for concrete types
@@ -49,27 +46,6 @@ function _is_leaf(s::Set{T}) where T
 	end
 	return true
 end
-
-
-
-# preprocessor(dedup) = Base.Fix1(preprocess, dedup)
-
-# function preprocess(dedup, a::Array)
-# 	r = ReadOnlyArray(a)
-# 	_is_leaf(r) ? dedup(r) : r
-# end
-# preprocess(dedup, d::Dict) = _is_leaf(d) ? dedup(d) : d
-# preprocess(dedup, s::Set) = _is_leaf(s) ? dedup(s) : s
-
-# preprocess(::Any, x::Any) = preprocess(x)
-
-# preprocess(x::AbstractString) = string(x) # Standardize strings
-# preprocess(x::Symbol) = x # symbols are immutable, pass through
-# preprocess(f::VersionedFunction) = f
-# preprocess(f::Union{<:Base.Fix1,<:Base.Fix2}) = f # TODO: revise (or revise in copy_nested)
-
-
-# preprocess(x::Any) = preprocess_copy(x)
 
 
 
