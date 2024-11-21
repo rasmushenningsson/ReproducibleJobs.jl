@@ -13,6 +13,7 @@ end
 
 
 
+
 _arg_replacer(upstream) = Base.Fix1(_arg_replacer, upstream)
 _arg_replacer(upstream, x) = get(upstream, x, x) # replaces prefetched specs by the value, and leaves everything else in place
 
@@ -40,6 +41,17 @@ fetch_dependencies!(scheduler, deps) = IdDict{Spec,Any}(dep=>fetch!(scheduler, d
 forward_dependencies!(scheduler, deps) = IdDict{Spec,Any}(dep=>forward!(scheduler, dep) for dep in deps)
 
 
+
+function preprocess(spec::Spec, upstream::IdDict{Spec,Any})
+	vf = get_versioned_function(spec)
+
+	@info "Preprocessing $vf"
+	res = vf.f(spec, upstream)
+	@assert res !== nothing "Preprocessing of $vf returned nothing"
+	res
+end
+
+
 function compute(spec::Spec, upstream::IdDict{Spec,Any})
 	vf = get_versioned_function(spec)
 	sa = _get_spec_args(spec)
@@ -50,7 +62,7 @@ function compute(spec::Spec, upstream::IdDict{Spec,Any})
 
 	@info "Running $vf"
 	res = vf.f(args...; kwargs...)
-	@assert res !== nothing "Computation of $(get_versioned_function(spec)) returned nothing"
+	@assert res !== nothing "Computation of $vf returned nothing"
 	res
 end
 
@@ -58,7 +70,9 @@ end
 function _fetch_and_compute!(scheduler, spec)
 	deps = get_dependencies(spec)::Vector{Spec}
 	deps = fetch_dependencies!(scheduler, deps)
-	compute(spec, deps)
+	res = compute(spec, deps)
+	@assert !(res isa Spec)
+	res
 end
 
 
@@ -75,7 +89,7 @@ function _process!(scheduler::Scheduler, spec::Spec)
 		@info "Preprocessing $(get_versioned_function(spec))"
 		deps = get_dependencies(spec)::Vector{Spec}
 		deps = fetch_dependencies!(scheduler, deps)
-		return res = compute(spec, deps)
+		return preprocess(spec, deps)::Spec
 	end
 
 	if !spec.fully_forwarded

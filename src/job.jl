@@ -13,8 +13,18 @@ fetched(job::Job) = fetched(job.spec)
 
 
 
-fetch!(job::Job; scheduler=default_scheduler(), kwargs...) =
-	job.result = fetch!(scheduler, job.spec; kwargs...)
+fetch!(job::Job; scheduler=default_scheduler()) =
+	job.result = fetch!(scheduler, job.spec)
+
+function forward!(job::Job; scheduler=default_scheduler())
+	spec = forward!(scheduler, job.spec)
+	spec === job.spec ? job : Job(spec)
+end
+function forward_once!(job::Job; scheduler=default_scheduler())
+	spec = forward_once!(scheduler, job.spec)
+	spec === job.spec ? job : Job(spec)
+end
+
 
 # --- printing ---
 function Base.show(io::IO, ::MIME"text/plain", job::Job)
