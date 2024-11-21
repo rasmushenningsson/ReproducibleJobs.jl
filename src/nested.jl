@@ -4,12 +4,12 @@ visit_nested(f, pred, x) = f(x)
 # visit_nested(f, pred, ro::ReadOnly) = visit_nested(f, pred, ro.value)
 # NB: visit_nested should not go into ReadOnlys, they are considered "leaves"
 
-function visit_nested(f, pred, a::Union{<:Array,<:Tuple,<:NamedTuple,<:Set})
+function visit_nested(f, pred, a::Union{<:AbstractArray,<:Tuple,<:NamedTuple,<:AbstractSet})
 	for x in a
 		pred(x) && visit_nested(f, pred, x) # pred let us handle e.g. an Array{Array{Int}} that we do not need to traverse when looking for Specs
 	end
 end
-function visit_nested(f, pred, d::Dict)
+function visit_nested(f, pred, d::AbstractDict)
 	for (k,v) in d
 		pred(k) && visit_nested(f, pred, k)
 		pred(v) && visit_nested(f, pred, v)
