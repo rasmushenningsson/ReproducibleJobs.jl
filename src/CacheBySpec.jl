@@ -16,7 +16,9 @@ export
 	print_spec,
 	fetch!,
 	forward!,
+	forward,
 	forward_once!,
+	forward_once,
 	prefetch
 
 include("read_only.jl")

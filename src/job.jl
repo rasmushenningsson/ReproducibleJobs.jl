@@ -15,11 +15,11 @@ _prefetch(job::Job) = _prefetch(job.spec)
 fetch!(job::Job; scheduler=default_scheduler()) =
 	job.result = fetch!(scheduler, job.spec)
 
-function forward!(job::Job; scheduler=default_scheduler())
+function forward(job::Job; scheduler=default_scheduler())
 	spec = forward!(scheduler, job.spec)
 	spec === job.spec ? job : Job(spec)
 end
-function forward_once!(job::Job; scheduler=default_scheduler())
+function forward_once(job::Job; scheduler=default_scheduler())
 	spec = forward_once!(scheduler, job.spec)
 	spec === job.spec ? job : Job(spec)
 end
