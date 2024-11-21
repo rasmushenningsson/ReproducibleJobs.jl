@@ -28,9 +28,9 @@ end
 
 function fetch_dependency!(scheduler, spec)
 	res = fetch!(scheduler, spec)
-	# Preprocess - but do not copy nor deduplicate! The result can be large and is just used for the computation at hand
-	# It's important that preprocess is done to get the same exact inputs as if the spec was prefetched
-	res = copy_nested(preprocess, res)
+	# Process args - but do not copy nor deduplicate! The result can be large and is just used for the computation at hand
+	# It's important that process_arg is done to get the same exact inputs as if the spec was prefetched
+	res = copy_nested(process_arg, res)
 end
 
 fetch_dependencies!(scheduler, deps) = IdDict{Spec,Any}(dep=>fetch_dependency!(scheduler,dep) for dep in deps)
@@ -42,8 +42,8 @@ function forward_or_prefetch!(scheduler, spec)
 	res = process!(scheduler, spec, prefetch ? :compute : :forward)
 
 	if prefetch
-		# NB: Same as when creating spec except no preprocess_copy, because that cannot have a reasonable default
-		f = deduplicate_leaves(default_deduplicator())∘preprocess # TODO: avoid using default_deduplicator() here - we need to get it from somewhere
+		# NB: Same as when creating spec except no copy_arg, because that cannot have a reasonable default
+		f = deduplicate_leaves(default_deduplicator())∘process_arg # TODO: avoid using default_deduplicator() here - we need to get it from somewhere
 		res = copy_nested(f, res)
 	end
 	res

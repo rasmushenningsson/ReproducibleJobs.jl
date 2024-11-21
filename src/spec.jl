@@ -53,14 +53,14 @@ deduplicate_type(::Deduplicator, ::Type{Spec}) = false
 
 
 _is_leaf_type(::Type{Spec}) = false
-preprocess_copy(spec::Spec) = spec # Already managed, no need to copy
+copy_arg(spec::Spec) = spec # Already managed, no need to copy
 
 
 
 
 
 function create_spec(args...; deduplicator=default_deduplicator(), use_cache=true, kwargs...)
-	f = deduplicate_leaves(deduplicator)∘preprocess_copy∘preprocess
+	f = deduplicate_leaves(deduplicator)∘copy_arg∘process_arg
 	# sa = create_spec_args(preprocessor(deduplicator), args, kwargs)
 	sa = create_spec_args(f, args, kwargs)
 	sa = deduplicator(sa)

@@ -50,15 +50,15 @@ end
 
 
 
-preprocess(a::Array) = ReadOnlyArray(a)
-preprocess(x::Any) = x
+process_arg(a::Array) = ReadOnlyArray(a)
+process_arg(x::Any) = x
 
-preprocess_copy(x::Union{<:ReadOnlyArray,<:Dict,<:Set}) = x # already copied in copy_nested
-preprocess_copy(x::AbstractString) = string(x) # Standardize strings
-preprocess_copy(x::Symbol) = x # symbols are immutable, pass through
-preprocess_copy(f::VersionedFunction) = f
-preprocess_copy(f::Union{<:Base.Fix1,<:Base.Fix2}) = f # TODO: revise (or revise in copy_nested)
-preprocess_copy(x) = copy(x)
+copy_arg(x::Union{<:ReadOnlyArray,<:Dict,<:Set}) = x # already copied in copy_nested
+copy_arg(x::AbstractString) = string(x) # Standardize strings
+copy_arg(x::Symbol) = x # symbols are immutable, pass through
+copy_arg(f::VersionedFunction) = f
+copy_arg(f::Union{<:Base.Fix1,<:Base.Fix2}) = f # TODO: revise (or revise in copy_nested)
+copy_arg(x) = copy(x)
 
 deduplicate_leaves(dedup::Deduplicator) = Base.Fix1(deduplicate_leaves, dedup)
 deduplicate_leaves(dedup::Deduplicator, x::Union{<:ReadOnlyArray,<:Dict,<:Set}) =
