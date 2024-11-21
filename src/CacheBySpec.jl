@@ -17,7 +17,7 @@ export
 	fetch!,
 	forward!,
 	forward_once!,
-	fetched
+	prefetch
 
 include("read_only.jl")
 include("nested.jl")

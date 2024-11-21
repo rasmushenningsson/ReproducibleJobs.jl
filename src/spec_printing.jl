@@ -236,9 +236,10 @@ function to_print_node!(pc::PrintContext, sa::SpecArgs, name, h)
 		item_color = :red
 	end
 
-	if _get_kwarg(sa, :__fetched, false)
-		f = PrintFetched(f)
-	end
+	# TODO: fix printing for prefetched
+	# if _get_kwarg(sa, :__fetched, false)
+	# 	f = PrintFetched(f)
+	# end
 
 	create_print_node(pc, name, h, f; children, item_color)
 end

@@ -45,26 +45,22 @@ struct Spec
 	ro::ReadOnly{SpecArgs}
 	use_cache::Bool
 	forwarding_complete::Bool
+	prefetch::Bool
 end
-Spec(ro::ReadOnly{SpecArgs}, use_cache::Bool) = Spec(ro, use_cache, false)
 
 
 deduplicate_type(::Deduplicator, ::Type{Spec}) = false
-
 
 _is_leaf_type(::Type{Spec}) = false
 copy_arg(spec::Spec) = spec # Already managed, no need to copy
 
 
-
-
-
-function create_spec(args...; deduplicator=default_deduplicator(), use_cache=true, kwargs...)
+function create_spec(args...; deduplicator=default_deduplicator(), use_cache=true, prefetch=false, kwargs...)
 	f = deduplicate_leaves(deduplicator)∘copy_arg∘process_arg
 	# sa = create_spec_args(preprocessor(deduplicator), args, kwargs)
 	sa = create_spec_args(f, args, kwargs)
 	sa = deduplicator(sa)
-	Spec(sa, use_cache)
+	Spec(sa, use_cache, false, prefetch)
 end
 
 
@@ -96,7 +92,7 @@ visit_dependencies(f, spec::Spec) = visit_dependencies(f, _get_spec_args(spec))
 
 
 
-deduplicate!(dedup::Deduplicator, spec::Spec) =	Spec(deduplicate!(dedup, spec.ro), spec.use_cache)
+deduplicate!(dedup::Deduplicator, spec::Spec) = Spec(deduplicate!(dedup, spec.ro), spec.use_cache, spec.forwarding_complete, spec.prefetch)
 
 
 

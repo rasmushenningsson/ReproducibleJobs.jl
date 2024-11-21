@@ -38,10 +38,9 @@ fetch_dependencies!(scheduler, deps) = IdDict{Spec,Any}(dep=>fetch_dependency!(s
 
 # TODO: find a better name?
 function forward_or_prefetch!(scheduler, spec)
-	prefetch = _get_kwarg(spec, :__fetched, false)
-	res = process!(scheduler, spec, prefetch ? :compute : :forward)
+	res = process!(scheduler, spec, spec.prefetch ? :compute : :forward)
 
-	if prefetch
+	if spec.prefetch
 		# NB: Same as when creating spec except no copy_arg, because that cannot have a reasonable default
 		f = deduplicate_leaves(default_deduplicator())∘process_arg # TODO: avoid using default_deduplicator() here - we need to get it from somewhere
 		res = copy_nested(f, res)
@@ -98,7 +97,6 @@ function _process!(scheduler::Scheduler, spec::Spec)
 	# TODO: avoid code repetions below
 
 	if is_preprocessing(spec)
-		@info "Preprocessing $(get_versioned_function(spec))"
 		deps = get_dependencies(spec)::Vector{Spec}
 		deps = fetch_dependencies!(scheduler, deps)
 		return preprocess(spec, deps)::Spec
@@ -115,7 +113,7 @@ function _process!(scheduler::Scheduler, spec::Spec)
 
 		sa_forwarded = SpecArgs(args, kwargs)
 		sa_forwarded = default_deduplicator()(sa_forwarded) # TODO: avoid using default_deduplicator() here - we need to get it from somewhere
-		return Spec(sa_forwarded, spec.use_cache, true)
+		return Spec(sa_forwarded, spec.use_cache, true, spec.prefetch)
 	end
 
 	if spec.use_cache

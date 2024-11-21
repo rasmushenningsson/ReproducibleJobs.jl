@@ -8,7 +8,7 @@ Job(spec::Spec) = Job(spec, NotComputed())
 
 
 process_arg(job::Job) = job.spec
-fetched(job::Job) = fetched(job.spec)
+_prefetch(job::Job) = _prefetch(job.spec)
 
 
 

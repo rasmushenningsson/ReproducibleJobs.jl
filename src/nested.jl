@@ -20,7 +20,6 @@ function visit_nested(f, pred, (k,v)::Pair)
 	pred(v) && visit_nested(f, pred, v)
 end
 
-
 visit_nested(f, x) = visit_nested(f, Returns(true), x)
 
 
