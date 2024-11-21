@@ -20,8 +20,8 @@ export
 	forward_once!,
 	forward_once,
 	prefetch,
-	ifelse_spec,
-	ifelse_job
+	ifelse_job,
+	checksummedfilepath_job
 
 
 include("read_only.jl")
