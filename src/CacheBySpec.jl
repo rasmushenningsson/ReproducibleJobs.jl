@@ -5,7 +5,7 @@ using ReadOnlyArrays
 using Scratch: @get_scratch!
 using JLD2: jldsave, load
 import AbstractTrees # for pretty printing
-using CodecZlib
+using CodecZstd: ZstdFrameCompressor
 using SHA
 import Dates # for printing of timestamped paths
 

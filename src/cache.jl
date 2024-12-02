@@ -23,7 +23,8 @@ function _cache_load(fp, sa::SpecArgs)
 end
 _cache_load(fp, spec::Spec) = _cache_load(fp, spec.ro.value)
 
-_cache_save(fp, spec_args::SpecArgs, value) = jldsave(fp, true; spec_args, value) # compress=true
+# _cache_save(fp, spec_args::SpecArgs, value) = jldsave(fp, true; spec_args, value) # compress=true - using CodecZlib
+_cache_save(fp, spec_args::SpecArgs, value) = jldsave(fp, ZstdFrameCompressor(); spec_args, value) # compress with Zstd - Default compression level is probably fine.
 _cache_save(fp, spec::Spec, value) = _cache_save(fp, spec.ro.value, value)
 
 
