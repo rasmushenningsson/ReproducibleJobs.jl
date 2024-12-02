@@ -4,12 +4,7 @@ struct TimestampedFilePath
 end
 TimestampedFilePath(path) = (@assert isfile(path); TimestampedFilePath(path, mtime(path)))
 
-copy_arg(ts::TimestampedFilePath) = ts # Already managed, no need to copy
-
-
-
 function Base.show(io::IO, ts::TimestampedFilePath)
-	# print(io, '"', ts.path, "\"@", Dates.unix2datetime(ts.timestamp))
 	print(io, '"', ts.path, '"')
 	printstyled(io, '@', Dates.unix2datetime(ts.timestamp); color=:light_black)
 end
@@ -48,8 +43,12 @@ Base.show(io::IO, x::ChecksummedFilePath) = print(io, "ChecksummedFilePath(", x.
 
 
 
-function checksummedfilepath_spec(fp; kwargs...)
-	ts = TimestampedFilePath(fp)
+checksummedfilepath_spec(ts::TimestampedFilePath; kwargs...) =
 	create_spec(ts; use_cache=true, prefetch=true, __versionedfunction=VersionedFunction(checksummedfilepath,v"0.1.0"), kwargs...)
-end
+checksummedfilepath_spec(fp::AbstractString; kwargs...) =
+	checksummedfilepath_spec(TimestampedFilePath(fp); kwargs...)
+
 checksummedfilepath_job(fp; kwargs...) = Job(checksummedfilepath_spec(fp; kwargs...))
+
+
+copy_arg(ts::TimestampedFilePath) = ts # Already managed, no need to copy

@@ -11,9 +11,10 @@ import Dates # for printing of timestamped paths
 
 export
 	Deduplicator,
-	deduplicate!,
 	Spec,
 	Job,
+	TimestampedFilePath,
+	deduplicate!,
 	print_spec,
 	fetch!,
 	forward!,
