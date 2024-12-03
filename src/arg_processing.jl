@@ -58,6 +58,7 @@ copy_arg(x::AbstractString) = string(x) # Standardize strings
 copy_arg(x::Symbol) = x # symbols are immutable, pass through
 copy_arg(f::VersionedFunction) = f
 copy_arg(f::Union{<:Base.Fix1,<:Base.Fix2}) = f # TODO: revise (or revise in copy_nested)
+copy_arg(x::DataType) = x
 copy_arg(x) = copy(x)
 
 deduplicate_leaves(dedup::Deduplicator) = Base.Fix1(deduplicate_leaves, dedup)
