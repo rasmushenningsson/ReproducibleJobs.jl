@@ -18,7 +18,7 @@ struct PrintReference
 	str::String # What to print, usually the type of the referenced thing?
 end
 
-printreference(::T) where T = PrintReference(_nameof(T))
+printreference(::T) where T = PrintReference(string(_nameof(T)))
 printreference(sa::SpecArgs; prefetch) =
 	PrintReference(string(get_versioned_function(sa).f, prefetch ? " (prefetched)" : ""))
 
