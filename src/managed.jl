@@ -70,15 +70,29 @@ copy_arg(m::Managed) = m.x # Already managed, just unwrap
 
 
 # Getters that wrap items as they are returned
-Base.getindex(m::Managed{<:Union{Array,Dict,Pair,Tuple,NamedTuple}}, args...) =
-	manage.(getindex(m.x, args...))
-Base.get(m::Managed{<:Union{Array,Dict,Tuple,NamedTuple}}, args...) =
-	manage.(get(m.x, args...))
 
-Base.getindex(m::Managed{<:ReadOnly{T}}, args...) where {T<:Union{Array,Dict}} =
-	getindex(m.x.value, args...)
-Base.get(m::Managed{<:ReadOnly{T}}, args...) where {T<:Union{Array,Dict}} =
-	get(m.x.value, args...)
+# scalar version
+Base.getindex(m::Managed{<:Union{Array,Pair,Tuple,NamedTuple}}, i::Integer) =
+	manage(getindex(m.x, i))
+Base.get(m::Managed{<:Union{Array,Tuple,NamedTuple}}, i::Integer) =
+	manage(get(m.x, i))
+
+# vector version
+Base.getindex(m::Managed{<:Union{Array,Pair,Tuple,NamedTuple}}, ind::Union{AbstractArray,Tuple}) =
+	manage.(getindex(m.x, ind))
+Base.get(m::Managed{<:Union{Array,Tuple,NamedTuple}}, ind::Union{AbstractArray,Tuple}) =
+	manage.(get(m.x, ind))
+
+# Dict
+Base.getindex(m::Managed{Dict}, k) = manage(getindex(m.x, k))
+Base.get(m::Managed{<:Union{Array,Dict,Tuple,NamedTuple}}, k) = manage(get(m.x, k))
+
+# ReadOnly
+Base.getindex(m::Managed{<:ReadOnly{T}}, k) where {T<:Union{Array,Dict}} =
+	getindex(m.x.value, k)
+Base.get(m::Managed{<:ReadOnly{T}}, k) where {T<:Union{Array,Dict}} =
+	get(m.x.value, k)
+
 
 function Base.iterate(m::Managed{<:Union{Array,Tuple,Pair}}, args...)
 	res = iterate(m.x, args...)

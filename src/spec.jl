@@ -48,6 +48,16 @@ struct Spec
 	prefetch::Bool
 end
 
+function Base.getproperty(spec::Spec, s::Symbol)
+	s === :args && return get_args(spec)
+	s === :kwargs && return get_kwargs(spec)
+	getfield(spec, s)
+end
+function Base.propertynames(s::Spec, private::Bool=false)
+	n = (:args, :kwargs)
+	private ? (n..., fieldnames(Spec)...) : n
+end
+
 
 deduplicate_type(::Deduplicator, ::Type{Spec}) = false
 
@@ -77,17 +87,6 @@ _get_kwarg(spec::Spec, name::Symbol, args...) = _get_kwarg(_get_spec_args(spec),
 get_versioned_function(spec::Spec) = get_versioned_function(_get_spec_args(spec))
 
 
-Base.getindex(spec::Spec, i::Integer) = manage(_get_spec_args(spec).args[i])
-Base.getindex(spec::Spec, s::Symbol) = manage(_get_kwarg(spec, s))
-
-Base.getindex(spec::Spec, ind::AbstractArray{<:Integer}) =
-	manage(_get_spec_args(spec).args[ind])
-
-Base.getindex(spec::Spec, ind::Union{AbstractArray{Symbol},NTuple{<:Any,Symbol}}) =
-	manage((; (s=>_get_kwarg(spec,s) for s in ind)...))
-
-Base.firstindex(spec::Spec) = firstindex(_get_spec_args(spec).args)
-Base.lastindex(spec::Spec) = lastindex(_get_spec_args(spec).args)
 
 # TODO: access these through getpropery instead?
 get_args(spec::Spec) = manage(_get_spec_args(spec).args)
