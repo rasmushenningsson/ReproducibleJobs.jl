@@ -80,6 +80,17 @@ Base.getindex(m::Managed{<:ReadOnly{T}}, args...) where {T<:Union{Array,Dict}} =
 Base.get(m::Managed{<:ReadOnly{T}}, args...) where {T<:Union{Array,Dict}} =
 	get(m.x.value, args...)
 
+function Base.iterate(m::Managed{<:Union{Array,Tuple,Pair}}, args...)
+	res = iterate(m.x, args...)
+	res === nothing && return nothing
+	manage(res[1]), res[2]
+end
+function Base.iterate(m::Managed{<:Union{Dict,NamedTuple}}, args...)
+	res = iterate(pairs(m.x), args...)
+	res === nothing && return nothing
+	manage(res[1].first)=>manage(res[1].second), res[2]
+end
+
 # Forward array/dict stuff
 Base.length(m::Managed{<:T}) where {T<:Union{Array,Dict,Set,Pair,Tuple,NamedTuple}} = length(m.x)
 Base.length(m::Managed{<:ReadOnly{T}}) where {T<:Union{Array,Dict,Set}} = length(m.x.value)
