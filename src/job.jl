@@ -12,8 +12,12 @@ _prefetch(job::Job) = _prefetch(job.spec)
 
 
 
-fetch!(job::Job; scheduler=default_scheduler()) =
-	job.result = fetch!(scheduler, job.spec)
+function fetch!(job::Job; scheduler=default_scheduler(), managed=false)
+	if job.result === NotComputed()
+		job.result = Managed(fetch!(scheduler, job.spec))
+	end
+	managed ? job.result : unmanage(job.result)
+end
 
 function forward(job::Job; scheduler=default_scheduler())
 	spec = forward!(scheduler, job.spec)
@@ -44,7 +48,7 @@ function Base.show(io::IO, ::MIME"text/plain", job::Job)
 		let io = IOContext(io, :compact=>true)
 			println(io)
 			print(io, "Job Result: ")
-			show(io, job.result)
+			show(io, unsafe_unmanage(job.result))
 		end
 	end
 end

@@ -18,9 +18,10 @@ _arg_replacer(upstream) = Base.Fix2(_arg_replacer, upstream)
 _arg_replacer(x, upstream) = get(upstream, x, x) # replaces prefetched specs by the value, and leaves everything else in place
 
 _unwrap_value(upstream) = Base.Fix2(_unwrap_value, upstream)
+_unwrap_value() = _unwrap_value(IdDict{Spec,Any}())
+
 function _unwrap_value(x, upstream)
-	# Manual dispatch since we have few types
-	x isa Spec && return upstream[x]
+	x isa Spec && return copy_nested(_unwrap_value(), upstream[x]) # Needed to handle e.g. a result which is a vector of `ReadOnly`s
 	x isa ReadOnly && return x.value
 	x
 end

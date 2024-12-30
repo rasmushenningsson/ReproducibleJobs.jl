@@ -31,6 +31,7 @@ Retrieve the object wrapped in a `Managed`.
 See also: [`unmanage`](@ref)
 """
 unsafe_unmanage(m::Managed) = m.x
+unsafe_unmanage(x) = x
 
 
 # Recursive unmanaging
@@ -53,7 +54,7 @@ unmanage_rec(x::NamedTuple) = map(unmanage_rec, x)
 
 
 """
-	unsafe_unmanage(m::Managed)
+	unmanage(m::Managed)
 
 Retrieve the contents of a `Managed` object.
 In many cases, a read-only object will be returned, e.g. a `ReadOnlyArray`.
