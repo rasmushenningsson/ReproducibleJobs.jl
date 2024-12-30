@@ -48,7 +48,13 @@ end
 
 
 
+"""
+	process_arg(x)
 
+Defaults to returning `x`.
+Will be called for arguments when creating a `Spec`, to do some simple unwrapping, such as extracting the `Spec` from a `Job`.
+Note that `process_arg` is not called on e.g. (prefetched) results.
+"""
 process_arg(x::Any) = x
 
 copy_arg(x::Union{<:Array,<:Dict,<:Set}) = x # already copied in copy_nested

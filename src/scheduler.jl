@@ -26,11 +26,10 @@ function _unwrap_value(x, upstream)
 end
 
 
+# TODO: Get rid of this function. Any processing of the result should be done by `process!`.
 function fetch_dependency!(scheduler, spec)
 	res = fetch!(scheduler, spec)
-	# Process args - but do not copy nor deduplicate! The result can be large and is just used for the computation at hand
-	# It's important that process_arg is done to get the same exact inputs as if the spec was prefetched
-	res = copy_nested(process_arg, res)
+	res = copy_nested(identity, res) # Converts e.g. AbstractArrays to Arrays
 end
 
 fetch_dependencies!(scheduler, deps) = IdDict{Spec,Any}(dep=>fetch_dependency!(scheduler,dep) for dep in deps)
@@ -41,8 +40,8 @@ function forward_or_prefetch!(scheduler, spec)
 	res = process!(scheduler, spec, spec.prefetch ? :compute : :forward)
 
 	if spec.prefetch
-		# NB: Same as when creating spec except no copy_arg, because that cannot have a reasonable default
-		f = deduplicate_leaves(default_deduplicator())∘process_arg # TODO: avoid using default_deduplicator() here - we need to get it from somewhere
+		# TODO: Get rid of this arg processing. Any processing of the result should be done by `process!`.
+		f = deduplicate_leaves(default_deduplicator()) # TODO: avoid using default_deduplicator() here - we need to get it from somewhere
 		res = copy_nested(f, res)
 	end
 	res
