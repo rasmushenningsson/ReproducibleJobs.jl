@@ -15,7 +15,6 @@ export
 	Job,
 	TimestampedFilePath,
 	unmanage,
-	unsafe_unmanage, # TODO: make public, not exported
 	deduplicate!,
 	print_spec,
 	fetch!,
@@ -26,6 +25,16 @@ export
 	prefetch,
 	ifelse_job,
 	checksummedfilepath_job
+
+# Use public keyword in Julia versions where it is available
+if VERSION >= v"1.11.0-DEV.469"
+    let str = """
+        public unsafe_unmanage
+        """
+        eval(Meta.parse(str))
+    end
+end
+
 
 
 include("read_only.jl")
