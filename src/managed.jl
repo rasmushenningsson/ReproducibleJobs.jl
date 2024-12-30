@@ -63,6 +63,11 @@ When this isn't possible, a copy of the object is made.
 unmanage(m::Managed) = unmanage_rec(m.x)
 
 
+
+copy_arg(m::Managed) = m.x # Already managed, just unwrap
+
+
+
 # Getters that wrap items as they are returned
 Base.getindex(m::Managed{<:Union{Array,Dict,Pair,Tuple,NamedTuple}}, args...) =
 	manage.(getindex(m.x, args...))

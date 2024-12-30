@@ -26,25 +26,27 @@ function _unwrap_value(x, upstream)
 end
 
 
-# TODO: Get rid of this function. Any processing of the result should be done by `process!`.
-function fetch_dependency!(scheduler, spec)
-	res = fetch!(scheduler, spec)
-	res = copy_nested(identity, res) # Converts e.g. AbstractArrays to Arrays
-end
+# # TODO: Get rid of this function. Any processing of the result should be done by `process!`.
+# function fetch_dependency!(scheduler, spec)
+# 	res = fetch!(scheduler, spec)
+# 	res = copy_nested(identity, res) # Converts e.g. AbstractArrays to Arrays
+# end
 
-fetch_dependencies!(scheduler, deps) = IdDict{Spec,Any}(dep=>fetch_dependency!(scheduler,dep) for dep in deps)
+# fetch_dependencies!(scheduler, deps) = IdDict{Spec,Any}(dep=>fetch_dependency!(scheduler,dep) for dep in deps)
+fetch_dependencies!(scheduler, deps) = IdDict{Spec,Any}(dep=>fetch!(scheduler,dep) for dep in deps)
 
 
 # TODO: find a better name?
 function forward_or_prefetch!(scheduler, spec)
-	res = process!(scheduler, spec, spec.prefetch ? :compute : :forward)
+	process!(scheduler, spec, spec.prefetch ? :compute : :forward)
+	# res = process!(scheduler, spec, spec.prefetch ? :compute : :forward)
 
-	if spec.prefetch
-		# TODO: Get rid of this arg processing. Any processing of the result should be done by `process!`.
-		f = deduplicate_leaves(default_deduplicator()) # TODO: avoid using default_deduplicator() here - we need to get it from somewhere
-		res = copy_nested(f, res)
-	end
-	res
+	# if spec.prefetch
+	# 	# TODO: Get rid of this arg processing. Any processing of the result should be done by `process!`.
+	# 	f = deduplicate_leaves(default_deduplicator()) # TODO: avoid using default_deduplicator() here - we need to get it from somewhere
+	# 	res = copy_nested(f, res)
+	# end
+	# res
 end
 
 # TODO: find a better name?
@@ -83,6 +85,15 @@ function _fetch_and_compute!(scheduler, spec)
 	deps = fetch_dependencies!(scheduler, deps)
 	res = compute(spec, deps)
 	@assert !(res isa Spec)
+
+	# By returning a Managed result, the computing function takes responsibility of the contents, otherwise we need to standardize
+	if res isa Managed
+		res = res.x
+	else
+		f = deduplicate_leaves(default_deduplicator()) # TODO: avoid using default_deduplicator() here - we need to get it from somewhere
+		res = copy_nested(f, res)
+	end
+
 	res
 end
 
