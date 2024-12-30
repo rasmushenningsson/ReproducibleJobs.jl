@@ -15,21 +15,25 @@ manage(x::Union{Number,String,Symbol,Nothing,Missing}) = x
 unsafe_unmanage(m::Managed) = m.x
 
 
-unmanage(x) = x
+# Recursive unmanaging
+unmanage_rec(x) = copy(x) # expensive fallback
+unmanage_rec(x::ReadOnly) = copy(x.value) # expensive fallback
 
-unmanage(m::Managed) = copy(m.x) # expensive fallback
-unmanage(m::Managed{<:ReadOnly}) = copy(m.x.value) # expensive fallback
+unmanage_rec(x::Array) = unmanage_rec.(x)
+unmanage_rec(x::ReadOnly{<:Array}) = ReadOnlyArray(x.value)
 
-unmanage(m::Managed{<:Array}) = unmanage.(m.x)
-unmanage(m::Managed{<:ReadOnly{T}}) where {T<:Array} = ReadOnlyArray(m.x.value)
-
-unmanage(m::Managed{<:Dict}) = Dict(unmanage(k)=>unmanage(v) for (k,v) in m.x)
-unmanage(m::Managed{<:Set}) = Set(unmanage(a) for a in m.x)
+unmanage_rec(x::Dict) = Dict(unmanage_rec(k)=>unmanage_rec(v) for (k,v) in x)
+unmanage_rec(x::Set) = Set(unmanage_rec(a) for a in x)
 # TODO: ReadOnlyDict and ReadOnlySet if stored in ReadOnly
 
-unmanage(m::Managed{<:Pair}) = unmanage(m.x.first)=>unmanage(m.x.second)
-unmanage(m::Managed{<:Tuple}) = unmanage.(m.x)
-unmanage(m::Managed{<:NamedTuple}) = map(unmanage, m.x)
+unmanage_rec(x::Pair) = unmanage_rec(x.first)=>unmanage_rec(x.second)
+unmanage_rec(x::Tuple) = unmanage_rec.(x)
+unmanage_rec(x::NamedTuple) = map(unmanage_rec, x)
+
+
+unmanage(x) = x
+unmanage(m::Managed) = unmanage_rec(m.x)
+
 
 # Getters that wrap items as they are returned
 Base.getindex(m::Managed{<:Union{Array,Dict,Pair,Tuple,NamedTuple}}, args...) =
