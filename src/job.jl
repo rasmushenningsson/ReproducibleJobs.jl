@@ -7,7 +7,7 @@ end
 Job(spec::Spec) = Job(spec, NotComputed())
 
 
-process_arg(job::Job) = job.spec
+copy_arg(job::Job) = job.spec # Already managed, just unwrap
 _prefetch(job::Job) = _prefetch(job.spec)
 
 

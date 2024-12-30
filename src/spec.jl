@@ -56,7 +56,7 @@ copy_arg(spec::Spec) = spec # Already managed, no need to copy
 
 
 function create_spec(args...; deduplicator=default_deduplicator(), use_cache=true, prefetch=false, kwargs...)
-	f = deduplicate_leaves(deduplicator)∘copy_arg∘process_arg
+	f = deduplicate_leaves(deduplicator)∘copy_arg
 	# sa = create_spec_args(preprocessor(deduplicator), args, kwargs)
 	sa = create_spec_args(f, args, kwargs)
 	sa = deduplicator(sa)

@@ -47,16 +47,6 @@ function _is_leaf(s::Set{T}) where T
 end
 
 
-
-"""
-	process_arg(x)
-
-Defaults to returning `x`.
-Will be called for arguments when creating a `Spec`, to do some simple unwrapping, such as extracting the `Spec` from a `Job`.
-Note that `process_arg` is not called on e.g. (prefetched) results.
-"""
-process_arg(x::Any) = x
-
 copy_arg(x::Union{<:Array,<:Dict,<:Set}) = x # already copied in copy_nested
 copy_arg(x::AbstractString) = string(x) # Standardize strings
 copy_arg(x::Symbol) = x # symbols are immutable, pass through
