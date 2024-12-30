@@ -39,6 +39,7 @@ end
 
 include("read_only.jl")
 include("managed.jl")
+include("kwarg_vector.jl")
 include("nested.jl")
 include("deduplicator.jl")
 include("versioned_function.jl")

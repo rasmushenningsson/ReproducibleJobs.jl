@@ -9,7 +9,6 @@ end
 
 Base.:(==)(a::SpecArgs, b::SpecArgs) = a.args == b.args && a.kwargs == b.kwargs
 
-
 function create_spec_args(f, args, kwargs)
 	a = Any[copy_nested(f,x) for x in args]
 	kw = sort!(Pair{Symbol,Any}[k=>copy_nested(f,v) for (k,v) in kwargs]; by=first)
@@ -36,6 +35,7 @@ get_versioned_function(sa::SpecArgs, default=nothing) =
 # Pair{Symbol,Any} currently hashes without any type information about the `Any`.
 # And that would make structs with identical contents hash the same way, if they are the value of a kwarg.
 # This is a workaround.
+# NB: Probably solved in later versions of StableHashTraits. Change to more ideomatic way.
 StableHashTraits.transformer(::Type{<:SpecArgs}) = StableHashTraits.Transformer(x->(x.args, first.(x.kwargs), last.(x.kwargs)))
 
 
@@ -54,6 +54,7 @@ deduplicate_type(::Deduplicator, ::Type{Spec}) = false
 _is_leaf_type(::Type{Spec}) = false
 copy_arg(spec::Spec) = spec # Already managed, no need to copy
 
+manage(spec::Spec) = spec # Already managed
 
 function create_spec(args...; deduplicator=default_deduplicator(), use_cache=true, prefetch=false, kwargs...)
 	f = deduplicate_leaves(deduplicator)∘copy_arg
@@ -91,7 +92,8 @@ Base.lastindex(spec::Spec) = lastindex(_get_spec_args(spec).args)
 # TODO: access these through getpropery instead?
 get_args(spec::Spec) = manage(_get_spec_args(spec).args)
 # get_kwargs(spec::Spec) = manage(_get_spec_args(spec).kwargs) # Doesn't work currently for passing kwargs...
-get_kwargs(spec::Spec) = [k=>manage(v) for (k,v) in _get_spec_args(spec).kwargs]
+# get_kwargs(spec::Spec) = [k=>manage(v) for (k,v) in _get_spec_args(spec).kwargs]
+get_kwargs(spec::Spec) = KwargVector(_get_spec_args(spec).kwargs)
 
 
 
