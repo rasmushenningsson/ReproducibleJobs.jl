@@ -1,3 +1,12 @@
+"""
+	Managed{T}
+
+Wrapper containing a single object of type `T`.
+Objects wrapped in `Managed` are read-only objects internal to `CacheBySpec`.
+To access the contents, use `unmanage`. For `Vector`s, `Dict`s etc. children can be accessed using `getindex` and `get`.
+
+See also: [`unmanage`](@ref)
+"""
 struct Managed{T}
 	x::T
 end
@@ -11,13 +20,25 @@ manage(x::Managed) = x
 manage(x::Union{Number,String,Symbol,Nothing,Missing}) = x
 
 
-# Anyone using this must treat the object (and any nested objects within) as read-only
+"""
+	unsafe_unmanage(m::Managed)
+
+Retrieve the object wrapped in a `Managed`.
+
+!!! note
+	This is unsafe to use since it is up to the caller to ensure that the object and all nested objects within never get modified.
+
+See also: [`unmanage`](@ref)
+"""
 unsafe_unmanage(m::Managed) = m.x
 
 
 # Recursive unmanaging
+
 unmanage_rec(x) = copy(x) # expensive fallback
 unmanage_rec(x::ReadOnly) = copy(x.value) # expensive fallback
+
+unmanage_rec(x::Union{String,Symbol}) = x # doesn't define copy
 
 unmanage_rec(x::Array) = unmanage_rec.(x)
 unmanage_rec(x::ReadOnly{<:Array}) = ReadOnlyArray(x.value)
@@ -31,7 +52,14 @@ unmanage_rec(x::Tuple) = unmanage_rec.(x)
 unmanage_rec(x::NamedTuple) = map(unmanage_rec, x)
 
 
-unmanage(x) = x
+"""
+	unsafe_unmanage(m::Managed)
+
+Retrieve the contents of a `Managed` object.
+In many cases, a read-only object will be returned, e.g. a `ReadOnlyArray`.
+When this isn't possible, a copy of the object is made.
+
+"""
 unmanage(m::Managed) = unmanage_rec(m.x)
 
 
