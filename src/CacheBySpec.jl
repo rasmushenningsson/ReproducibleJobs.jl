@@ -14,6 +14,8 @@ export
 	Spec,
 	Job,
 	TimestampedFilePath,
+	unmanage,
+	unsafe_unmanage, # TODO: make public, not exported
 	deduplicate!,
 	print_spec,
 	fetch!,
@@ -27,6 +29,7 @@ export
 
 
 include("read_only.jl")
+include("managed.jl")
 include("nested.jl")
 include("deduplicator.jl")
 include("versioned_function.jl")

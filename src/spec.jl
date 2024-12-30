@@ -76,6 +76,11 @@ _get_kwarg(spec::Spec, name::Symbol, args...) = _get_kwarg(_get_spec_args(spec),
 get_versioned_function(spec::Spec) = get_versioned_function(_get_spec_args(spec))
 
 
+# TODO: Support reasonable indices, such as tuples, vectors of integers/symbols
+Base.getindex(spec::Spec, i::Integer) = manage(_get_spec_args(spec).args[i])
+Base.getindex(spec::Spec, s::Symbol) = manage(_get_kwarg(spec, s))
+
+
 
 
 # TODO: Use predicate version for smart early-outs?
