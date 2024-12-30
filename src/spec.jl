@@ -80,7 +80,11 @@ get_versioned_function(spec::Spec) = get_versioned_function(_get_spec_args(spec)
 Base.getindex(spec::Spec, i::Integer) = manage(_get_spec_args(spec).args[i])
 Base.getindex(spec::Spec, s::Symbol) = manage(_get_kwarg(spec, s))
 
+Base.getindex(spec::Spec, ind::AbstractArray{<:Integer}) =
+	manage(_get_spec_args(spec).args[ind])
 
+Base.getindex(spec::Spec, ind::Union{AbstractArray{Symbol},NTuple{<:Any,Symbol}}) =
+	manage((; (s=>_get_kwarg(spec,s) for s in ind)...))
 
 
 # TODO: Use predicate version for smart early-outs?
