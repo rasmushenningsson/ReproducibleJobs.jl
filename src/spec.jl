@@ -48,6 +48,8 @@ struct Spec
 	prefetch::Bool
 end
 
+Base.Broadcast.broadcastable(spec::Spec) = Ref(spec) # treat as scalar for broadcasting
+
 function Base.getproperty(spec::Spec, s::Symbol)
 	s === :args && return get_args(spec)
 	s === :kwargs && return get_kwargs(spec)

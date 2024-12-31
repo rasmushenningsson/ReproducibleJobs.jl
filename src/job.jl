@@ -6,6 +6,7 @@ mutable struct Job
 end
 Job(spec::Spec) = Job(spec, NotComputed())
 
+Base.Broadcast.broadcastable(job::Job) = Ref(job) # treat as scalar for broadcasting
 
 copy_arg(job::Job) = job.spec # Already managed, just unwrap
 _prefetch(job::Job) = _prefetch(job.spec)
