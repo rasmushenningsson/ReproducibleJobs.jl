@@ -21,12 +21,11 @@ _get_kwarg(v::KwargVector, name::Symbol, default) = _get_kwarg(Returns(default),
 Base.IndexStyle(::Type{KwargVector}) = IndexLinear()
 Base.size(v::KwargVector, args...) = size(v.kwargs, args...)
 
-# Base.getindex(v::KwargVector, i::Integer) = manage(v.kwargs[i])
-# Base.getindex(v::KwargVector, ind::AbstractArray{<:Integer}) =
-# 	manage(v.kwargs[ind])
-
-# Forward standard indexing to inner vector
-Base.getindex(v::KwargVector, args...) = manage(getindex(v.kwargs, args...))
+# NB: Other cases are handled automatically by AbstractArray fallbacks
+function Base.getindex(v::KwargVector, i::Integer)
+	p = v.kwargs[i]
+	p.first => manage(p.second)
+end
 
 # Handle symbols to lookup kwargs
 Base.getindex(v::KwargVector, s::Symbol) = manage(_get_kwarg(v,s))
