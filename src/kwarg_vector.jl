@@ -13,7 +13,7 @@ end
 
 function _get_kwarg(f, v::KwargVector, name::Symbol)
 	i = _get_kwarg_index(v, name)
-	i === nothing && f() : last(v.kwargs[i])
+	i === nothing ? f() : last(v.kwargs[i])
 end
 _get_kwarg(v::KwargVector, name::Symbol) = _get_kwarg(()->throw(KeyError(name)), v, name)
 _get_kwarg(v::KwargVector, name::Symbol, default) = _get_kwarg(Returns(default), v, name)
