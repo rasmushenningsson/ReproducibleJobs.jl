@@ -52,6 +52,18 @@ unmanage_rec(x::Pair) = unmanage_rec(x.first)=>unmanage_rec(x.second)
 unmanage_rec(x::Tuple) = unmanage_rec.(x)
 unmanage_rec(x::NamedTuple) = map(unmanage_rec, x)
 
+# TODO: Move to package extension?
+# This considers a DataFrame as a collection of named vectors.
+function unmanage_rec(df::DataFrame)
+	# @show df
+	# A hack to handle that putting ReadOnly's in DataFrames wraps them in Vectors of length 1
+	if size(df,2)>0 && df[!,1] isa Vector{<:ReadOnly}
+		DataFrame((k=>unmanage_rec(f,only(v)) for (k,v) in pairs(eachcol(df)))...)
+	else
+		DataFrame((k=>unmanage_rec(f,v) for (k,v) in pairs(eachcol(df)))...)
+	end
+end
+
 
 """
 	unmanage(m::Managed)

@@ -5,6 +5,11 @@ end
 
 manage(v::KwargVector) = v # Already managed
 
+# Is this implementation what we want, or should we have a type param to KwargVector deciding if it's managed or not?
+# Would make more sense for unsafe_unmanage to return an object of the same type...
+unsafe_unmanage(v::KwargVector) = v.kwargs
+
+
 function _get_kwarg_index(v::KwargVector, name::Symbol)
 	r = searchsorted(v.kwargs, name=>nothing; by=first)
 	isempty(r) && return nothing

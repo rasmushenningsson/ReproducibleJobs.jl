@@ -54,9 +54,16 @@ wrap_item(d::AbstractDict) = Dict((wrap_item(k)=>wrap_item(v) for (k,v) in pairs
 wrap_item(s::AbstractSet) = Set((wrap_item(x) for x in s))
 wrap_item(nt::NamedTuple) = map(wrap_item, nt)
 
+wrap_item(df::DataFrame) = ItemWrapper(df)
+
 Base.show(io::IO, w::ItemWrapper) = show(io, w.item)
 function Base.show(io::IO, w::ItemWrapper{T}) where T<:Union{<:Base.Fix1,<:Base.Fix2}
 	print(io, string(_nameof(T), '(', w.item.f, ", ", repr(w.item.x), ')'))
+end
+function Base.show(io::IO, w::ItemWrapper{<:DataFrame})
+	sz = _dataframe_size(w.item)
+	item_name = string(join(sz,'×'), " ", _typenameof(w.item))
+	print(io, item_name)
 end
 
 
@@ -151,6 +158,7 @@ function _should_collapse(::Type{T}) where T
 	T <: AbstractArray && return false
 	T <: AbstractDict && return false
 	T <: AbstractSet && return false
+	T <: AbstractDataFrame && return false
 	if (T <: Pair) || (T <: Tuple) || (T <: NamedTuple)
 		return all(_should_collapse, fieldtypes(T))
 	end
@@ -205,6 +213,25 @@ function to_print_node!(pc::PrintContext, x::T, name, h) where T<:NamedTuple
 	end
 end
 
+function _dataframe_size(df::AbstractDataFrame)
+	# A little hack to get the actual DataFrame size. Might not be needed later.
+	if size(df,2)>0
+		col = df[!,1] # get the first column
+		if col isa Vector{<:ReadOnly}
+			ro = only(col)
+			return (length(ro.value), size(df,2))
+		end
+	end
+	return (0,0)
+end
+
+function to_print_node!(pc::PrintContext, df::AbstractDataFrame, name, h)
+	children = [to_print_node!(descend(pc),v,Symbol(string(k)),nothing) for (k,v) in pairs(eachcol(df))]
+	# item_name = Symbol(string(join(size(df),'×'), " ", _typenameof(df))) # If the size of the DataFrame was correct, we could use this.
+	sz = _dataframe_size(df)
+	item_name = Symbol(join(sz,'×'), " ", _typenameof(df))
+	create_print_node(pc, name, h, item_name; children, item_color=:magenta)
+end
 
 
 
