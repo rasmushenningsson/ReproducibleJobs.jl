@@ -21,6 +21,10 @@ function visit_nested(f, pred, (k,v)::Pair)
 end
 
 # TODO: Move to package extension?
+visit_nested(f, pred, a::AbstractSparseArray) = nothing
+
+
+# TODO: Move to package extension?
 # This considers a DataFrame as a collection of named vectors.
 function visit_nested(f, pred, df::AbstractDataFrame)
 	for x in eachcol(df)
@@ -41,6 +45,9 @@ copy_nested(f,s::AbstractSet) = f(Set((copy_nested(f,x) for x in s)))
 copy_nested(f,t::Tuple) = copy_nested.(f, t)
 copy_nested(f,nt::NamedTuple) = map(x->copy_nested(f,x), nt)
 copy_nested(f,(k,v)::Pair) = copy_nested(f, k)=>copy_nested(f, v)
+
+# TODO: Move to package extension?
+copy_nested(f,a::AbstractSparseArray) = f(a) # ensure that sparse matrices are not converted to dense
 
 # TODO: Move to package extension?
 # This considers a DataFrame as a collection of named vectors.

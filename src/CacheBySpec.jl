@@ -10,6 +10,7 @@ using SHA
 import Dates # for printing of timestamped paths
 
 using DataFrames # TODO: Use package extension?
+using SparseArrays # TODO: Use package extension?
 
 export
 	Deduplicator,
