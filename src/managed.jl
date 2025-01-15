@@ -86,23 +86,23 @@ copy_arg(m::Managed) = m.x # Already managed, just unwrap
 # scalar version
 Base.getindex(m::Managed{<:Union{Array,Pair,Tuple,NamedTuple}}, i::Integer) =
 	manage(getindex(m.x, i))
-Base.get(m::Managed{<:Union{Array,Tuple,NamedTuple}}, i::Integer) =
+Base.get(m::Managed{<:Union{Array,Tuple,NamedTuple}}, i::Integer) = # TODO: Fix. Should take f/default
 	manage(get(m.x, i))
 
 # vector version
 Base.getindex(m::Managed{<:Union{Array,Pair,Tuple,NamedTuple}}, ind::Union{AbstractArray,Tuple}) =
 	manage.(getindex(m.x, ind))
-Base.get(m::Managed{<:Union{Array,Tuple,NamedTuple}}, ind::Union{AbstractArray,Tuple}) =
+Base.get(m::Managed{<:Union{Array,Tuple,NamedTuple}}, ind::Union{AbstractArray,Tuple}) = # TODO: Fix. Should take f/default
 	manage.(get(m.x, ind))
 
 # Dict
 Base.getindex(m::Managed{Dict}, k) = manage(getindex(m.x, k))
-Base.get(m::Managed{<:Union{Array,Dict,Tuple,NamedTuple}}, k) = manage(get(m.x, k))
+Base.get(m::Managed{<:Union{Array,Dict,Tuple,NamedTuple}}, k) = manage(get(m.x, k)) # TODO: Fix. Should take f/default
 
 # ReadOnly
 Base.getindex(m::Managed{<:ReadOnly{T}}, k) where {T<:Union{Array,Dict}} =
 	getindex(m.x.value, k)
-Base.get(m::Managed{<:ReadOnly{T}}, k) where {T<:Union{Array,Dict}} =
+Base.get(m::Managed{<:ReadOnly{T}}, k) where {T<:Union{Array,Dict}} = # TODO: Fix. Should take f/default
 	get(m.x.value, k)
 
 

@@ -16,19 +16,11 @@ function create_spec_args(f, args, kwargs)
 end
 
 
-function _get_kwarg_index(sa::SpecArgs, name::Symbol)
-	r = searchsorted(sa.kwargs, name=>nothing; by=first)
-	isempty(r) && return nothing
-	only(r)
+function get_versioned_function(sa::SpecArgs, default=nothing)
+	# Probably refactor so we can customize KwargVector to return without wrapping in Managed
+	ret = get(KwargVector(sa.kwargs), :__versionedfunction, nothing)
+	ret === nothing ? default : unsafe_unmanage(ret)
 end
-
-function _get_kwarg(sa::SpecArgs, name::Symbol, default=nothing)
-	i = _get_kwarg_index(sa,name)
-	i !== nothing ? last(sa.kwargs[i]) : default
-end
-
-get_versioned_function(sa::SpecArgs, default=nothing) =
-	_get_kwarg(sa, :__versionedfunction, default)::Union{Nothing,VersionedFunction}
 
 
 
@@ -92,8 +84,6 @@ get_versioned_function(spec::Spec) = get_versioned_function(_get_spec_args(spec)
 
 # TODO: access these through getpropery instead?
 get_args(spec::Spec) = manage(_get_spec_args(spec).args)
-# get_kwargs(spec::Spec) = manage(_get_spec_args(spec).kwargs) # Doesn't work currently for passing kwargs...
-# get_kwargs(spec::Spec) = [k=>manage(v) for (k,v) in _get_spec_args(spec).kwargs]
 get_kwargs(spec::Spec) = KwargVector(_get_spec_args(spec).kwargs)
 
 
