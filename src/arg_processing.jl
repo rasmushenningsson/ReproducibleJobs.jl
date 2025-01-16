@@ -49,6 +49,7 @@ end
 
 copy_arg(x::Union{<:Array,<:Dict,<:Set}) = x # already copied in copy_nested
 copy_arg(x::AbstractString) = string(x) # Standardize strings
+copy_arg(x::Char) = x # Chars are immutable, pass through
 copy_arg(x::Symbol) = x # symbols are immutable, pass through
 copy_arg(f::VersionedFunction) = f
 copy_arg(c::Colon) = c
@@ -60,4 +61,3 @@ deduplicate_leaves(dedup::Deduplicator) = Base.Fix1(deduplicate_leaves, dedup)
 deduplicate_leaves(dedup::Deduplicator, x::Union{<:Array,<:Dict,<:Set}) =
 	_is_leaf(x) ? dedup(x) : x
 deduplicate_leaves(::Deduplicator, x::Any) = x
-

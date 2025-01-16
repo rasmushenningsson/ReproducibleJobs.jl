@@ -17,7 +17,7 @@ manage(x) = Managed(x)
 manage(x::Managed) = x
 
 # Basic immutable types - should this list be extended?
-manage(x::Union{Number,String,Symbol,Nothing,Missing}) = x
+manage(x::Union{Number,String,Char,Symbol,Nothing,Missing}) = x
 
 
 """
@@ -39,7 +39,7 @@ unsafe_unmanage(x) = x
 unmanage_rec(x) = copy(x) # expensive fallback
 unmanage_rec(x::ReadOnly) = copy(x.value) # expensive fallback
 
-unmanage_rec(x::Union{String,Symbol}) = x # doesn't define copy
+unmanage_rec(x::Union{String,Char,Symbol}) = x # doesn't define copy
 
 unmanage_rec(x::Array) = unmanage_rec.(x)
 unmanage_rec(x::ReadOnly{<:Array}) = ReadOnlyArray(x.value)
