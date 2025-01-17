@@ -56,8 +56,8 @@ copy_nested(f,a::AbstractSparseArray) = f(a) # ensure that sparse matrices are n
 function copy_nested(f, df::AbstractDataFrame)
 	# A hack to handle that putting ReadOnly's in DataFrames wraps them in Vectors of length 1
 	if size(df,2)>0 && df[!,1] isa Vector{<:ReadOnly}
-		f(DataFrame((k=>copy_nested(f,only(v)) for (k,v) in pairs(eachcol(df)))...))
+		f(DataFrame((k=>copy_nested(f,only(v)) for (k,v) in pairs(eachcol(df)))...; copycols=false))
 	else
-		f(DataFrame((k=>copy_nested(f,v) for (k,v) in pairs(eachcol(df)))...))
+		f(DataFrame((k=>copy_nested(f,v) for (k,v) in pairs(eachcol(df)))...; copycols=false))
 	end
 end
