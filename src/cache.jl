@@ -17,7 +17,11 @@ function _cache_load(fp, sa::SpecArgs)
 	@info "Loading $(get_versioned_function(sa)) from cache"
 	d = load(fp)
 	cached_sa = d["spec_args"]
-	@assert sa == cached_sa "Job specification did not match job specification in cache" # TODO: Decide what to do on failure - delete the file???
+
+	# TODO: handle this better...
+	#       perhaps by wrapping Fix1/Fix2 in our own type internally...
+	sa == cached_sa || @warn "Job specification did not match job specification in cache (likely cause, Regex within a Base.Fix2)."
+
 	touch(fp) # update file timestamp (in case we want to remove old cached files later)
 	return d["value"]
 end
