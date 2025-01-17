@@ -13,6 +13,13 @@ end
 
 # TODO: Do we need to implement hash/== by forwarding somehow?
 
+Base.:(==)(a::Managed, b::Managed) = a.x == b.x
+function Base.hash(m::Managed, h::UInt)
+	h = hash(0x87f003e2bcbd5fdc, h) # used to make it different from hash(m.x)
+	hash(m.x, h)
+end
+
+
 manage(x) = Managed(x)
 manage(x::Managed) = x
 
