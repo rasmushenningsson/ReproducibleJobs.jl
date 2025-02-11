@@ -101,7 +101,8 @@ function _process!(scheduler::Scheduler, spec::Spec)
 		args = Any[copy_nested(replacer, a) for a in sa.args]
 		kwargs = Pair{Symbol,Any}[k=>copy_nested(replacer,v) for (k,v) in sa.kwargs]
 
-		sa_forwarded = SpecArgs(args, kwargs)
+		# sa_forwarded = SpecArgs(args, kwargs)
+		sa_forwarded = SpecArgs(sa.f, args, kwargs)
 		sa_forwarded = default_deduplicator()(sa_forwarded) # TODO: avoid using default_deduplicator() here - we need to get it from somewhere
 		return Spec(sa_forwarded, spec.use_cache, true, spec.prefetch)
 	end

@@ -1,34 +1,30 @@
 struct SpecArgs
+	f::VersionedFunction
 	args::Vector{Any}
 	kwargs::Vector{Pair{Symbol,Any}}
-	function SpecArgs(args, kwargs)
+	function SpecArgs(f, args, kwargs)
 		@assert issorted(kwargs; by=first)
-		new(args, kwargs)
+		new(f, args, kwargs)
 	end
 end
 
 Base.:(==)(a::SpecArgs, b::SpecArgs) = a.args == b.args && a.kwargs == b.kwargs
 
-function create_spec_args(f, args, kwargs)
-	a = Any[copy_nested(f,x) for x in args]
-	kw = sort!(Pair{Symbol,Any}[k=>copy_nested(f,v) for (k,v) in kwargs]; by=first)
-	SpecArgs(a,kw)
+function create_spec_args(p, f, args, kwargs)
+	a = Any[copy_nested(p,x) for x in args]
+	kw = sort!(Pair{Symbol,Any}[k=>copy_nested(p,v) for (k,v) in kwargs]; by=first)
+	SpecArgs(f,a,kw)
 end
 
 
 function get_versioned_function(sa::SpecArgs, default=nothing)
-	# Probably refactor so we can customize KwargVector to return without wrapping in Managed
-	ret = get(KwargVector(sa.kwargs), :__versionedfunction, nothing)
-	ret === nothing ? default : unsafe_unmanage(ret)
+	# # Probably refactor so we can customize KwargVector to return without wrapping in Managed
+	# ret = get(KwargVector(sa.kwargs), :__versionedfunction, nothing)
+	# ret === nothing ? default : unsafe_unmanage(ret)
+	# @something get(sa.args, 1, nothing) Some(default)
+	sa.f
 end
 
-
-
-# Pair{Symbol,Any} currently hashes without any type information about the `Any`.
-# And that would make structs with identical contents hash the same way, if they are the value of a kwarg.
-# This is a workaround.
-# NB: Probably solved in later versions of StableHashTraits. Change to more ideomatic way.
-StableHashTraits.transformer(::Type{<:SpecArgs}) = StableHashTraits.Transformer(x->(x.args, first.(x.kwargs), last.(x.kwargs)))
 
 
 
@@ -43,6 +39,7 @@ end
 Base.Broadcast.broadcastable(spec::Spec) = Ref(spec) # treat as scalar for broadcasting
 
 function Base.getproperty(spec::Spec, s::Symbol)
+	s === :f && return get_versioned_function(spec)
 	s === :args && return get_args(spec)
 	s === :kwargs && return get_kwargs(spec)
 	getfield(spec, s)
@@ -60,10 +57,9 @@ copy_arg(spec::Spec) = spec # Already managed, no need to copy
 
 manage(spec::Spec) = spec # Already managed
 
-function create_spec(args...; deduplicator=default_deduplicator(), use_cache=true, prefetch=false, kwargs...)
-	f = deduplicate_leaves(deduplicator)∘copy_arg
-	# sa = create_spec_args(preprocessor(deduplicator), args, kwargs)
-	sa = create_spec_args(f, args, kwargs)
+function create_spec(f, args...; deduplicator=default_deduplicator(), use_cache=true, prefetch=false, kwargs...)
+	p = deduplicate_leaves(deduplicator)∘copy_arg
+	sa = create_spec_args(p, f, args, kwargs)
 	sa = deduplicator(sa)
 	Spec(sa, use_cache, false, prefetch)
 end

@@ -44,7 +44,7 @@ Base.show(io::IO, x::ChecksummedFilePath) = print(io, "ChecksummedFilePath(", x.
 
 
 checksummedfilepath_spec(ts::TimestampedFilePath; kwargs...) =
-	create_spec(ts; use_cache=true, prefetch=true, __versionedfunction=VersionedFunction(checksummedfilepath,v"0.1.0"), kwargs...)
+	create_spec(VersionedFunction(checksummedfilepath,v"0.1.0"), ts; use_cache=true, prefetch=true, kwargs...)
 checksummedfilepath_spec(fp::AbstractString; kwargs...) =
 	checksummedfilepath_spec(TimestampedFilePath(fp); kwargs...)
 
