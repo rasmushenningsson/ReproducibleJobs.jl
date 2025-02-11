@@ -1,5 +1,5 @@
 function is_preprocessing(spec::Spec)
-	vf = get_versioned_function(spec)
+	vf = spec.f
 	@assert vf !== nothing
 	is_preprocessing(vf.f, spec)
 end
@@ -10,7 +10,7 @@ is_preprocessing(f) = false
 
 
 function get_dependencies(spec::Spec)
-	vf = get_versioned_function(spec)
+	vf = spec.f
 	@assert vf !== nothing
 	get_dependencies(vf.f, spec)
 end

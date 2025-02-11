@@ -17,17 +17,6 @@ function create_spec_args(p, f, args, kwargs)
 end
 
 
-function get_versioned_function(sa::SpecArgs, default=nothing)
-	# # Probably refactor so we can customize KwargVector to return without wrapping in Managed
-	# ret = get(KwargVector(sa.kwargs), :__versionedfunction, nothing)
-	# ret === nothing ? default : unsafe_unmanage(ret)
-	# @something get(sa.args, 1, nothing) Some(default)
-	sa.f
-end
-
-
-
-
 
 struct Spec
 	ro::ReadOnly{SpecArgs}
@@ -38,6 +27,12 @@ end
 
 Base.Broadcast.broadcastable(spec::Spec) = Ref(spec) # treat as scalar for broadcasting
 
+# Usually accessed through getproperty
+get_versioned_function(spec::Spec) = _get_spec_args(spec).f
+get_args(spec::Spec) = manage(_get_spec_args(spec).args)
+get_kwargs(spec::Spec) = KwargVector(_get_spec_args(spec).kwargs)
+
+
 function Base.getproperty(spec::Spec, s::Symbol)
 	s === :f && return get_versioned_function(spec)
 	s === :args && return get_args(spec)
@@ -45,7 +40,7 @@ function Base.getproperty(spec::Spec, s::Symbol)
 	getfield(spec, s)
 end
 function Base.propertynames(s::Spec, private::Bool=false)
-	n = (:args, :kwargs)
+	n = (:f, :args, :kwargs)
 	private ? (n..., fieldnames(Spec)...) : n
 end
 
@@ -74,13 +69,9 @@ _get_spec_args(spec::Spec) = spec.ro.value
 
 get_hash(spec::Spec) = get_hash(spec.ro)
 _get_kwarg(spec::Spec, name::Symbol, args...) = _get_kwarg(_get_spec_args(spec), name, args...)
-get_versioned_function(spec::Spec) = get_versioned_function(_get_spec_args(spec))
 
 
 
-# TODO: access these through getpropery instead?
-get_args(spec::Spec) = manage(_get_spec_args(spec).args)
-get_kwargs(spec::Spec) = KwargVector(_get_spec_args(spec).kwargs)
 
 
 
@@ -114,7 +105,7 @@ prefetch(x::Any) = copy_nested(_prefetch, x)
 # --- printing ---
 function Base.show(io::IO, spec::Spec)
 	if get(io,:compact,false)
-		show(io, get_versioned_function(spec))
+		show(io, spec.f)
 	else
 		print_spec(io, spec; maxdepth=10)
 	end

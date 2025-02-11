@@ -36,7 +36,7 @@ forward_prefetch_dependencies!(scheduler, deps) =
 
 
 function preprocess(spec::Spec, upstream::IdDict{Spec,Any})
-	vf = get_versioned_function(spec)
+	vf = spec.f
 
 	@info "Preprocessing $vf"
 	res = vf.f(spec, upstream)
@@ -46,7 +46,7 @@ end
 
 
 function compute(spec::Spec, upstream::IdDict{Spec,Any})
-	vf = get_versioned_function(spec)
+	vf = spec.f
 	sa = _get_spec_args(spec)
 
 	unwrapper = _unwrap_value(upstream)

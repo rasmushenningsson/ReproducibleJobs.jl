@@ -14,7 +14,7 @@ spec2path(cache::Cache, spec::Spec) = spec2path(cache, spec.ro)
 
 
 function _cache_load(fp, sa::SpecArgs)
-	@info "Loading $(get_versioned_function(sa)) from cache"
+	@info "Loading $(sa.f) from cache"
 	d = load(fp)
 	cached_sa = d["spec_args"]
 
@@ -49,7 +49,7 @@ end
 
 function cache_insert!(cache::Cache, spec::Spec, value)
 	fp = spec2path(cache, spec)
-	isfile(fp) && error("cache_insert! expects a spec that is not already in the cache. Got $(get_versioned_function(spec)) with hash $(spec.ro.h).")
+	isfile(fp) && error("cache_insert! expects a spec that is not already in the cache. Got $(spec.f) with hash $(spec.ro.h).")
 	_cache_save(fp, spec, value)
 	return value
 end

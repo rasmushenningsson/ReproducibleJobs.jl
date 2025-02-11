@@ -40,7 +40,7 @@ end
 
 printreference(::T) where T = PrintReference(string(_nameof(T)))
 printreference(sa::SpecArgs; prefetch) =
-	PrintReference(string(get_versioned_function(sa).f, prefetch ? " (prefetched)" : ""))
+	PrintReference(string(sa.f.f, prefetch ? " (prefetched)" : ""))
 
 Base.show(io::IO, ref::PrintReference) = print(io, ref.str)
 
@@ -270,7 +270,7 @@ function to_print_node!(pc::PrintContext, sa::SpecArgs, name, h; prefetch)
 	c2 = [to_print_node!(descend(pc),v,k,nothing) for (k,v) in sa.kwargs if !startswith(string(k),"__")] # skip "hidden" kwargs
 	children = vcat(c1,c2)
 
-	vf = get_versioned_function(sa)
+	vf = sa.f
 	if vf !== nothing
 		f = vf.f
 		item_color = :green
