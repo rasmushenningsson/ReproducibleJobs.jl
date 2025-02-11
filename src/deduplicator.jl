@@ -24,6 +24,7 @@ function deduplicate_type(dedup::Deduplicator, ::Type{T}) where {T}
 		return deduplicate_type(dedup, T.a) || deduplicate_type(dedup, T.b)
 	end
 	ismutabletype(T) && return true
+	T === Any && return true
 	for S in fieldtypes(T)
 		deduplicate_type(dedup, S) && return true
 	end

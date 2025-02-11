@@ -1,5 +1,5 @@
 struct SpecArgs
-	f::VersionedFunction
+	f::Any
 	args::Vector{Any}
 	kwargs::Vector{Pair{Symbol,Any}}
 	function SpecArgs(f, args, kwargs)
@@ -8,7 +8,9 @@ struct SpecArgs
 	end
 end
 
-Base.:(==)(a::SpecArgs, b::SpecArgs) = a.args == b.args && a.kwargs == b.kwargs
+Base.:(==)(a::SpecArgs, b::SpecArgs) = a.f == b.f && a.args == b.args && a.kwargs == b.kwargs
+
+deduplicate_type(::Deduplicator, ::Type{SpecArgs}) = true
 
 function create_spec_args(p, f, args, kwargs)
 	a = Any[copy_nested(p,x) for x in args]
@@ -68,9 +70,6 @@ Base.:(==)(a::Spec, b::Spec) = a.use_cache == b.use_cache && a.ro == b.ro
 _get_spec_args(spec::Spec) = spec.ro.value
 
 get_hash(spec::Spec) = get_hash(spec.ro)
-_get_kwarg(spec::Spec, name::Symbol, args...) = _get_kwarg(_get_spec_args(spec), name, args...)
-
-
 
 
 

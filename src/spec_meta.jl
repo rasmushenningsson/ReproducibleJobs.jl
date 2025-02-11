@@ -1,7 +1,6 @@
 function is_preprocessing(spec::Spec)
-	vf = spec.f
-	@assert vf !== nothing
-	is_preprocessing(vf.f, spec)
+	@assert spec.f !== nothing
+	is_preprocessing(spec.f, spec)
 end
 
 # One of these can be customized to tell that a function is preprocessing a spec
@@ -10,9 +9,8 @@ is_preprocessing(f) = false
 
 
 function get_dependencies(spec::Spec)
-	vf = spec.f
-	@assert vf !== nothing
-	get_dependencies(vf.f, spec)
+	@assert spec.f !== nothing
+	get_dependencies(spec.f, spec)
 end
 
 # This can be customized to tell which specs should be fetched before computing

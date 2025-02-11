@@ -36,26 +36,29 @@ forward_prefetch_dependencies!(scheduler, deps) =
 
 
 function preprocess(spec::Spec, upstream::IdDict{Spec,Any})
-	vf = spec.f
+	f = spec.f
 
-	@info "Preprocessing $vf"
-	res = vf.f(spec, upstream)
-	@assert res !== nothing "Preprocessing of $vf returned nothing"
+	@info "Preprocessing $f"
+	res = f(spec, upstream)
+	@assert res !== nothing "Preprocessing of $f returned nothing"
 	res
 end
 
 
 function compute(spec::Spec, upstream::IdDict{Spec,Any})
-	vf = spec.f
-	sa = _get_spec_args(spec)
+	f = spec.f
 
+	v = get(spec.kwargs, :__version, nothing)
+	@assert v !== nothing "__version kwarg must be provided for all (non-preprocessing) specs."
+
+	sa = _get_spec_args(spec)
 	unwrapper = _unwrap_value(upstream)
 	args = (copy_nested(unwrapper, a) for a in sa.args)
 	kwargs = (copy_nested(unwrapper, k)=>copy_nested(unwrapper,v) for (k,v) in sa.kwargs if !startswith(string(k),"__"))
 
-	@info "Running $vf"
-	res = vf.f(args...; kwargs...)
-	@assert res !== nothing "Computation of $vf returned nothing"
+	@info "Running $f"
+	res = f(args...; kwargs...)
+	@assert res !== nothing "Computation of $f returned nothing"
 	res
 end
 
