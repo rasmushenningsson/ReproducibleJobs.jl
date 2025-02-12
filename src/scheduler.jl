@@ -39,7 +39,13 @@ function preprocess(spec::Spec, upstream::IdDict{Spec,Any})
 	f = spec.f
 
 	@info "Preprocessing $f"
-	res = f(spec, upstream)
+
+	if isempty(upstream)
+		res = f(spec.args...; spec.kwargs...)
+	else
+		res = f(spec.args...; spec.kwargs..., upstream)
+	end
+	# res = f(spec, upstream)
 	@assert res !== nothing "Preprocessing of $f returned nothing"
 	res
 end
