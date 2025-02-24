@@ -55,6 +55,15 @@ copy_arg(v::VersionNumber) = v
 copy_arg(c::Colon) = c
 copy_arg(f::Union{<:Base.Fix1,<:Base.Fix2}) = f # TODO: revise (or revise in copy_nested)
 copy_arg(x::DataType) = x
+
+
+copy_arg(f::ComposedFunction) = copy_arg(f.outer) ∘ copy_arg(f.inner)
+
+# Simple temporary solution for allowing some functions to be used as arguments
+copy_arg(f::Union{typeof(identity), typeof(!), typeof(iszero)}) = f
+
+
+
 copy_arg(x) = copy(x)
 
 deduplicate_leaves(dedup::Deduplicator) = Base.Fix1(deduplicate_leaves, dedup)
