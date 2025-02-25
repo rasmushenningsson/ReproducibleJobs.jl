@@ -68,6 +68,7 @@ wrap_item(x) = x
 wrap_item(x::Union{<:Base.Fix1,<:Base.Fix2}) = ItemWrapper(x)
 wrap_item(x::AbstractString) = ItemWrapper(x)
 
+wrap_item(x::AbstractRange) = ItemWrapper(x)
 wrap_item(x::Union{<:AbstractArray,<:Tuple}) = wrap_item.(x)
 wrap_item(p::Pair) = wrap_item(p.first) => wrap_item(p.second)
 wrap_item(d::AbstractDict) = Dict((wrap_item(k)=>wrap_item(v) for (k,v) in pairs(d)))
@@ -113,7 +114,6 @@ AbstractTrees.children(x::PrintNode) = x.children
 
 _printitem(io::IO, item, item_color) =
 	printstyled(IOContext(io, :limit=>true, :compact=>true, :short=>true), item; color=item_color) # Not great, but better than no IOContext
-
 
 
 function _printitem(io::IO, a::AbstractArray, item_color)
@@ -165,6 +165,7 @@ function _should_collapse(::Type{T}) where T
 	T isa Union && return _should_collapse(T.a) && _should_collapse(T.b)
 	T <: Spec && return false
 	T <: ReadOnly && return false
+	T <: AbstractRange && return true
 	T <: AbstractArray && return false
 	T <: AbstractDict && return false
 	T <: AbstractSet && return false
@@ -172,6 +173,10 @@ function _should_collapse(::Type{T}) where T
 		return all(_should_collapse, fieldtypes(T))
 	end
 	return true
+end
+
+function to_print_node!(pc::PrintContext, x::AbstractRange{T}, name, h) where T
+	create_print_node(pc, name, h, x)
 end
 
 

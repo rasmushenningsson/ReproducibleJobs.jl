@@ -9,6 +9,8 @@ using CodecZstd: ZstdFrameCompressor
 using SHA
 import Dates # for printing of timestamped paths
 
+using LinearAlgebra # For handling copy_arg(transposed)
+
 using DataFrames # TODO: Use package extension?
 using SparseArrays # TODO: Use package extension?
 

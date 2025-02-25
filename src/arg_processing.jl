@@ -57,6 +57,7 @@ copy_arg(f::Union{<:Base.Fix1,<:Base.Fix2}) = f # TODO: revise (or revise in cop
 copy_arg(x::DataType) = x
 
 
+copy_arg(f::Returns{T}) where T = Returns(copy_arg(f.value))
 copy_arg(f::ComposedFunction) = copy_arg(f.outer) ∘ copy_arg(f.inner)
 
 # Simple temporary solution for allowing some functions to be used as arguments

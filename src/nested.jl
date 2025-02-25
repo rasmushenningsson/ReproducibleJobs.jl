@@ -39,12 +39,17 @@ copy_nested(f,x) = f(x)
 
 # NB: copy_nested should not go into ReadOnlys, they are considered "leaves"
 
+
+copy_nested(f,r::AbstractRange) = f(r)
 copy_nested(f,a::AbstractArray) = f([copy_nested(f,x) for x in a]) # NB: preserves dims of array, might change eltype
 copy_nested(f,d::AbstractDict) = f(Dict((copy_nested(f,k)=>copy_nested(f,v) for (k,v) in d)))
 copy_nested(f,s::AbstractSet) = f(Set((copy_nested(f,x) for x in s)))
 copy_nested(f,t::Tuple) = copy_nested.(f, t)
 copy_nested(f,nt::NamedTuple) = map(x->copy_nested(f,x), nt)
 copy_nested(f,(k,v)::Pair) = copy_nested(f, k)=>copy_nested(f, v)
+
+copy_nested(f,a::Adjoint{TV,TM}) where {TV,TM} = Adjoint{TV,TM}(copy_nested(f,parent(a)))
+copy_nested(f,a::Transpose{TV,TM}) where {TV,TM} = Transpose{TV,TM}(copy_nested(f,parent(a)))
 
 # TODO: Move to package extension?
 copy_nested(f,a::AbstractSparseArray) = f(a) # ensure that sparse matrices are not converted to dense
