@@ -53,6 +53,7 @@ include("spec_meta.jl")
 include("spec_printing.jl")
 include("cache.jl")
 include("job.jl")
+include("processing_exception.jl")
 include("scheduler.jl")
 
 include("paths.jl")

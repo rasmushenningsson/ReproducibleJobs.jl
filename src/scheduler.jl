@@ -37,35 +37,63 @@ forward_prefetch_dependencies!(scheduler, deps) =
 
 function preprocess(spec::Spec, upstream::IdDict{Spec,Any})
 	f = spec.f
+	try
+		# Propagate errors
+		if any(x->x isa ProcessingException, values(upstream))
+			causes = filter!(x->x isa ProcessingException, collect(values(upstream)))
+			return ProcessingException(spec, causes)
+		end
 
-	@info "Preprocessing $f"
+		@info "Preprocessing $f"
 
-	if isempty(upstream)
-		res = f(spec.args...; spec.kwargs...)
-	else
-		res = f(spec.args...; spec.kwargs..., upstream)
+		if isempty(upstream)
+			res = f(spec.args...; spec.kwargs...)
+		else
+			res = f(spec.args...; spec.kwargs..., upstream)
+		end
+		# res = f(spec, upstream)
+		@assert res !== nothing "Preprocessing of $f returned nothing"
+		return res
+	catch e
+		@warn "Error preprocessing $f"
+		bt = Base.catch_backtrace()
+		# Base.showerror(stdout, e, bt)
+		Base.showerror(stdout, e)
+		println()
+		return ProcessingException(spec, e, stacktrace(bt))
 	end
-	# res = f(spec, upstream)
-	@assert res !== nothing "Preprocessing of $f returned nothing"
-	res
 end
 
 
 function compute(spec::Spec, upstream::IdDict{Spec,Any})
 	f = spec.f
+	try
+		# Propagate errors
+		if any(x->x isa ProcessingException, values(upstream))
+			causes = filter!(x->x isa ProcessingException, collect(values(upstream)))
+			return ProcessingException(spec, causes)
+		end
 
-	v = get(spec.kwargs, :__version, nothing)
-	@assert v !== nothing "__version kwarg must be provided for all (non-preprocessing) specs."
+		v = get(spec.kwargs, :__version, nothing)
+		@assert v !== nothing "__version kwarg must be provided for all (non-preprocessing) specs."
 
-	sa = _get_spec_args(spec)
-	unwrapper = _unwrap_value(upstream)
-	args = (copy_nested(unwrapper, a) for a in sa.args)
-	kwargs = (copy_nested(unwrapper, k)=>copy_nested(unwrapper,v) for (k,v) in sa.kwargs if !startswith(string(k),"__"))
+		sa = _get_spec_args(spec)
+		unwrapper = _unwrap_value(upstream)
+		args = (copy_nested(unwrapper, a) for a in sa.args)
+		kwargs = (copy_nested(unwrapper, k)=>copy_nested(unwrapper,v) for (k,v) in sa.kwargs if !startswith(string(k),"__"))
 
-	@info "Running $f"
-	res = f(args...; kwargs...)
-	@assert res !== nothing "Computation of $f returned nothing"
-	res
+		@info "Running $f"
+		res = f(args...; kwargs...)
+		@assert res !== nothing "Computation of $f returned nothing"
+		return res
+	catch e
+		@warn "Error computing $f"
+		bt = Base.catch_backtrace()
+		# Base.showerror(stdout, e, bt)
+		Base.showerror(stdout, e)
+		println()
+		return ProcessingException(spec, e, stacktrace(bt))
+	end
 end
 
 
@@ -93,12 +121,12 @@ function _process!(scheduler::Scheduler, spec::Spec)
 	# 2. We need to forward/prefetch subspecs and replace subspecs with forwarded/prefetched subspecs
 	# 3. We need to fetch and compute (and cache if needed)
 
-	# TODO: avoid code repetions below
+	# TODO: avoid code repetitions below
 
 	if is_preprocessing(spec)
 		deps = get_dependencies(spec)::Vector{Spec}
 		deps = fetch_dependencies!(scheduler, deps)
-		return preprocess(spec, deps)::Spec
+		return preprocess(spec, deps)::Union{Spec,ProcessingException}
 	end
 
 	if !spec.forwarding_complete

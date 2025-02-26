@@ -80,6 +80,7 @@ When this isn't possible, a copy of the object is made.
 
 """
 unmanage(m::Managed) = unmanage_rec(m.x)
+unmanage(x::Any) = x
 
 
 
