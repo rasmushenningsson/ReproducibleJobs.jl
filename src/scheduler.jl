@@ -164,6 +164,13 @@ function process!(scheduler::Scheduler, spec::Spec, mode::Symbol)
 
 		res = get!(scheduler.results, spec) do
 			_process!(scheduler, spec)
+
+			# # Hopefully we won't need this
+			# r = _process!(scheduler, spec)
+			# if r isa Spec
+			# 	r = Spec(r.ro, r.use_cache, r.forwarding_complete, r.prefetch || spec.prefetch)
+			# end
+			# r
 		end
 
 		res isa Spec || return res
