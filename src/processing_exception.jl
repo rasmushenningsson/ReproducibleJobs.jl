@@ -29,6 +29,7 @@ manage(e::ProcessingException) = e # Already managed
 
 
 function Base.showerror(io::IO, e::ProcessingException{T}) where T
+	println(io, "ProcessingException ")
 	Base.showerror(io, e.inner)
 	println(io)
 	println(io, "Spec stacktrace:")

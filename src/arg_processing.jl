@@ -47,6 +47,13 @@ function _is_leaf(s::Set{T}) where T
 end
 
 
+function copy_arg(e::Exception)
+	@warn "Exceptions cannot be put as arguments in a Spec, throwing."
+	throw(e)
+end
+
+
+
 copy_arg(x::Union{<:Array,<:Dict,<:Set}) = x # already copied in copy_nested
 copy_arg(x::AbstractString) = string(x) # Standardize strings
 copy_arg(x::Char) = x # Chars are immutable, pass through

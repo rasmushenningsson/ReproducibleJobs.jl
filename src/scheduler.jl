@@ -35,16 +35,23 @@ forward_prefetch_dependencies!(scheduler, deps) =
 
 
 
+function propagate_error(spec, vals)::Union{Nothing, ProcessingException}
+	if any(x->x isa ProcessingException, vals)
+		causes = filter!(x->x isa ProcessingException, collect(vals))
+		return ProcessingException(spec, causes)
+	else
+		return nothing
+	end
+end
+
+
 function preprocess(spec::Spec, upstream::IdDict{Spec,Any})
 	f = spec.f
 	try
-		# Propagate errors
-		if any(x->x isa ProcessingException, values(upstream))
-			causes = filter!(x->x isa ProcessingException, collect(values(upstream)))
-			return ProcessingException(spec, causes)
-		end
-
 		@info "Preprocessing $f"
+
+		err = propagate_error(spec, values(upstream))
+		err !== nothing && return err
 
 		if isempty(upstream)
 			res = f(spec.args...; spec.kwargs...)
@@ -55,6 +62,7 @@ function preprocess(spec::Spec, upstream::IdDict{Spec,Any})
 		@assert res !== nothing "Preprocessing of $f returned nothing"
 		return res
 	catch e
+		# TODO: Do not show anything/much here, it will be shown later instead
 		@warn "Error preprocessing $f"
 		bt = Base.catch_backtrace()
 		# Base.showerror(stdout, e, bt)
@@ -64,15 +72,30 @@ function preprocess(spec::Spec, upstream::IdDict{Spec,Any})
 	end
 end
 
+function replace_forwarded(spec::Spec, upstream::IdDict{Spec,Any})
+	err = propagate_error(spec, values(upstream))
+	err !== nothing && return err
+
+	replacer = _arg_replacer(upstream)
+
+	sa = spec.ro.value
+	args = Any[copy_nested(replacer, a) for a in sa.args]
+	kwargs = Pair{Symbol,Any}[k=>copy_nested(replacer,v) for (k,v) in sa.kwargs]
+
+	# sa_forwarded = SpecArgs(args, kwargs)
+	sa_forwarded = SpecArgs(sa.f, args, kwargs)
+	sa_forwarded = default_deduplicator()(sa_forwarded) # TODO: avoid using default_deduplicator() here - we need to get it from somewhere
+	return Spec(sa_forwarded, spec.use_cache, true, spec.prefetch)
+
+end
+
 
 function compute(spec::Spec, upstream::IdDict{Spec,Any})
 	f = spec.f
 	try
-		# Propagate errors
-		if any(x->x isa ProcessingException, values(upstream))
-			causes = filter!(x->x isa ProcessingException, collect(values(upstream)))
-			return ProcessingException(spec, causes)
-		end
+		@info "Running $f"
+		err = propagate_error(spec, values(upstream))
+		err !== nothing && return err
 
 		v = get(spec.kwargs, :__version, nothing)
 		@assert v !== nothing "__version kwarg must be provided for all (non-preprocessing) specs."
@@ -82,11 +105,11 @@ function compute(spec::Spec, upstream::IdDict{Spec,Any})
 		args = (copy_nested(unwrapper, a) for a in sa.args)
 		kwargs = (copy_nested(unwrapper, k)=>copy_nested(unwrapper,v) for (k,v) in sa.kwargs if !startswith(string(k),"__"))
 
-		@info "Running $f"
 		res = f(args...; kwargs...)
 		@assert res !== nothing "Computation of $f returned nothing"
 		return res
 	catch e
+		# TODO: Do not show anything/much here, it will be shown later instead
 		@warn "Error computing $f"
 		bt = Base.catch_backtrace()
 		# Base.showerror(stdout, e, bt)
@@ -132,16 +155,7 @@ function _process!(scheduler::Scheduler, spec::Spec)
 	if !spec.forwarding_complete
 		forwarded_deps = get_dependencies(spec)::Vector{Spec}
 		forwarded_deps = forward_prefetch_dependencies!(scheduler, forwarded_deps)
-		replacer = _arg_replacer(forwarded_deps)
-
-		sa = spec.ro.value
-		args = Any[copy_nested(replacer, a) for a in sa.args]
-		kwargs = Pair{Symbol,Any}[k=>copy_nested(replacer,v) for (k,v) in sa.kwargs]
-
-		# sa_forwarded = SpecArgs(args, kwargs)
-		sa_forwarded = SpecArgs(sa.f, args, kwargs)
-		sa_forwarded = default_deduplicator()(sa_forwarded) # TODO: avoid using default_deduplicator() here - we need to get it from somewhere
-		return Spec(sa_forwarded, spec.use_cache, true, spec.prefetch)
+		return replace_forwarded(spec, forwarded_deps)::Union{Spec,ProcessingException}
 	end
 
 	if spec.use_cache
