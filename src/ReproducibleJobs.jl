@@ -1,4 +1,4 @@
-module CacheBySpec
+module ReproducibleJobs
 
 using StableHashTraits
 using ReadOnlyArrays

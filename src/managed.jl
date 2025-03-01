@@ -2,7 +2,7 @@
 	Managed{T}
 
 Wrapper containing a single object of type `T`.
-Objects wrapped in `Managed` are read-only objects internal to `CacheBySpec`.
+Objects wrapped in `Managed` are read-only objects internal to `ReproducibleJobs`.
 To access the contents, use `unmanage`. For `Vector`s, `Dict`s etc. children can be accessed using `getindex` and `get`.
 
 See also: [`unmanage`](@ref)

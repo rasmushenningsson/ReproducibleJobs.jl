@@ -1,5 +1,5 @@
-name = "CacheBySpec"
-uuid = "2ffa5f23-53ba-4141-98f3-a176c30fe328"
+name = "ReproducibleJobs"
+uuid = "aecc171b-6fa4-4f58-b49a-a8d1f07f0278"
 authors = ["Rasmus Henningsson <rasmus.henningsson@gmail.com>"]
 version = "0.1.0"
 

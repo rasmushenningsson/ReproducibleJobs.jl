@@ -2,7 +2,7 @@ struct Cache
 	dir::String
 end
 
-let cache = Cache(@get_scratch!("CacheBySpec"))
+let cache = Cache(@get_scratch!("ReproducibleJobs"))
 	global get_cache() = cache
 end
 
