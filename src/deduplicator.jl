@@ -14,9 +14,9 @@ end
 
 # "Shortcut" for some simple types, to lower risk of type instabilities in deduplicate!
 deduplicate_type(::Deduplicator, ::Type{<:Union{<:Pair,<:Tuple,<:NamedTuple}}) = false
-deduplicate_type(::Deduplicator, ::Type{<:Union{<:Integer,<:AbstractFloat,String,Symbol}}) = false
+deduplicate_type(::Deduplicator, ::Type{<:Union{<:Integer,<:AbstractFloat,String,Char,Symbol}}) = false
 deduplicate_type(::Deduplicator, ::Type{VersionNumber}) = false # Fix for VersionNumber that otherwise runs into Vararg problems below
-
+deduplicate_type(::Deduplicator, ::Type{<:Exception}) = false
 
 # Does these result in type instable code during deduplication? No, nothing bad, we will get a small union.
 function deduplicate_type(dedup::Deduplicator, ::Type{T}) where {T}
@@ -24,6 +24,7 @@ function deduplicate_type(dedup::Deduplicator, ::Type{T}) where {T}
 		return deduplicate_type(dedup, T.a) || deduplicate_type(dedup, T.b)
 	end
 	ismutabletype(T) && return true
+	T === Any && return true
 	for S in fieldtypes(T)
 		deduplicate_type(dedup, S) && return true
 	end
@@ -59,5 +60,5 @@ function (dedup::Deduplicator{D})(x::T) where {D,T}
 
 	h = bytes2hex(stable_hash(x, dedup.hash_context))
 	y = get!(dedup.d, h, x)
-	ReadOnly{T}(y,h)
+	return ReadOnly{T}(y,h)
 end

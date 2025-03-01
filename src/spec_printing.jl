@@ -4,6 +4,26 @@ _nameof(::Type{<:ReadOnlyArray{V,N,T}}) where {V,N,T} = _nameof(T)
 
 _typenameof(x::T) where T = _nameof(T)
 
+
+
+function get_max_print(io, min_len=20)
+	n_chars_printed = get(io, :n_chars_printed, 0)
+	width = get(io, :displaysize, (0,0))[2]
+	max_print = max(min_len, width-n_chars_printed)
+end
+
+function _print_limited_string(io::IO, str::AbstractString, suffix, item_color=:normal) # TODO: Better name
+	max_print = get_max_print(io)
+
+	if length(str) <= max_print
+		printstyled(io, str; color=item_color)
+	else
+		printstyled(io, @view(str[1:max_print-length(suffix)]), suffix; color=item_color)
+	end
+end
+
+
+
 struct PrintContext
 	hashes::Set{String} # hashes seen at least once
 	duplicates::Dict{String,Int} # hashes seen at least twice, mapping to an ordinal
@@ -18,9 +38,9 @@ struct PrintReference
 	str::String # What to print, usually the type of the referenced thing?
 end
 
-printreference(::T) where T = PrintReference(_nameof(T))
+printreference(::T) where T = PrintReference(string(_nameof(T)))
 printreference(sa::SpecArgs; prefetch) =
-	PrintReference(string(get_versioned_function(sa).f, prefetch ? " (prefetched)" : ""))
+	PrintReference(string(sa.f, prefetch ? " (prefetched)" : ""))
 
 Base.show(io::IO, ref::PrintReference) = print(io, ref.str)
 
@@ -47,16 +67,30 @@ wrap_item(x) = x
 
 wrap_item(x::Union{<:Base.Fix1,<:Base.Fix2}) = ItemWrapper(x)
 wrap_item(x::AbstractString) = ItemWrapper(x)
+wrap_item(x::Symbol) = ItemWrapper(x)
 
+wrap_item(x::AbstractRange) = ItemWrapper(x)
 wrap_item(x::Union{<:AbstractArray,<:Tuple}) = wrap_item.(x)
 wrap_item(p::Pair) = wrap_item(p.first) => wrap_item(p.second)
 wrap_item(d::AbstractDict) = Dict((wrap_item(k)=>wrap_item(v) for (k,v) in pairs(d)))
 wrap_item(s::AbstractSet) = Set((wrap_item(x) for x in s))
 wrap_item(nt::NamedTuple) = map(wrap_item, nt)
 
+wrap_item(df::DataFrame) = ItemWrapper(df)
+
 Base.show(io::IO, w::ItemWrapper) = show(io, w.item)
 function Base.show(io::IO, w::ItemWrapper{T}) where T<:Union{<:Base.Fix1,<:Base.Fix2}
 	print(io, string(_nameof(T), '(', w.item.f, ", ", repr(w.item.x), ')'))
+end
+function Base.show(io::IO, w::ItemWrapper{<:DataFrame})
+	sz = _dataframe_size(w.item)
+	# item_name = string(join(sz,'×'), " ", _typenameof(w.item))
+	# print(io, item_name)
+
+	# TODO: print type info in different color?
+	cols = join(names(w.item), ", ")
+	str = string(join(sz,'×'), " ", _typenameof(w.item), ": ", cols)
+	_print_limited_string(io, str, "...")
 end
 
 
@@ -82,22 +116,6 @@ AbstractTrees.children(x::PrintNode) = x.children
 _printitem(io::IO, item, item_color) =
 	printstyled(IOContext(io, :limit=>true, :compact=>true, :short=>true), item; color=item_color) # Not great, but better than no IOContext
 
-
-function get_max_print(io, min_len=20)
-	n_chars_printed = get(io, :n_chars_printed, 0)
-	width = get(io, :displaysize, (0,0))[2]
-	max_print = max(min_len, width-n_chars_printed)
-end
-
-function _print_limited_string(io::IO, str::AbstractString, suffix, item_color) # TODO: Better name
-	max_print = get_max_print(io)
-
-	if length(str) <= max_print
-		printstyled(io, str; color=item_color)
-	else
-		printstyled(io, @view(str[1:max_print-length(suffix)]), suffix; color=item_color)
-	end
-end
 
 function _printitem(io::IO, a::AbstractArray, item_color)
 	# This is a bit of a hack.
@@ -148,6 +166,7 @@ function _should_collapse(::Type{T}) where T
 	T isa Union && return _should_collapse(T.a) && _should_collapse(T.b)
 	T <: Spec && return false
 	T <: ReadOnly && return false
+	T <: AbstractRange && return true
 	T <: AbstractArray && return false
 	T <: AbstractDict && return false
 	T <: AbstractSet && return false
@@ -155,6 +174,10 @@ function _should_collapse(::Type{T}) where T
 		return all(_should_collapse, fieldtypes(T))
 	end
 	return true
+end
+
+function to_print_node!(pc::PrintContext, x::AbstractRange{T}, name, h) where T
+	create_print_node(pc, name, h, x)
 end
 
 
@@ -205,6 +228,29 @@ function to_print_node!(pc::PrintContext, x::T, name, h) where T<:NamedTuple
 	end
 end
 
+function _dataframe_size(df::AbstractDataFrame)
+	# A little hack to get the actual DataFrame size. Might not be needed later.
+	if size(df,2)>0
+		col = df[!,1] # get the first column
+		if col isa Vector{<:ReadOnly}
+			ro = only(col)
+			return (length(ro.value), size(df,2))
+		end
+	end
+	return (0,0)
+end
+
+function to_print_node!(pc::PrintContext, df::AbstractDataFrame, name, h)
+	# collapsing version
+	create_print_node(pc, name, h, df)
+
+	# # non-collapsing version
+	# children = [to_print_node!(descend(pc),v,Symbol(string(k)),nothing) for (k,v) in pairs(eachcol(df))]
+	# # item_name = Symbol(string(join(size(df),'×'), " ", _typenameof(df))) # If the size of the DataFrame was correct, we could use this.
+	# sz = _dataframe_size(df)
+	# item_name = Symbol(join(sz,'×'), " ", _typenameof(df))
+	# create_print_node(pc, name, h, item_name; children, item_color=:magenta)
+end
 
 
 
@@ -230,9 +276,8 @@ function to_print_node!(pc::PrintContext, sa::SpecArgs, name, h; prefetch)
 	c2 = [to_print_node!(descend(pc),v,k,nothing) for (k,v) in sa.kwargs if !startswith(string(k),"__")] # skip "hidden" kwargs
 	children = vcat(c1,c2)
 
-	vf = get_versioned_function(sa)
-	if vf !== nothing
-		f = vf.f
+	if sa.f !== nothing
+		f = sa.f
 		item_color = :green
 	else
 		f = Symbol("Function not specified")

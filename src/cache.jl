@@ -2,7 +2,7 @@ struct Cache
 	dir::String
 end
 
-let cache = Cache(@get_scratch!("CacheBySpec"))
+let cache = Cache(@get_scratch!("ReproducibleJobs"))
 	global get_cache() = cache
 end
 
@@ -14,17 +14,25 @@ spec2path(cache::Cache, spec::Spec) = spec2path(cache, spec.ro)
 
 
 function _cache_load(fp, sa::SpecArgs)
-	@info "Loading $(get_versioned_function(sa)) from cache"
+	@info "Loading $(sa.f) from cache"
 	d = load(fp)
 	cached_sa = d["spec_args"]
-	@assert sa == cached_sa "Job specification did not match job specification in cache" # TODO: Decide what to do on failure - delete the file???
+
+	# TODO: handle this better...
+	#       perhaps by wrapping Fix1/Fix2 in our own type internally...
+	sa == cached_sa || @warn "Job specification did not match job specification in cache (likely cause, Regex within a Base.Fix2)."
+
 	touch(fp) # update file timestamp (in case we want to remove old cached files later)
 	return d["value"]
 end
 _cache_load(fp, spec::Spec) = _cache_load(fp, spec.ro.value)
 
 # _cache_save(fp, spec_args::SpecArgs, value) = jldsave(fp, true; spec_args, value) # compress=true - using CodecZlib
-_cache_save(fp, spec_args::SpecArgs, value) = jldsave(fp, ZstdFrameCompressor(); spec_args, value) # compress with Zstd - Default compression level is probably fine.
+function _cache_save(fp, spec_args::SpecArgs, value)
+	if !(value isa ProcessingException)
+		jldsave(fp, ZstdFrameCompressor(); spec_args, value) # compress with Zstd - Default compression level is probably fine.
+	end
+end
 _cache_save(fp, spec::Spec, value) = _cache_save(fp, spec.ro.value, value)
 
 
@@ -45,7 +53,7 @@ end
 
 function cache_insert!(cache::Cache, spec::Spec, value)
 	fp = spec2path(cache, spec)
-	isfile(fp) && error("cache_insert! expects a spec that is not already in the cache. Got $(get_versioned_function(spec)) with hash $(spec.ro.h).")
+	isfile(fp) && error("cache_insert! expects a spec that is not already in the cache. Got $(spec.f) with hash $(spec.ro.h).")
 	_cache_save(fp, spec, value)
 	return value
 end

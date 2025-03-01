@@ -6,22 +6,30 @@ mutable struct Job
 end
 Job(spec::Spec) = Job(spec, NotComputed())
 
+Base.Broadcast.broadcastable(job::Job) = Ref(job) # treat as scalar for broadcasting
 
-process_arg(job::Job) = job.spec
+copy_arg(job::Job) = job.spec # Already managed, just unwrap
 _prefetch(job::Job) = _prefetch(job.spec)
 
 
 
-fetch!(job::Job; scheduler=default_scheduler()) =
-	job.result = fetch!(scheduler, job.spec)
+function fetch!(job::Job; scheduler=default_scheduler(), managed=false)
+	if job.result === NotComputed()
+		job.result = manage(fetch!(scheduler, job.spec))
+	end
+	job.result isa ProcessingException && throw(job.result)
+	managed ? job.result : unmanage(job.result)
+end
 
 function forward(job::Job; scheduler=default_scheduler())
-	spec = forward!(scheduler, job.spec)
-	spec === job.spec ? job : Job(spec)
+	res = forward!(scheduler, job.spec)
+	res isa ProcessingException && throw(res)
+	res === job.spec ? job : Job(res)
 end
 function forward_once(job::Job; scheduler=default_scheduler())
-	spec = forward_once!(scheduler, job.spec)
-	spec === job.spec ? job : Job(spec)
+	res = forward_once!(scheduler, job.spec)
+	res isa ProcessingException && throw(res)
+	res === job.spec ? job : Job(res)
 end
 
 
@@ -44,7 +52,7 @@ function Base.show(io::IO, ::MIME"text/plain", job::Job)
 		let io = IOContext(io, :compact=>true)
 			println(io)
 			print(io, "Job Result: ")
-			show(io, job.result)
+			show(io, unsafe_unmanage(job.result))
 		end
 	end
 end

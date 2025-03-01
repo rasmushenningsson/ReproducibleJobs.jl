@@ -18,64 +18,105 @@ _arg_replacer(upstream) = Base.Fix2(_arg_replacer, upstream)
 _arg_replacer(x, upstream) = get(upstream, x, x) # replaces prefetched specs by the value, and leaves everything else in place
 
 _unwrap_value(upstream) = Base.Fix2(_unwrap_value, upstream)
+_unwrap_value() = _unwrap_value(IdDict{Spec,Any}())
+
 function _unwrap_value(x, upstream)
-	# Manual dispatch since we have few types
-	x isa Spec && return upstream[x]
+	x isa Spec && return copy_nested(_unwrap_value(), upstream[x]) # Needed to handle e.g. a result which is a vector of `ReadOnly`s
 	x isa ReadOnly && return x.value
 	x
 end
 
 
-function fetch_dependency!(scheduler, spec)
-	res = fetch!(scheduler, spec)
-	# Process args - but do not copy nor deduplicate! The result can be large and is just used for the computation at hand
-	# It's important that process_arg is done to get the same exact inputs as if the spec was prefetched
-	res = copy_nested(process_arg, res)
-end
-
-fetch_dependencies!(scheduler, deps) = IdDict{Spec,Any}(dep=>fetch_dependency!(scheduler,dep) for dep in deps)
-
-
-# TODO: find a better name?
-function forward_or_prefetch!(scheduler, spec)
-	res = process!(scheduler, spec, spec.prefetch ? :compute : :forward)
-
-	if spec.prefetch
-		# NB: Same as when creating spec except no copy_arg, because that cannot have a reasonable default
-		f = deduplicate_leaves(default_deduplicator())∘process_arg # TODO: avoid using default_deduplicator() here - we need to get it from somewhere
-		res = copy_nested(f, res)
-	end
-	res
-end
+fetch_dependencies!(scheduler, deps) = IdDict{Spec,Any}(dep=>fetch!(scheduler,dep) for dep in deps)
 
 # TODO: find a better name?
 forward_prefetch_dependencies!(scheduler, deps) =
-	IdDict{Spec,Any}(dep=>forward_or_prefetch!(scheduler, dep) for dep in deps)
+	IdDict{Spec,Any}(dep=>process!(scheduler, dep, dep.prefetch ? :compute : :forward) for dep in deps)
 
+
+
+function propagate_error(spec, vals)::Union{Nothing, ProcessingException}
+	if any(x->x isa ProcessingException, vals)
+		causes = filter!(x->x isa ProcessingException, collect(vals))
+		return ProcessingException(spec, causes)
+	else
+		return nothing
+	end
+end
 
 
 function preprocess(spec::Spec, upstream::IdDict{Spec,Any})
-	vf = get_versioned_function(spec)
+	f = spec.f
+	try
+		@info "Preprocessing $f"
 
-	@info "Preprocessing $vf"
-	res = vf.f(spec, upstream)
-	@assert res !== nothing "Preprocessing of $vf returned nothing"
-	res
+		err = propagate_error(spec, values(upstream))
+		err !== nothing && return err
+
+		if isempty(upstream)
+			res = f(spec.args...; spec.kwargs...)
+		else
+			res = f(spec.args...; spec.kwargs..., upstream)
+		end
+		# res = f(spec, upstream)
+		@assert res !== nothing "Preprocessing of $f returned nothing"
+		return res
+	catch e
+		# TODO: Do not show anything/much here, it will be shown later instead
+		@warn "Error preprocessing $f"
+		bt = Base.catch_backtrace()
+		# Base.showerror(stdout, e, bt)
+		Base.showerror(stdout, e)
+		println()
+		return ProcessingException(spec, e, stacktrace(bt))
+	end
+end
+
+function replace_forwarded(spec::Spec, upstream::IdDict{Spec,Any})
+	err = propagate_error(spec, values(upstream))
+	err !== nothing && return err
+
+	replacer = _arg_replacer(upstream)
+
+	sa = spec.ro.value
+	args = Any[copy_nested(replacer, a) for a in sa.args]
+	kwargs = Pair{Symbol,Any}[k=>copy_nested(replacer,v) for (k,v) in sa.kwargs]
+
+	# sa_forwarded = SpecArgs(args, kwargs)
+	sa_forwarded = SpecArgs(sa.f, args, kwargs)
+	sa_forwarded = default_deduplicator()(sa_forwarded) # TODO: avoid using default_deduplicator() here - we need to get it from somewhere
+	return Spec(sa_forwarded, spec.use_cache, true, spec.prefetch)
+
 end
 
 
 function compute(spec::Spec, upstream::IdDict{Spec,Any})
-	vf = get_versioned_function(spec)
-	sa = _get_spec_args(spec)
+	f = spec.f
+	try
+		@info "Running $f"
+		err = propagate_error(spec, values(upstream))
+		err !== nothing && return err
 
-	unwrapper = _unwrap_value(upstream)
-	args = (copy_nested(unwrapper, a) for a in sa.args)
-	kwargs = (copy_nested(unwrapper, k)=>copy_nested(unwrapper,v) for (k,v) in sa.kwargs if !startswith(string(k),"__"))
+		v = get(spec.kwargs, :__version, nothing)
+		@assert v !== nothing "__version kwarg must be provided for all (non-preprocessing) specs."
 
-	@info "Running $vf"
-	res = vf.f(args...; kwargs...)
-	@assert res !== nothing "Computation of $vf returned nothing"
-	res
+		sa = _get_spec_args(spec)
+		unwrapper = _unwrap_value(upstream)
+		args = (copy_nested(unwrapper, a) for a in sa.args)
+		kwargs = (copy_nested(unwrapper, k)=>copy_nested(unwrapper,v) for (k,v) in sa.kwargs if !startswith(string(k),"__"))
+
+		res = f(args...; kwargs...)
+		@assert res !== nothing "Computation of $f returned nothing"
+		return res
+	catch e
+		# TODO: Do not show anything/much here, it will be shown later instead
+		@warn "Error computing $f"
+		bt = Base.catch_backtrace()
+		# Base.showerror(stdout, e, bt)
+		Base.showerror(stdout, e)
+		println()
+		return ProcessingException(spec, e, stacktrace(bt))
+	end
 end
 
 
@@ -84,6 +125,15 @@ function _fetch_and_compute!(scheduler, spec)
 	deps = fetch_dependencies!(scheduler, deps)
 	res = compute(spec, deps)
 	@assert !(res isa Spec)
+
+	# By returning a Managed result, the computing function takes responsibility of the contents, otherwise we need to standardize
+	if res isa Managed
+		res = res.x
+	else
+		f = deduplicate_leaves(default_deduplicator()) # TODO: avoid using default_deduplicator() here - we need to get it from somewhere
+		res = copy_nested(f, res)
+	end
+
 	res
 end
 
@@ -94,26 +144,18 @@ function _process!(scheduler::Scheduler, spec::Spec)
 	# 2. We need to forward/prefetch subspecs and replace subspecs with forwarded/prefetched subspecs
 	# 3. We need to fetch and compute (and cache if needed)
 
-	# TODO: avoid code repetions below
+	# TODO: avoid code repetitions below
 
 	if is_preprocessing(spec)
 		deps = get_dependencies(spec)::Vector{Spec}
 		deps = fetch_dependencies!(scheduler, deps)
-		return preprocess(spec, deps)::Spec
+		return preprocess(spec, deps)::Union{Spec,ProcessingException}
 	end
 
 	if !spec.forwarding_complete
 		forwarded_deps = get_dependencies(spec)::Vector{Spec}
 		forwarded_deps = forward_prefetch_dependencies!(scheduler, forwarded_deps)
-		replacer = _arg_replacer(forwarded_deps)
-
-		sa = spec.ro.value
-		args = Any[copy_nested(replacer, a) for a in sa.args]
-		kwargs = Pair{Symbol,Any}[k=>copy_nested(replacer,v) for (k,v) in sa.kwargs]
-
-		sa_forwarded = SpecArgs(args, kwargs)
-		sa_forwarded = default_deduplicator()(sa_forwarded) # TODO: avoid using default_deduplicator() here - we need to get it from somewhere
-		return Spec(sa_forwarded, spec.use_cache, true, spec.prefetch)
+		return replace_forwarded(spec, forwarded_deps)::Union{Spec,ProcessingException}
 	end
 
 	if spec.use_cache
@@ -136,6 +178,13 @@ function process!(scheduler::Scheduler, spec::Spec, mode::Symbol)
 
 		res = get!(scheduler.results, spec) do
 			_process!(scheduler, spec)
+
+			# # Hopefully we won't need this
+			# r = _process!(scheduler, spec)
+			# if r isa Spec
+			# 	r = Spec(r.ro, r.use_cache, r.forwarding_complete, r.prefetch || spec.prefetch)
+			# end
+			# r
 		end
 
 		res isa Spec || return res

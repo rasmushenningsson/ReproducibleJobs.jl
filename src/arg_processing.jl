@@ -23,7 +23,6 @@ function _is_leaf(a::Array{T}) where T
 	end
 	return true
 end
-_is_leaf(a::ReadOnlyArray{T}) where T = _is_leaf(parent(a))
 
 
 function _is_leaf(d::Dict{K,V}) where {K,V}
@@ -48,21 +47,34 @@ function _is_leaf(s::Set{T}) where T
 end
 
 
+function copy_arg(e::Exception)
+	@warn "Exceptions cannot be put as arguments in a Spec, throwing."
+	throw(e)
+end
 
 
-process_arg(a::Array) = ReadOnlyArray(a)
-process_arg(x::Any) = x
 
-copy_arg(x::Union{<:ReadOnlyArray,<:Dict,<:Set}) = x # already copied in copy_nested
+copy_arg(x::Union{<:Array,<:Dict,<:Set}) = x # already copied in copy_nested
 copy_arg(x::AbstractString) = string(x) # Standardize strings
+copy_arg(x::Char) = x # Chars are immutable, pass through
 copy_arg(x::Symbol) = x # symbols are immutable, pass through
-copy_arg(f::VersionedFunction) = f
+copy_arg(v::VersionNumber) = v
+copy_arg(c::Colon) = c
 copy_arg(f::Union{<:Base.Fix1,<:Base.Fix2}) = f # TODO: revise (or revise in copy_nested)
 copy_arg(x::DataType) = x
+
+
+copy_arg(f::Returns{T}) where T = Returns(copy_arg(f.value))
+copy_arg(f::ComposedFunction) = copy_arg(f.outer) ∘ copy_arg(f.inner)
+
+# Simple temporary solution for allowing some functions to be used as arguments
+copy_arg(f::Union{typeof(identity), typeof(!), typeof(iszero)}) = f
+
+
+
 copy_arg(x) = copy(x)
 
 deduplicate_leaves(dedup::Deduplicator) = Base.Fix1(deduplicate_leaves, dedup)
-deduplicate_leaves(dedup::Deduplicator, x::Union{<:ReadOnlyArray,<:Dict,<:Set}) =
+deduplicate_leaves(dedup::Deduplicator, x::Union{<:Array,<:Dict,<:Set}) =
 	_is_leaf(x) ? dedup(x) : x
 deduplicate_leaves(::Deduplicator, x::Any) = x
-

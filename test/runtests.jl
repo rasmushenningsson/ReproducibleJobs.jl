@@ -1,8 +1,8 @@
-using CacheBySpec
-using CacheBySpec: ReadOnly
+using ReproducibleJobs
+using ReproducibleJobs: ReadOnly
 using StableHashTraits
 using Test
 
-@testset "CacheBySpec" begin
+@testset "ReproducibleJobs" begin
 	include("deduplication.jl")
 end
