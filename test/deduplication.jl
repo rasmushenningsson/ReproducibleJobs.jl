@@ -61,13 +61,20 @@ end
 	
 	ro = ReadOnly(x, "dummy_hash")
 	ro2 = dedup(ro)
+	@test ro != ro2
 	@test ro !== ro2
 
 	ro3 = ReadOnly(copy(x), "dummy_hash")
-	@test ro3 !== ro # before dedup
+	# before dedup
+	@test ro3 == ro
+	@test ro3 !== ro
 	ro4 = dedup(ro3)
-	@test ro4 === ro2 # after dedup
-	@test ro4 !== ro # after dedup
-	@test ro4 !== ro3 # after dedup
+	# after dedup
+	@test ro4 == ro2
+	@test ro4 != ro
+	@test ro4 != ro3
+	@test ro4 === ro2
+	@test ro4 !== ro
+	@test ro4 !== ro3
 	@test length(dedup.d) == 1
 end
