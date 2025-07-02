@@ -1,5 +1,5 @@
 struct SpecArgs
-	f::Any
+	f::Any # Hm. Can this just be Symbol now?
 	args::Vector{Any}
 	kwargs::Vector{Pair{Symbol,Any}}
 	function SpecArgs(f, args, kwargs)
@@ -106,6 +106,6 @@ function Base.show(io::IO, spec::Spec)
 	if get(io,:compact,false)
 		show(io, spec.f)
 	else
-		print_spec(io, spec; maxdepth=10)
+		print_spec(io, spec; maxdepth=15)
 	end
 end
