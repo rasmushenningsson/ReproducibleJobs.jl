@@ -8,14 +8,12 @@ is_preprocessing(spec::Spec) = is_preprocessing(_get_spec_args(spec))
 is_preprocessing(f, ::SpecArgs) = is_preprocessing(f)
 is_preprocessing(f) = false
 
-
-# We should probably add an (optional) parameter `f` that will be applied to dependencies, e.g. forcing forwarding.
-# And then not return deps with `op===nothing`. Because that's the most common case during preprocessing.
-function get_dependencies(sa::SpecArgs)
+function get_dependencies(f::F, sa::SpecArgs) where F
 	deps = Spec[]
-	visit_dependencies(sa) do dep
-		push!(deps, dep)
+	visit_dependencies(sa) do dep::Spec
+		f(dep.op) && push!(deps, dep)
 	end
 	return unique!(deps)
 end
-get_dependencies(spec::Spec) = get_dependencies(_get_spec_args(spec))
+
+get_dependencies(sa::SpecArgs) = get_dependencies(Returns(true), sa)

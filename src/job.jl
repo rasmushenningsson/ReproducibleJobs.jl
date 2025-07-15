@@ -1,7 +1,6 @@
 struct NotComputed end
 
 mutable struct Job
-	# const spec::Spec
 	const spec::ReadOnly{SpecArgs}
 	result::Any
 end

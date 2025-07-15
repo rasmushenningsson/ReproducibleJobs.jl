@@ -31,15 +31,14 @@ fetch_dependencies!(scheduler, deps) = IdDict{Spec,Any}(dep=>fetch!(scheduler, d
 
 
 
-function process_dependency!(scheduler, dep; force_forward=false)
-	op = dep.op
-	if force_forward && op !== Prefetch()
-		op = Forward()
-	end
-	process!(scheduler, dep.ro, op)
+function process_dependency!(f, scheduler, dep)
+	dep = f(dep)
+	dep.op === Call() && return dep # Already preprocessed as far as it gets
+	process!(scheduler, dep)
 end
-process_dependencies!(scheduler, deps; kwargs...) =
-	IdDict{Spec,Any}(dep=>process_dependency!(scheduler, dep; kwargs...) for dep in deps)
+process_dependencies!(f::F, scheduler, deps) where F =
+	IdDict{Spec,Any}(dep=>process_dependency!(f, scheduler, dep) for dep in deps)
+process_dependencies!(scheduler, deps) = process_dependencies!(identity, scheduler, deps)
 
 
 
@@ -139,10 +138,11 @@ function _process_once!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, deps::Vect
 	sa = ro.value
 
 	if is_preprocessing(sa)
-		forwarded_deps = process_dependencies!(scheduler, deps)
-		sa_forwarded = replace_forwarded(sa, forwarded_deps)::Union{SpecArgs,ProcessingException}
-
-		preprocessed = preprocess(sa_forwarded)
+		if !isempty(deps)
+			forwarded_deps = process_dependencies!(scheduler, deps)
+			sa = replace_forwarded(sa, forwarded_deps)::Union{SpecArgs,ProcessingException}
+		end
+		preprocessed = preprocess(sa)
 		if preprocessed isa ReadOnly{SpecArgs}
 			return Spec(preprocessed, nothing)
 		else
@@ -151,7 +151,7 @@ function _process_once!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, deps::Vect
 	end
 
 	if !all(x->x.op === Call(), deps)
-		forwarded_deps = process_dependencies!(scheduler, deps; force_forward=true)
+		forwarded_deps = process_dependencies!(forward, scheduler, deps)
 		sa_forwarded = replace_forwarded(sa, forwarded_deps)::Union{SpecArgs,ProcessingException}
 		sa_forwarded isa ProcessingException && return sa_forwarded
 		ro_forwarded = default_deduplicator()(sa_forwarded) # TODO: avoid using default_deduplicator() here - we need to get it from somewhere
@@ -180,11 +180,17 @@ function process_once!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, op::T) wher
 		op.predicate(sa) && return (Spec(ro, nothing), true) # should op ever be set to something here?
 	end
 
-	deps = get_dependencies(sa)::Vector{Spec}
 
-	# If we are not preprocessing, we should only forward if it's not ready to be called yet.
-	if !is_preprocessing(sa) && T <: Forward && all(s->s.op === Call(), deps)
-		return (Spec(ro, Call()), true)
+	if is_preprocessing(sa)
+		deps = get_dependencies(!isnothing, sa) # No need to collect dependencies with op===nothing since they will not be changed.
+	else
+		deps = get_dependencies(sa)
+
+		# Stop if we are forwarding - but sa is ready for computation
+		# I.e. ensure process_once! doesn't compute if we only ask for forwarding.
+		if T <: Forward && all(s->s.op === Call(), deps)
+			return (Spec(ro, Call()), true)
+		end
 	end
 
 	res = get!(scheduler.results, ro) do

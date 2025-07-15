@@ -41,14 +41,18 @@ _get_kwarg(f, sa::SpecArgs) = _get_kwarg(f, sa.kwargs)
 
 
 
-
-
 struct Call end
 struct Prefetch end # Rename?
 struct Forward{F} # Rename to something that would indicate that we should stop if predicate is true?
 	predicate::F # true means we found what we want, so forwarding will stop
 end
 Forward() = Forward(Returns(false))
+
+
+forward(::Call) = Call()
+forward(::Prefetch) = Prefetch()
+forward(::Forward) = Forward() # get rid of the predicate
+forward(::Nothing) = Forward()
 
 
 
@@ -58,6 +62,7 @@ struct Spec
 end
 
 Base.Broadcast.broadcastable(spec::Spec) = Ref(spec) # treat as scalar for broadcasting
+Base.Broadcast.broadcastable(sa::SpecArgs) = Ref(sa) # treat as scalar for broadcasting
 
 # Usually accessed through getproperty
 get_versioned_function(spec::Spec) = _get_spec_args(spec).f
@@ -81,6 +86,9 @@ deduplicate_type(::Deduplicator, ::Type{Spec}) = false
 
 _is_leaf_type(::Type{Spec}) = false
 copy_arg(spec::Spec) = spec # Already managed, no need to copy
+# copy_arg(ro::ReadOnly{SpecArgs}) = Spec(ro, nothing) # Wrap in Spec
+
+
 
 manage(spec::Spec) = spec # Already managed
 
@@ -88,8 +96,8 @@ function create_spec(f, args...; deduplicator=default_deduplicator(), kwargs...)
 	p = deduplicate_leaves(deduplicator)∘copy_arg
 	sa = create_spec_args(p, f, args, kwargs)
 	sa = deduplicator(sa)
+	Spec(sa, nothing)
 end
-
 
 
 
@@ -121,6 +129,10 @@ visit_dependencies(f, spec::Spec) = visit_dependencies(f, _get_spec_args(spec))
 
 deduplicate!(dedup::Deduplicator, spec::Spec) = Spec(deduplicate!(dedup, spec.ro), spec.use_cache, spec.forwarding_complete, spec.prefetch)
 
+
+
+
+forward(spec::Spec) = Spec(spec.ro, forward(spec.op))
 
 
 
