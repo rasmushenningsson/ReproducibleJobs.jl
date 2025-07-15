@@ -151,7 +151,7 @@ function _process_once!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, deps::Vect
 	end
 
 	if !all(x->x.op === Call(), deps)
-		forwarded_deps = process_dependencies!(forward, scheduler, deps)
+		forwarded_deps = process_dependencies!(forwarded, scheduler, deps)
 		sa_forwarded = replace_forwarded(sa, forwarded_deps)::Union{SpecArgs,ProcessingException}
 		sa_forwarded isa ProcessingException && return sa_forwarded
 		ro_forwarded = default_deduplicator()(sa_forwarded) # TODO: avoid using default_deduplicator() here - we need to get it from somewhere
