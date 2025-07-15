@@ -39,20 +39,21 @@ struct PrintReference
 end
 
 printreference(::T) where T = PrintReference(string(_nameof(T)))
-# printreference(sa::SpecArgs; op::T) where T =
-printreference(sa::SpecArgs; op::T = nothing) where T = # op should be used here really
-	PrintReference(string(sa.f, op === Prefetch() ? " (prefetched)" : ""))
+printreference(sa::SpecArgs; op::T = nothing) where T =
+	PrintReference(string(sa.f, op === nothing ? "" : string(" (",op,')')))
 
 Base.show(io::IO, ref::PrintReference) = print(io, ref.str)
 
 
-struct PrintFetched
+struct PrintWithOp
 	f::Any
+	op::Any
 end
-function Base.show(io::IO, x::PrintFetched)
+function Base.show(io::IO, x::PrintWithOp)
 	show(io, x.f)
-	print(io, " (prefetched)")
+	print(io, " (", x.op, ')')
 end
+
 
 
 """
@@ -288,8 +289,8 @@ function to_print_node!(pc::PrintContext, sa::SpecArgs, name, h; op::T = nothing
 		item_color = :red
 	end
 
-	if op === Prefetch()
-		f = PrintFetched(f)
+	if op !== nothing
+		f = PrintWithOp(f, op)
 	end
 
 	create_print_node(pc, name, h, f; children, item_color)

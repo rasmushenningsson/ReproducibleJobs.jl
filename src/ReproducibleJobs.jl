@@ -29,6 +29,7 @@ export
 	forward_once,
 	fetched,
 	prefetched,
+	forwarded,
 	ifelse_job,
 	checksummedfilepath_job
 

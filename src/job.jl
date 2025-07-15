@@ -14,6 +14,9 @@ copy_arg(job::Job) = Spec(job.spec, nothing) # Already managed, just wrap in a S
 _fetched(job::Job) = _fetched(job.spec)
 _prefetched(job::Job) = _prefetched(job.spec)
 
+forwarded(job::Job) = forwarded(Spec(job.spec, nothing))
+forwarded(predicate, job::Job) = forwarded(predicate, Spec(job.spec, nothing))
+
 
 
 function fetch!(job::Job; scheduler=default_scheduler(), managed=false)

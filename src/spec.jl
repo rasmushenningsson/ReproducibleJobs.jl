@@ -58,6 +58,7 @@ forward(::Nothing) = Forward()
 
 
 
+
 struct Spec
 	ro::ReadOnly{SpecArgs}
 	op::Any # Call/Fetch/Prefetch/Forward{F}/Nothing - is it better to use a Union?
@@ -134,7 +135,8 @@ deduplicate!(dedup::Deduplicator, spec::Spec) = Spec(deduplicate!(dedup, spec.ro
 
 
 
-forward(spec::Spec) = Spec(spec.ro, forward(spec.op))
+forwarded(spec::Spec) = Spec(spec.ro, forward(spec.op))
+forwarded(predicate, spec::Spec) = Spec(spec.ro, Forward(predicate))
 
 
 
@@ -156,5 +158,16 @@ function Base.show(io::IO, spec::Spec)
 		show(io, spec.f)
 	else
 		print_spec(io, spec; maxdepth=15)
+	end
+end
+
+Base.show(io::IO, ::Call) = print(io, "call")
+Base.show(io::IO, ::Fetch) = print(io, "fetched")
+Base.show(io::IO, ::Prefetch) = print(io, "prefetched")
+function Base.show(io::IO, fwd::Forward{F}) where F
+	if fwd.predicate === Returns(false)
+		print(io, "forwarded")
+	else
+		print(io, "forwarded(", fwd.predicate, ")")
 	end
 end
