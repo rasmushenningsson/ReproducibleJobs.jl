@@ -17,6 +17,10 @@ end
 
 Base.hash(ro::ReadOnly, h::UInt) = hash(ro.h, h)
 
+
+Base.Broadcast.broadcastable(ro::ReadOnly) = Ref(ro) # treat as scalar for broadcasting
+
+
 # Needed to supported ReadOnly values with other, nested ReadOnly values inside (without recomputing hash values)
 StableHashTraits.transformer(::Type{<:ReadOnly}) = StableHashTraits.Transformer(pick_fields(:h))
 

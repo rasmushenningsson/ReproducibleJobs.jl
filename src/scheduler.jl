@@ -3,9 +3,9 @@
 # And maybe not be the default.
 
 struct Scheduler
-	results::IdDict{Spec,Any}
+	results::Dict{ReadOnly{SpecArgs},Any}
 end
-Scheduler() = Scheduler(IdDict{Spec,Any}())
+Scheduler() = Scheduler(Dict{ReadOnly{SpecArgs},Any}())
 
 let scheduler_singleton = Scheduler()
 	global default_scheduler() = scheduler_singleton
@@ -27,38 +27,39 @@ function _unwrap_value(x, upstream)
 end
 
 
-fetch_dependencies!(scheduler, deps) = IdDict{Spec,Any}(dep=>fetch!(scheduler,dep) for dep in deps)
-
-# TODO: find a better name?
-forward_prefetch_dependencies!(scheduler, deps) =
-	IdDict{Spec,Any}(dep=>process!(scheduler, dep, dep.prefetch ? :compute : :forward) for dep in deps)
+fetch_dependencies!(scheduler, deps) = IdDict{Spec,Any}(dep=>fetch!(scheduler, dep.ro) for dep in deps)
 
 
 
-function propagate_error(spec, vals)::Union{Nothing, ProcessingException}
+function process_dependency!(f, scheduler, dep)
+	dep = f(dep)
+	dep.op === Call() && return dep # Already preprocessed as far as it gets
+	process!(scheduler, dep)
+end
+process_dependencies!(f::F, scheduler, deps) where F =
+	IdDict{Spec,Any}(dep=>process_dependency!(f, scheduler, dep) for dep in deps)
+process_dependencies!(scheduler, deps) = process_dependencies!(identity, scheduler, deps)
+
+
+
+function propagate_error(sa, vals)::Union{Nothing, ProcessingException}
 	if any(x->x isa ProcessingException, vals)
 		causes = filter!(x->x isa ProcessingException, collect(vals))
-		return ProcessingException(spec, causes)
+		return ProcessingException(sa, causes)
 	else
 		return nothing
 	end
 end
 
 
-function preprocess(spec::Spec, upstream::IdDict{Spec,Any})
-	f = spec.f
+preprocess(err::ProcessingException) = err
+
+function preprocess(sa::SpecArgs)
+	f = sa.f
 	try
 		@info "Preprocessing $f"
 
-		err = propagate_error(spec, values(upstream))
-		err !== nothing && return err
-
-		if isempty(upstream)
-			res = f(spec.args...; spec.kwargs...)
-		else
-			res = f(spec.args...; spec.kwargs..., upstream)
-		end
-		# res = f(spec, upstream)
+		res = f(sa.args...; sa.kwargs...)
 		@assert res !== nothing "Preprocessing of $f returned nothing"
 		return res
 	catch e
@@ -68,39 +69,34 @@ function preprocess(spec::Spec, upstream::IdDict{Spec,Any})
 		# Base.showerror(stdout, e, bt)
 		Base.showerror(stdout, e)
 		println()
-		return ProcessingException(spec, e, stacktrace(bt))
+		return ProcessingException(sa, e, stacktrace(bt))
 	end
 end
 
-function replace_forwarded(spec::Spec, upstream::IdDict{Spec,Any})
-	err = propagate_error(spec, values(upstream))
+function replace_forwarded(sa::SpecArgs, upstream::IdDict{Spec,Any})
+	err = propagate_error(sa, values(upstream))
 	err !== nothing && return err
 
 	replacer = _arg_replacer(upstream)
 
-	sa = spec.ro.value
 	args = Any[copy_nested(replacer, a) for a in sa.args]
 	kwargs = Pair{Symbol,Any}[k=>copy_nested(replacer,v) for (k,v) in sa.kwargs]
 
-	# sa_forwarded = SpecArgs(args, kwargs)
 	sa_forwarded = SpecArgs(sa.f, args, kwargs)
-	sa_forwarded = default_deduplicator()(sa_forwarded) # TODO: avoid using default_deduplicator() here - we need to get it from somewhere
-	return Spec(sa_forwarded, spec.use_cache, true, spec.prefetch)
-
+	return sa_forwarded
 end
 
 
-function compute(spec::Spec, upstream::IdDict{Spec,Any})
-	f = spec.f
+function compute(sa::SpecArgs, upstream::IdDict{Spec,Any})
+	f = sa.f
 	try
 		@info "Running $f"
-		err = propagate_error(spec, values(upstream))
+		err = propagate_error(sa, values(upstream))
 		err !== nothing && return err
 
-		v = get(spec.kwargs, :__version, nothing)
+		v = _get_kwarg(sa, :__version, nothing)
 		@assert v !== nothing "__version kwarg must be provided for all (non-preprocessing) specs."
 
-		sa = _get_spec_args(spec)
 		unwrapper = _unwrap_value(upstream)
 		args = (copy_nested(unwrapper, a) for a in sa.args)
 		kwargs = (copy_nested(unwrapper, k)=>copy_nested(unwrapper,v) for (k,v) in sa.kwargs if !startswith(string(k),"__"))
@@ -115,15 +111,14 @@ function compute(spec::Spec, upstream::IdDict{Spec,Any})
 		# Base.showerror(stdout, e, bt)
 		Base.showerror(stdout, e)
 		println()
-		return ProcessingException(spec, e, stacktrace(bt))
+		return ProcessingException(sa, e, stacktrace(bt))
 	end
 end
 
 
-function _fetch_and_compute!(scheduler, spec)
-	deps = get_dependencies(spec)::Vector{Spec}
+function _fetch_and_compute!(scheduler, sa::SpecArgs, deps::Vector{Spec})
 	deps = fetch_dependencies!(scheduler, deps)
-	res = compute(spec, deps)
+	res = compute(sa, deps)
 	@assert !(res isa Spec)
 
 	# By returning a Managed result, the computing function takes responsibility of the contents, otherwise we need to standardize
@@ -138,66 +133,97 @@ function _fetch_and_compute!(scheduler, spec)
 end
 
 
-function _process!(scheduler::Scheduler, spec::Spec)
-	# Possibilities:
-	# 1. We need to preprocess: possibly fetch and then compute(spec, fetched)
-	# 2. We need to forward/prefetch subspecs and replace subspecs with forwarded/prefetched subspecs
-	# 3. We need to fetch and compute (and cache if needed)
 
-	# TODO: avoid code repetitions below
+function _process_once!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, deps::Vector{Spec})
+	sa = ro.value
 
-	if is_preprocessing(spec)
-		deps = get_dependencies(spec)::Vector{Spec}
-		deps = fetch_dependencies!(scheduler, deps)
-		return preprocess(spec, deps)::Union{Spec,ProcessingException}
+	if is_preprocessing(sa)
+		if !isempty(deps)
+			forwarded_deps = process_dependencies!(scheduler, deps)
+			sa = replace_forwarded(sa, forwarded_deps)::Union{SpecArgs,ProcessingException}
+		end
+		preprocessed = preprocess(sa)
+		if preprocessed isa ReadOnly{SpecArgs}
+			return Spec(preprocessed, nothing)
+		else
+			return preprocessed
+		end
 	end
 
-	if !spec.forwarding_complete
-		forwarded_deps = get_dependencies(spec)::Vector{Spec}
-		forwarded_deps = forward_prefetch_dependencies!(scheduler, forwarded_deps)
-		return replace_forwarded(spec, forwarded_deps)::Union{Spec,ProcessingException}
+	if !all(x->x.op === Call(), deps)
+		forwarded_deps = process_dependencies!(forward, scheduler, deps)
+		sa_forwarded = replace_forwarded(sa, forwarded_deps)::Union{SpecArgs,ProcessingException}
+		sa_forwarded isa ProcessingException && return sa_forwarded
+		ro_forwarded = default_deduplicator()(sa_forwarded) # TODO: avoid using default_deduplicator() here - we need to get it from somewhere
+		return Spec(ro_forwarded, Call())
 	end
 
-	if spec.use_cache
-		return cache_get!(spec) do
-			_fetch_and_compute!(scheduler, spec)
+	if _get_kwarg(sa, :__use_cache)
+		return cache_get!(ro) do
+			_fetch_and_compute!(scheduler, sa, deps)
 		end
 	else
 		@info "Bypassing cache"
-		return _fetch_and_compute!(scheduler, spec)
+		return _fetch_and_compute!(scheduler, sa, deps)
 	end
 end
 
-function process!(scheduler::Scheduler, spec::Spec, mode::Symbol)
-	@assert mode in (:forward_once,:forward,:compute)
 
+# Return tuple with result and Bool telling if it's done (TODO: Make code more clear)
+function process_once!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, op::T) where T
+	op === nothing && return Spec(ro, nothing), true
+
+	sa = ro.value
+
+	# Early out, we don't need to consider dependencies for this
+	if T <: Forward
+		op.predicate(sa) && return (Spec(ro, nothing), true) # should op ever be set to something here?
+	end
+
+
+	if is_preprocessing(sa)
+		deps = get_dependencies(!isnothing, sa) # No need to collect dependencies with op===nothing since they will not be changed.
+	else
+		deps = get_dependencies(sa)
+
+		# Stop if we are forwarding - but sa is ready for computation
+		# I.e. ensure process_once! doesn't compute if we only ask for forwarding.
+		if T <: Forward && all(s->s.op === Call(), deps)
+			return (Spec(ro, Call()), true)
+		end
+	end
+
+	res = get!(scheduler.results, ro) do
+		_process_once!(scheduler, ro, deps)
+	end
+
+	done = !(res isa Spec)
+	return res, done
+end
+
+
+
+function process!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, op::T) where T
 	while true
-		if spec.forwarding_complete && mode in (:forward_once, :forward)
-			return spec
-		end
-
-		res = get!(scheduler.results, spec) do
-			_process!(scheduler, spec)
-
-			# # Hopefully we won't need this
-			# r = _process!(scheduler, spec)
-			# if r isa Spec
-			# 	r = Spec(r.ro, r.use_cache, r.forwarding_complete, r.prefetch || spec.prefetch)
-			# end
-			# r
-		end
-
-		res isa Spec || return res
-		spec = res::Spec
-
-		mode == :forward_once && return spec
+		res, done = process_once!(scheduler, ro, op)
+		done && return res
+		res::Spec
+		ro = res.ro
 	end
 end
 
 
-fetch!(scheduler::Scheduler, spec::Spec) = process!(scheduler, spec, :compute)
-forward!(scheduler::Scheduler, spec::Spec) = process!(scheduler, spec, :forward)
-forward_once!(scheduler::Scheduler, spec::Spec) = process!(scheduler, spec, :forward_once)
+fetch!(scheduler::Scheduler, spec::ReadOnly{SpecArgs}) = process!(scheduler, spec, Prefetch())
+forward!(scheduler::Scheduler, spec::ReadOnly{SpecArgs}) = process!(scheduler, spec, Forward())
+
+function forward_once!(scheduler::Scheduler, spec::ReadOnly{SpecArgs})
+	res, _ = process_once!(scheduler, spec, Forward())
+	res
+end
+
+
+process!(scheduler::Scheduler, spec::Spec) = process!(scheduler, spec.ro, spec.op)
+
 
 
 # --- printing ---

@@ -1,14 +1,15 @@
 struct NotComputed end
 
 mutable struct Job
-	const spec::Spec
+	const spec::ReadOnly{SpecArgs}
 	result::Any
 end
-Job(spec::Spec) = Job(spec, NotComputed())
+Job(ro::ReadOnly{SpecArgs}) = Job(ro, NotComputed())
+Job(spec::Spec) = Job(spec.ro)
 
 Base.Broadcast.broadcastable(job::Job) = Ref(job) # treat as scalar for broadcasting
 
-copy_arg(job::Job) = job.spec # Already managed, just unwrap
+copy_arg(job::Job) = Spec(job.spec, nothing) # Already managed, just wrap in a Spec
 _prefetch(job::Job) = _prefetch(job.spec)
 
 
@@ -36,7 +37,8 @@ end
 # --- printing ---
 function Base.show(io::IO, ::MIME"text/plain", job::Job)
 	println(io, "Job Spec:")
-	show(io, MIME"text/plain"(), job.spec)
+	# show(io, MIME"text/plain"(), job.spec)
+	show(io, MIME"text/plain"(), Spec(job.spec, nothing)) # A little workaround until I refactor printing to work with ReadOnly{SpecArgs} directly
 	# println(io)
 
 	# TODO: Show better status (also follow forwarding in the Scheduler). Something like:

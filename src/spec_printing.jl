@@ -39,8 +39,9 @@ struct PrintReference
 end
 
 printreference(::T) where T = PrintReference(string(_nameof(T)))
-printreference(sa::SpecArgs; prefetch) =
-	PrintReference(string(sa.f, prefetch ? " (prefetched)" : ""))
+# printreference(sa::SpecArgs; op::T) where T =
+printreference(sa::SpecArgs; op::T = nothing) where T = # op should be used here really
+	PrintReference(string(sa.f, op === Prefetch() ? " (prefetched)" : ""))
 
 Base.show(io::IO, ref::PrintReference) = print(io, ref.str)
 
@@ -255,7 +256,8 @@ end
 
 
 # Unwrap Spec
-to_print_node!(pc::PrintContext, spec::Spec, name, h) = to_print_node!(pc, spec.ro, name, h; spec.prefetch)
+# to_print_node!(pc::PrintContext, spec::Spec, name, h) = to_print_node!(pc, spec.ro, name, h; spec.prefetch)
+to_print_node!(pc::PrintContext, spec::Spec, name, h) = to_print_node!(pc, spec.ro, name, h; spec.op)
 
 # Unwrap ReadOnly
 function to_print_node!(pc::PrintContext, ro::ReadOnly, name, h; kwargs...)
@@ -271,7 +273,9 @@ function to_print_node!(pc::PrintContext, ro::ReadOnly, name, h; kwargs...)
 end
 
 
-function to_print_node!(pc::PrintContext, sa::SpecArgs, name, h; prefetch)
+# TODO: Refactor how `op` is propagate. It's not a good design at the moment.
+# function to_print_node!(pc::PrintContext, sa::SpecArgs, name, h; op::T) where T
+function to_print_node!(pc::PrintContext, sa::SpecArgs, name, h; op::T = nothing) where T # Why is noting needed here
 	c1 = to_print_node!.(Ref(descend(pc)), sa.args)
 	c2 = [to_print_node!(descend(pc),v,k,nothing) for (k,v) in sa.kwargs if !startswith(string(k),"__")] # skip "hidden" kwargs
 	children = vcat(c1,c2)
@@ -284,7 +288,7 @@ function to_print_node!(pc::PrintContext, sa::SpecArgs, name, h; prefetch)
 		item_color = :red
 	end
 
-	if prefetch
+	if op === Prefetch()
 		f = PrintFetched(f)
 	end
 

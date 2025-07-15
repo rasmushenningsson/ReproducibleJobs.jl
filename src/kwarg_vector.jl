@@ -10,17 +10,12 @@ manage(v::KwargVector) = v # Already managed
 unsafe_unmanage(v::KwargVector) = v.kwargs
 
 
-function _get_kwarg_index(v::KwargVector, name::Symbol)
-	r = searchsorted(v.kwargs, name=>nothing; by=first)
-	isempty(r) && return nothing
-	only(r)
-end
+_get_kwarg_index(v::KwargVector, name::Symbol) = _get_kwarg_index(v.kwargs, name)
 
-function Base.get(f, v::KwargVector, name::Symbol)
-	i = _get_kwarg_index(v, name)
-	i === nothing ? f() : last(v.kwargs[i])
-end
-Base.get(v::KwargVector, name::Symbol, default) = get(Returns(default), v, name)
+Base.get(f, v::KwargVector, name::Symbol) =
+	_get_kwarg(f, v.kwargs, name)
+Base.get(v::KwargVector, name::Symbol, default) =
+	_get_kwarg(v.kwargs, name, default)
 
 Base.IndexStyle(::Type{KwargVector}) = IndexLinear()
 Base.size(v::KwargVector, args...) = size(v.kwargs, args...)
