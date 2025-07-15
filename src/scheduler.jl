@@ -15,7 +15,7 @@ end
 
 
 _arg_replacer(upstream) = Base.Fix2(_arg_replacer, upstream)
-_arg_replacer(x, upstream) = get(upstream, x, x) # replaces prefetched specs by the value, and leaves everything else in place
+_arg_replacer(x, upstream) = get(upstream, x, x) # replaces (pre)fetched specs by the value, and leaves everything else in place
 
 _unwrap_value(upstream) = Base.Fix2(_unwrap_value, upstream)
 _unwrap_value() = _unwrap_value(IdDict{Spec,Any}())
@@ -182,7 +182,8 @@ function process_once!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, op::T) wher
 
 
 	if is_preprocessing(sa)
-		deps = get_dependencies(!isnothing, sa) # No need to collect dependencies with op===nothing since they will not be changed.
+		# deps = get_dependencies(!isnothing, sa) # No need to collect dependencies with op===nothing since they will not be changed.
+		deps = get_dependencies(op->!isnothing(op) && !(op isa Prefetch), sa) # No need to collect dependencies with op===nothing or Prefetch, since they will not be changed.
 	else
 		deps = get_dependencies(sa)
 
@@ -213,7 +214,7 @@ function process!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, op::T) where T
 end
 
 
-fetch!(scheduler::Scheduler, spec::ReadOnly{SpecArgs}) = process!(scheduler, spec, Prefetch())
+fetch!(scheduler::Scheduler, spec::ReadOnly{SpecArgs}) = process!(scheduler, spec, Fetch())
 forward!(scheduler::Scheduler, spec::ReadOnly{SpecArgs}) = process!(scheduler, spec, Forward())
 
 function forward_once!(scheduler::Scheduler, spec::ReadOnly{SpecArgs})

@@ -42,7 +42,8 @@ _get_kwarg(f, sa::SpecArgs) = _get_kwarg(f, sa.kwargs)
 
 
 struct Call end
-struct Prefetch end # Rename?
+struct Fetch end # Means fetch immediately (e.g. get as value during preprocessing)
+struct Prefetch end # Replace spec by result just before computing - useful to collapse multiple specs that yield the same result onto the same spec.
 struct Forward{F} # Rename to something that would indicate that we should stop if predicate is true?
 	predicate::F # true means we found what we want, so forwarding will stop
 end
@@ -50,6 +51,7 @@ Forward() = Forward(Returns(false))
 
 
 forward(::Call) = Call()
+forward(::Fetch) = Fetch()
 forward(::Prefetch) = Prefetch()
 forward(::Forward) = Forward() # get rid of the predicate
 forward(::Nothing) = Forward()
@@ -58,7 +60,7 @@ forward(::Nothing) = Forward()
 
 struct Spec
 	ro::ReadOnly{SpecArgs}
-	op::Any # Call/Prefetch/Forward{F}/Nothing - is it better to use a Union?
+	op::Any # Call/Fetch/Prefetch/Forward{F}/Nothing - is it better to use a Union?
 end
 
 Base.Broadcast.broadcastable(spec::Spec) = Ref(spec) # treat as scalar for broadcasting
@@ -127,7 +129,7 @@ visit_dependencies(f, spec::Spec) = visit_dependencies(f, _get_spec_args(spec))
 
 
 
-deduplicate!(dedup::Deduplicator, spec::Spec) = Spec(deduplicate!(dedup, spec.ro), spec.use_cache, spec.forwarding_complete, spec.prefetch)
+deduplicate!(dedup::Deduplicator, spec::Spec) = Spec(deduplicate!(dedup, spec.ro), spec.op)
 
 
 
@@ -136,10 +138,15 @@ forward(spec::Spec) = Spec(spec.ro, forward(spec.op))
 
 
 
-_prefetch(spec::ReadOnly{SpecArgs}) = Spec(spec, Prefetch())
-_prefetch(spec::Spec) = _prefetch(spec.ro)
-_prefetch(x) = x
-prefetch(x::Any) = copy_nested(_prefetch, x)
+_fetched(spec::ReadOnly{SpecArgs}) = Spec(spec, Fetch())
+_fetched(spec::Spec) = _fetched(spec.ro)
+_fetched(x) = x
+fetched(x::Any) = copy_nested(_fetched, x)
+
+_prefetched(spec::ReadOnly{SpecArgs}) = Spec(spec, Prefetch())
+_prefetched(spec::Spec) = _prefetched(spec.ro)
+_prefetched(x) = x
+prefetched(x::Any) = copy_nested(_prefetched, x)
 
 
 

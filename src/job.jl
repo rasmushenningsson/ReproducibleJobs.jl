@@ -1,7 +1,7 @@
 struct NotComputed end
 
 mutable struct Job
-	const spec::ReadOnly{SpecArgs}
+	const spec::ReadOnly{SpecArgs} # Rename to ro?
 	result::Any
 end
 Job(ro::ReadOnly{SpecArgs}) = Job(ro, NotComputed())
@@ -10,7 +10,9 @@ Job(spec::Spec) = Job(spec.ro)
 Base.Broadcast.broadcastable(job::Job) = Ref(job) # treat as scalar for broadcasting
 
 copy_arg(job::Job) = Spec(job.spec, nothing) # Already managed, just wrap in a Spec
-_prefetch(job::Job) = _prefetch(job.spec)
+
+_fetched(job::Job) = _fetched(job.spec)
+_prefetched(job::Job) = _prefetched(job.spec)
 
 
 
