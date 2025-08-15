@@ -7,7 +7,7 @@ Deduplicator(hash_context::T) where T = Deduplicator{T}(hash_context, Dict{Strin
 
 
 
-let deduplicator_singleton = Deduplicator(HashVersion{4}())
+let deduplicator_singleton = Deduplicator(ReproducibleHashContext())
 	global default_deduplicator() = deduplicator_singleton
 end
 
