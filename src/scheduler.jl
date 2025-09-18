@@ -67,8 +67,14 @@ function preprocess(sa::SpecArgs)
 		@warn "Error preprocessing $f"
 		bt = Base.catch_backtrace()
 		# Base.showerror(stdout, e, bt)
-		Base.showerror(stdout, e)
-		println()
+		# Base.showerror(stdout, e)
+		# println()
+
+		io = IOBuffer()
+		Base.showerror(IOContext(io, :color=>true), e)
+		message = String(take!(io))
+		@warn message
+
 		return ProcessingException(sa, e, stacktrace(bt))
 	end
 end
@@ -109,8 +115,14 @@ function compute(sa::SpecArgs, upstream::IdDict{Spec,Any})
 		@warn "Error computing $f"
 		bt = Base.catch_backtrace()
 		# Base.showerror(stdout, e, bt)
-		Base.showerror(stdout, e)
-		println()
+		# Base.showerror(stdout, e)
+
+		io = IOBuffer()
+		Base.showerror(IOContext(io, :color=>true), e)
+		message = String(take!(io))
+		@warn message
+
+		# println()
 		return ProcessingException(sa, e, stacktrace(bt))
 	end
 end
