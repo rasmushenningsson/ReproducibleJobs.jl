@@ -156,7 +156,7 @@ function _process_once!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, deps::Vect
 		end
 		preprocessed = preprocess(sa)
 		if preprocessed isa ReadOnly{SpecArgs}
-			return Spec(preprocessed, nothing)
+			return Spec(preprocessed)
 		else
 			return preprocessed
 		end
@@ -183,13 +183,11 @@ end
 
 # Return tuple with result and Bool telling if it's done (TODO: Make code more clear)
 function process_once!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, op::T) where T
-	op === nothing && return Spec(ro, nothing), true
-
 	sa = ro.value
 
 	# Early out, we don't need to consider dependencies for this
 	if T <: Forward
-		op.predicate(sa) && return (Spec(ro, nothing), true) # should op ever be set to something here?
+		op.predicate(sa) && return (Spec(ro), true) # should op ever be set to something here?
 	end
 
 

@@ -54,15 +54,16 @@ forward(::Call) = Call()
 forward(::Fetch) = Fetch()
 forward(::Prefetch) = Prefetch()
 forward(::Forward) = Forward() # get rid of the predicate
-forward(::Nothing) = Forward()
 
-
+default_forwarding_predicate(x) = !(x isa Preprocess)
+default_spec_op() = Forward(default_forwarding_predicate)
 
 
 struct Spec
 	ro::ReadOnly{SpecArgs}
-	op::Any # Call/Fetch/Prefetch/Forward{F}/Nothing - is it better to use a Union?
+	op::Any # Call/Fetch/Prefetch/Forward{F} - is it better to use a Union?
 end
+Spec(ro::ReadOnly{SpecArgs}) = Spec(ro, default_spec_op())
 
 Base.Broadcast.broadcastable(spec::Spec) = Ref(spec) # treat as scalar for broadcasting
 Base.Broadcast.broadcastable(sa::SpecArgs) = Ref(sa) # treat as scalar for broadcasting
@@ -99,7 +100,7 @@ function create_spec(f, args...; deduplicator=default_deduplicator(), kwargs...)
 	p = deduplicate_leaves(deduplicator)∘copy_arg
 	sa = create_spec_args(p, f, args, kwargs)
 	sa = deduplicator(sa)
-	Spec(sa, nothing)
+	Spec(sa)
 end
 
 

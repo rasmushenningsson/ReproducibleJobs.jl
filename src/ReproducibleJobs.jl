@@ -18,6 +18,7 @@ export
 	Deduplicator,
 	Spec,
 	Job,
+	Preprocess,
 	TimestampedFilePath,
 	unmanage,
 	deduplicate!,
@@ -54,6 +55,7 @@ include("arg_processing.jl")
 include("spec.jl")
 include("spec_meta.jl")
 include("spec_printing.jl")
+include("preprocess.jl")
 include("cache.jl")
 include("job.jl")
 include("processing_exception.jl")

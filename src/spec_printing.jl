@@ -39,8 +39,8 @@ struct PrintReference
 end
 
 printreference(::T) where T = PrintReference(string(_nameof(T)))
-printreference(sa::SpecArgs; op::T = nothing) where T =
-	PrintReference(string(sa.f, op === nothing ? "" : string(" (",op,')')))
+printreference(sa::SpecArgs; op::T = default_spec_op()) where T =
+	PrintReference(string(sa.f, op === default_spec_op() ? "" : string(" (",op,')')))
 
 Base.show(io::IO, ref::PrintReference) = print(io, ref.str)
 
@@ -276,7 +276,7 @@ end
 
 # TODO: Refactor how `op` is propagate. It's not a good design at the moment.
 # function to_print_node!(pc::PrintContext, sa::SpecArgs, name, h; op::T) where T
-function to_print_node!(pc::PrintContext, sa::SpecArgs, name, h; op::T = nothing) where T # Why is noting needed here
+function to_print_node!(pc::PrintContext, sa::SpecArgs, name, h; op::T = default_spec_op()) where T # Why is noting needed here
 	c1 = to_print_node!.(Ref(descend(pc)), sa.args)
 	c2 = [to_print_node!(descend(pc),v,k,nothing) for (k,v) in sa.kwargs if !startswith(string(k),"__")] # skip "hidden" kwargs
 	children = vcat(c1,c2)
@@ -289,7 +289,7 @@ function to_print_node!(pc::PrintContext, sa::SpecArgs, name, h; op::T = nothing
 		item_color = :red
 	end
 
-	if op !== nothing
+	if op !== default_spec_op()
 		f = PrintWithOp(f, op)
 	end
 
