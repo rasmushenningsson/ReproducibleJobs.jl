@@ -68,7 +68,7 @@ copy_arg(f::Returns{T}) where T = Returns(copy_arg(f.value))
 copy_arg(f::ComposedFunction) = copy_arg(f.outer) ∘ copy_arg(f.inner)
 
 # Simple temporary solution for allowing some functions to be used as arguments
-copy_arg(f::Union{typeof(identity), typeof(!), typeof(iszero)}) = f
+copy_arg(f::Union{typeof(identity), typeof(!), typeof(iszero), typeof(ismissing)}) = f
 
 
 
