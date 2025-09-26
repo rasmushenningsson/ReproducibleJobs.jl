@@ -55,7 +55,7 @@ forward(::Fetch) = Fetch()
 forward(::Prefetch) = Prefetch()
 forward(::Forward) = Forward() # get rid of the predicate
 
-default_forwarding_predicate(x) = !(x isa Preprocess)
+default_forwarding_predicate(x) = !(x.f isa Preprocess)
 default_spec_op() = Forward(default_forwarding_predicate)
 
 
