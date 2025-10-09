@@ -48,10 +48,12 @@ Base.show(io::IO, ref::PrintReference) = print(io, ref.str)
 struct PrintWithOp
 	f::Any
 	op::Any
+	PrintWithOp(f, op) = new(wrap_item(f), op)
 end
+
 function Base.show(io::IO, x::PrintWithOp)
 	show(io, x.f)
-	print(io, " (", x.op, ')')
+	printstyled(io, " (", x.op, ')'; color=:light_black, italic=true)
 end
 
 
@@ -80,6 +82,8 @@ wrap_item(nt::NamedTuple) = map(wrap_item, nt)
 
 wrap_item(df::DataFrame) = ItemWrapper(df)
 
+wrap_item(a::AbstractPreprocess) = ReproducibleJobs.ItemWrapper(a)
+
 Base.show(io::IO, w::ItemWrapper) = show(io, w.item)
 function Base.show(io::IO, w::ItemWrapper{T}) where T<:Union{<:Base.Fix1,<:Base.Fix2}
 	print(io, string(_nameof(T), '(', w.item.f, ", ", repr(w.item.x), ')'))
@@ -93,6 +97,11 @@ function Base.show(io::IO, w::ItemWrapper{<:DataFrame})
 	cols = join(names(w.item), ", ")
 	str = string(join(sz,'×'), " ", _typenameof(w.item), ": ", cols)
 	_print_limited_string(io, str, "...")
+end
+
+function Base.show(io::IO, w::ItemWrapper{<:T}) where T<:AbstractPreprocess
+	print(io, w.item)
+	printstyled(io, " (", nameof(T), ")"; color=:light_black)
 end
 
 
