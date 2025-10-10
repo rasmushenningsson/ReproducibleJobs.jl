@@ -181,10 +181,16 @@ function _should_collapse(::Type{T}) where T
 	T <: AbstractArray && return false
 	T <: AbstractDict && return false
 	T <: AbstractSet && return false
+	T <: Number && return true
+	T <: AbstractString && return true
+	T <: Symbol && return true
+	T <: AbstractChar && return true
 	if (T <: Pair) || (T <: Tuple) || (T <: NamedTuple)
 		return all(_should_collapse, fieldtypes(T))
 	end
-	return true
+
+	# We do not collapse when the eltype is Any
+	return false
 end
 
 function to_print_node!(pc::PrintContext, x::AbstractRange{T}, name, h) where T
