@@ -272,7 +272,6 @@ end
 
 
 # Unwrap Spec
-# to_print_node!(pc::PrintContext, spec::Spec, name, h) = to_print_node!(pc, spec.ro, name, h; spec.prefetch)
 to_print_node!(pc::PrintContext, spec::Spec, name, h) = to_print_node!(pc, spec.ro, name, h; spec.op)
 
 # Unwrap ReadOnly
@@ -289,9 +288,9 @@ function to_print_node!(pc::PrintContext, ro::ReadOnly, name, h; kwargs...)
 end
 
 
-# TODO: Refactor how `op` is propagate. It's not a good design at the moment.
+# TODO: Refactor how `op` is propagated. It's not a good design at the moment.
 # function to_print_node!(pc::PrintContext, sa::SpecArgs, name, h; op::T) where T
-function to_print_node!(pc::PrintContext, sa::SpecArgs, name, h; op::T = default_spec_op()) where T # Why is noting needed here
+function to_print_node!(pc::PrintContext, sa::SpecArgs, name, h; op::T = default_spec_op()) where T
 	c1 = to_print_node!.(Ref(descend(pc)), sa.args)
 	c2 = [to_print_node!(descend(pc),v,k,nothing) for (k,v) in sa.kwargs if !startswith(string(k),"__")] # skip "hidden" kwargs
 	children = vcat(c1,c2)

@@ -15,6 +15,12 @@ function Base.:(==)(a::ReadOnly{T}, b::ReadOnly{T}) where T
 	return a.value == b.value
 end
 
+function Base.isequal(a::ReadOnly{T}, b::ReadOnly{T}) where T
+	!isequal(a.h, b.h) && return false # early out
+	a === b && return true # early out
+	return isequal(a.value, b.value)
+end
+
 Base.hash(ro::ReadOnly, h::UInt) = hash(ro.h, h)
 
 

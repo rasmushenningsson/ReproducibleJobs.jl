@@ -1,5 +1,5 @@
 struct SpecArgs
-	f::Any # Hm. Can this just be Symbol now?
+	f::Any
 	args::Vector{Any}
 	kwargs::Vector{Pair{Symbol,Any}}
 	function SpecArgs(f, args, kwargs)
@@ -9,13 +9,14 @@ struct SpecArgs
 end
 
 Base.:(==)(a::SpecArgs, b::SpecArgs) = a.f == b.f && a.args == b.args && a.kwargs == b.kwargs
+Base.isequal(a::SpecArgs, b::SpecArgs) = isequal(a.f, b.f) && isequal(a.args, b.args) && isequal(a.kwargs, b.kwargs)
 
 deduplicate_type(::Deduplicator, ::Type{SpecArgs}) = true
 
 function create_spec_args(p, f, args, kwargs)
 	a = Any[copy_nested(p,x) for x in args]
 	kw = sort!(Pair{Symbol,Any}[k=>copy_nested(p,v) for (k,v) in kwargs]; by=first)
-	SpecArgs(f,a,kw)
+	SpecArgs(f, a, kw)
 end
 
 
@@ -106,6 +107,7 @@ end
 
 
 Base.:(==)(a::Spec, b::Spec) = a.op == b.op && a.ro == b.ro
+Base.isequal(a::Spec, b::Spec) = isequal(a.op, b.op) && isequal(a.ro, b.ro)
 
 
 _get_spec_args(spec::Spec) = spec.ro.value
@@ -141,13 +143,15 @@ forwarded(predicate, spec::Spec) = Spec(spec.ro, Forward(predicate))
 
 
 
-_fetched(spec::ReadOnly{SpecArgs}) = Spec(spec, Fetch())
-_fetched(spec::Spec) = _fetched(spec.ro)
+# _fetched(spec::ReadOnly{SpecArgs}) = Spec(spec, Fetch())
+# _fetched(spec::Spec) = _fetched(spec.ro)
+_fetched(spec::Spec) = Spec(spec.ro, Fetch())
 _fetched(x) = x
 fetched(x::Any) = copy_nested(_fetched, x)
 
-_prefetched(spec::ReadOnly{SpecArgs}) = Spec(spec, Prefetch())
-_prefetched(spec::Spec) = _prefetched(spec.ro)
+# _prefetched(spec::ReadOnly{SpecArgs}) = Spec(spec, Prefetch())
+# _prefetched(spec::Spec) = _prefetched(spec.ro)
+_prefetched(spec::Spec) = Spec(spec.ro, Prefetch())
 _prefetched(x) = x
 prefetched(x::Any) = copy_nested(_prefetched, x)
 

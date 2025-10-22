@@ -46,7 +46,7 @@ unsafe_unmanage(x) = x
 unmanage_rec(x) = copy(x) # expensive fallback
 unmanage_rec(x::ReadOnly) = copy(x.value) # expensive fallback
 
-unmanage_rec(x::Union{String,Char,Symbol}) = x # doesn't define copy
+unmanage_rec(x::Union{String,Char,Symbol,Missing,Colon}) = x # doesn't define copy
 
 unmanage_rec(x::Array) = unmanage_rec.(x)
 unmanage_rec(x::ReadOnly{<:Array}) = ReadOnlyArray(x.value)

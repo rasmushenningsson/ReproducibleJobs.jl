@@ -60,6 +60,7 @@ copy_arg(x::Char) = x # Chars are immutable, pass through
 copy_arg(x::Symbol) = x # symbols are immutable, pass through
 copy_arg(v::VersionNumber) = v
 copy_arg(c::Colon) = c
+copy_arg(m::Missing) = m
 copy_arg(f::Union{<:Base.Fix1,<:Base.Fix2}) = f # TODO: revise (or revise in copy_nested)
 copy_arg(x::DataType) = x
 
