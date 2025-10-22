@@ -182,22 +182,18 @@ function _insert_partial_results!(scheduler, ro, cr::CompoundResult, curr_sub=St
 	end
 end
 function _insert_partial_results!(scheduler, ro, res, curr_sub)
-	scheduler.results[cached(Spec(ro, Call()); sub=curr_sub).ro] = res # rewrap in get_cached to make it work with the cache
+	scheduler.results[cached(Spec(ro, Call()), curr_sub...).ro] = res # rewrap in get_cached to make it work with the cache
 end
 
 
 
-# TODO: Move this somewhere else?
+# TODO: Move these somewhere else?
 function get_cached end # `get_cached` is actually never called. We just use it as singleton value to show that something is using the on-disk cache.
 
-# TODO: specify sub using `args...` instead?
-function cached(spec; sub::Union{Nothing,Vector{String}}=nothing)
-	if sub === nothing || isempty(sub)
-		create_spec(get_cached, spec; __version=v"1.0.0") # Encode sub=String[] and sub=nothing in the same way.
-	else
-		create_spec(get_cached, spec; sub, __version=v"1.0.0")
-	end
-end
+# Use `sub` to retrieve parts of `CompoundResult`s
+cached(spec, sub::String...) = create_spec(get_cached, spec, sub...; __version=v"1.0.0")
+
+
 
 
 function cached_call!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, deps::Vector{Spec}; sub::Union{Nothing, Vector{String}})
@@ -221,6 +217,8 @@ function cached_call!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, deps::Vector
 		# TODO: Figure out a better place to do this (we are currently inside a get!(scheduler.results, ro) call, so it works, but it is a bit awkward)
 		# Insert all parts of the result into the in-RAM cache
 		_insert_partial_results!(scheduler, ro, res)
+
+		sub === nothing && throw(ArgumentError("Cannot retrieve CompoundResult directly, sub-result must be specified."))
 
 		# But only return the sub we asked for
 		return get_subresult(res, sub)
@@ -267,17 +265,15 @@ function process_once!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, op::T) wher
 			T <: Forward && return (Spec(ro, Call()), true)
 
 			if sa.f === get_cached
-				sub = unsafe_unmanage(_get_kwarg(sa.kwargs, :sub, nothing))
-				if sub isa ReadOnly{Vector{String}}
-					sub = sub.value # unwrap ReadOnly to get vector
-				end
-
 				inner_spec = sa.args[1]::Spec
 				inner_ro = inner_spec.ro
 				inner_sa = inner_ro.value
 				@assert inner_sa.f !== get_cached # we cannot handle nested get_cached
 				inner_deps = get_dependencies(inner_sa)
 				@assert all(s->s.op === Call(), inner_deps) # The out Call has enforced all inner `op`s to be called has well.
+
+				# The remaining args specify subresults of `CompoundResult`s
+				sub = length(sa.args)==1 ? nothing : collect(String, @view(sa.args[2:end]))
 
 				res = get!(scheduler.results, ro) do # the key is the `get_cached` spec
 					cached_call!(scheduler, inner_ro, inner_deps; sub) # but we compute the inner spec
