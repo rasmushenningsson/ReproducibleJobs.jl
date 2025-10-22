@@ -8,7 +8,10 @@ spec2path(cache::Cache, ro::ReadOnly{SpecArgs}) = joinpath(cache.dir, string(get
 
 function _cache_load_item(io, sub)
 	if sub === nothing || isempty(sub)
-		return io["value"]
+		get(io, "value") do
+			# NB: The abscene of a "value" key means that this is a `CompoundResult`
+			throw(ArgumentError("Illegal to retrieve CompoundResult directly from cache. You must specify sub-result(s) using cached(spec,sub...)."))
+		end
 	else
 		children = io["children"]
 		child = children[sub[1]]
@@ -44,7 +47,7 @@ function _cache_save_item(io, value)
 	io["value"] = value
 end
 function _cache_save_item(io, cr::CompoundResult)
-	io["value"] = first.(cr.children)
+	io["keys"] = first.(cr.children)
 	children = JLD2.Group(io, "children")
 	for (k,v) in cr.children
 		child = JLD2.Group(children, k)
