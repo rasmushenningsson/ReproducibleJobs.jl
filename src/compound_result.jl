@@ -33,5 +33,5 @@ function get_subresult(cr::CompoundResult, sub::AbstractVector)
 	throw(KeyError(ks))
 end
 
-Base.copy(cr::CompoundResult) = cr # TODO: REMOVE THIS, JUST TEMPORARILY NEEDED DURING REFACTORING
+# Base.copy(cr::CompoundResult) = cr # TODO: REMOVE THIS, JUST TEMPORARILY NEEDED DURING REFACTORING
 

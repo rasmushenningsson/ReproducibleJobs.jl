@@ -143,14 +143,10 @@ forwarded(predicate, spec::Spec) = Spec(spec.ro, Forward(predicate))
 
 
 
-# _fetched(spec::ReadOnly{SpecArgs}) = Spec(spec, Fetch())
-# _fetched(spec::Spec) = _fetched(spec.ro)
 _fetched(spec::Spec) = Spec(spec.ro, Fetch())
 _fetched(x) = x
 fetched(x::Any) = copy_nested(_fetched, x)
 
-# _prefetched(spec::ReadOnly{SpecArgs}) = Spec(spec, Prefetch())
-# _prefetched(spec::Spec) = _prefetched(spec.ro)
 _prefetched(spec::Spec) = Spec(spec.ro, Prefetch())
 _prefetched(x) = x
 prefetched(x::Any) = copy_nested(_prefetched, x)

@@ -3,11 +3,9 @@
 # And maybe not be the default.
 
 struct Scheduler
-	# results::Dict{ReadOnly{SpecArgs},Any}
 	forwarded::Dict{ReadOnly{SpecArgs}, Any} # Maps a spec to what it becomes after forwarding one step - either a Spec or a value (Any), but the former is way more common, maybe wrap in a union type?
 	results::Dict{ReadOnly{SpecArgs},Any} # spec -> result
 end
-# Scheduler() = Scheduler(Dict{ReadOnly{SpecArgs},Any}())
 Scheduler() = Scheduler(Dict{ReadOnly{SpecArgs}, ReadOnly{SpecArgs}}(), Dict{Tuple{ReadOnly{SpecArgs},Vector{String}},Any}())
 
 
@@ -155,41 +153,6 @@ function _fetch_and_compute!(scheduler, sa::SpecArgs, deps::Vector{Spec})
 end
 
 
-
-# function _process_once!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, deps::Vector{Spec})
-# 	sa = ro.value
-
-# 	if is_preprocessing(sa)
-# 		if !isempty(deps)
-# 			forwarded_deps = process_dependencies!(scheduler, deps)
-# 			sa = replace_forwarded(sa, forwarded_deps)::Union{SpecArgs,ProcessingException}
-# 		end
-# 		preprocessed = preprocess(sa)
-# 		if preprocessed isa ReadOnly{SpecArgs}
-# 			return Spec(preprocessed)
-# 		else
-# 			return preprocessed
-# 		end
-# 	end
-
-# 	if !all(x->x.op === Call(), deps)
-# 		forwarded_deps = process_dependencies!(forwarded, scheduler, deps)
-# 		sa_forwarded = replace_forwarded(sa, forwarded_deps)::Union{SpecArgs,ProcessingException}
-# 		sa_forwarded isa ProcessingException && return sa_forwarded
-# 		ro_forwarded = default_deduplicator()(sa_forwarded) # TODO: avoid using default_deduplicator() here - we need to get it from somewhere
-# 		return Spec(ro_forwarded, Call())
-# 	end
-
-# 	if _get_kwarg(sa, :__use_cache)
-# 		return cache_get!(ro) do
-# 			_fetch_and_compute!(scheduler, sa, deps)
-# 		end
-# 	else
-# 		@info "Bypassing cache"
-# 		return _fetch_and_compute!(scheduler, sa, deps)
-# 	end
-# end
-
 function _process_once!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, deps::Vector{Spec})
 	sa = ro.value
 
@@ -199,7 +162,6 @@ function _process_once!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, deps::Vect
 			sa = replace_forwarded(sa, forwarded_deps)::Union{SpecArgs,ProcessingException}
 		end
 		preprocessed = preprocess(sa)
-		# @show typeof(preprocessed)
 		return preprocessed # Should we strip `op` for Specs here?
 	end
 
@@ -212,16 +174,14 @@ end
 
 
 function _insert_partial_results!(scheduler, ro, cr::CompoundResult, curr_sub=String[])
-	# Insert keys as their own result
+	# TODO: Insert keys as their own result?
 	# scheduler.results[(ro,curr_sub)] = first.(cr.children)
 
 	for (k,v) in cr.children
-		# _insert_partial_results!(scheduler, ro, v, vcat(curr_sub, k))
 		_insert_partial_results!(scheduler, ro, v, vcat(curr_sub, k))
 	end
 end
 function _insert_partial_results!(scheduler, ro, res, curr_sub)
-	# scheduler.results[(ro,curr_sub)] = res
 	scheduler.results[cached(Spec(ro, Call()); sub=curr_sub).ro] = res # rewrap in get_cached to make it work with the cache
 end
 
@@ -238,48 +198,6 @@ function cached(spec; sub::Union{Nothing,Vector{String}}=nothing)
 		create_spec(get_cached, spec; sub, __version=v"1.0.0")
 	end
 end
-
-
-
-# # This will be split into two functions, one for cached and one for non-cached
-# function _call!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, deps::Vector{Spec}, sub)
-# 	sa = ro.value
-
-# 	@assert all(x->x.op === Call(), deps) # Probably remove, it is already checked in process_once!
-
-
-# 	# if _get_kwarg(sa, :__use_cache)
-# 	if sa.f === get_cached
-# 		key = get_cache_key(ro)
-
-# 		# Load from cache if it's already in there
-# 		res = cache_load(key, sub)
-# 		res !== nothing && return res
-
-# 		# Compute
-# 		res = _fetch_and_compute!(scheduler, sa, deps)
-
-# 		# Store in on-disk cache
-# 		cache_save(key, res)
-
-# 		if res isa CompoundResult
-# 			# TODO: Figure out a better place to do this (we are currently inside a get!(scheduler.results, ro) call, so it works, but it is a bit awkward)
-# 			# Insert all parts of the result into the in-RAM cache
-# 			_insert_partial_results!(scheduler, ro, res)
-
-# 			# But only return the sub we asked for
-# 			return get_subresult(res, sub)
-# 		else
-# 			return res
-# 		end
-# 	else
-# 		@info "Bypassing cache"
-# 		@assert isempty(sub) # We only support CompoundResults when using the on-disk cache
-# 		res = _fetch_and_compute!(scheduler, sa, deps)
-# 		@assert !(res isa CompoundResult) # We only support CompoundResults when using the on-disk cache
-# 		return res
-# 	end
-# end
 
 
 function cached_call!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, deps::Vector{Spec}; sub::Union{Nothing, Vector{String}})
@@ -336,8 +254,6 @@ function process_once!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, op::T) wher
 
 
 	if is_preprocessing(sa)
-		# deps = get_dependencies(!isnothing, sa) # No need to collect dependencies with op===nothing since they will not be changed.
-		# deps = get_dependencies(op->!isnothing(op) && !(op isa Prefetch), sa) # No need to collect dependencies with op===nothing or Prefetch, since they will not be changed.
 		deps = get_dependencies(op->!(op isa Prefetch), sa) # No need to collect dependencies with op Prefetch, since they will not be changed.
 	else
 		deps = get_dependencies(sa)
@@ -389,32 +305,9 @@ function process_once!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, op::T) wher
 end
 
 
-
-# function process!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, op::T) where T
-# 	while true
-# 		res, done = process_once!(scheduler, ro, op)
-# 		done && return res
-# 		res::Spec
-# 		ro = res.ro
-# 	end
-# end
-
-
-# fetch!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}) = process!(scheduler, ro, Fetch())
-# forward!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}) = process!(scheduler, ro, Forward())
-
-# function forward_once!(scheduler::Scheduler, spec::ReadOnly{SpecArgs})
-# 	res, _ = process_once!(scheduler, spec, Forward())
-# 	res
-# end
-
-# process!(scheduler::Scheduler, spec::Spec) = process!(scheduler, spec.ro, spec.op)
-
-
 function process!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, op::T) where T
 	while true
 		res, done = process_once!(scheduler, ro, op)
-		# @show done
 		done && return res
 		res::Spec
 		ro = res.ro
@@ -431,9 +324,6 @@ function forward_once!(scheduler::Scheduler, spec::Spec)
 end
 
 process!(scheduler::Scheduler, spec::Spec) = process!(scheduler, spec.ro, spec.op)
-
-
-
 
 
 
