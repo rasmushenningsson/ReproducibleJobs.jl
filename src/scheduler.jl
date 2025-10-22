@@ -250,6 +250,7 @@ function process_once!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, op::T) wher
 	# Early out, we don't need to consider dependencies for this
 	if T <: Forward && op.predicate(sa)
 		return Spec(ro), true # should op ever be set to something here?
+		# return Spec(ro, op), true # Maybe it makes more sense to keep the op in case it has some custom forwarding rule?
 	end
 
 
@@ -294,7 +295,7 @@ function process_once!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, op::T) wher
 	end
 
 	res = get!(scheduler.forwarded, ro) do
-		_process_once!(scheduler, ro, deps)
+		_process_once!(scheduler, ro, deps) # Should we add op back in?
 	end
 
 	if res isa Spec
