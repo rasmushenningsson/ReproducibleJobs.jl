@@ -173,17 +173,7 @@ function _process_once!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, deps::Vect
 end
 
 
-function _insert_partial_results!(scheduler, ro, cr::CompoundResult, curr_sub=String[])
-	# TODO: Insert keys as their own result?
-	# scheduler.results[(ro,curr_sub)] = first.(cr.children)
 
-	for (k,v) in cr.children
-		_insert_partial_results!(scheduler, ro, v, vcat(curr_sub, k))
-	end
-end
-function _insert_partial_results!(scheduler, ro, res, curr_sub)
-	scheduler.results[cached(Spec(ro, Call()), curr_sub...).ro] = res # rewrap in get_cached to make it work with the cache
-end
 
 
 
@@ -195,6 +185,22 @@ function cached(spec, sub::String...; return_keys=false)
 	extra_kwargs = (return_keys ? (; return_keys) : (;)) # only pass kwarg if set to true
 	create_spec(get_cached, spec, sub...; extra_kwargs..., __version=v"1.0.0")
 end
+
+
+
+# Helper function for recreating the Specs for retrieving individual parts of a CompoundResult
+_cached_rewrap(ro, sub; kwargs...) = cached(Spec(ro, Call()), sub...; kwargs...).ro
+
+function _insert_partial_results!(scheduler, ro, cr::CompoundResult, curr_sub=String[])
+	# Insert keys as their own result
+	scheduler.results[_cached_rewrap(ro,curr_sub; return_keys=true)] = first.(cr.children)
+	for (k,v) in cr.children
+		_insert_partial_results!(scheduler, ro, v, vcat(curr_sub, k))
+	end
+end
+_insert_partial_results!(scheduler, ro, res, curr_sub) =
+	scheduler.results[_cached_rewrap(ro,curr_sub)] = res
+
 
 
 

@@ -6,47 +6,30 @@ end
 spec2path(cache::Cache, ro::ReadOnly{SpecArgs}) = joinpath(cache.dir, string(get_hash(ro),".jld2"))
 
 
-# function _cache_load_item(io, sub)
-# 	if sub === nothing || isempty(sub)
-# 		get(io, "value") do
-# 			# NB: The abscene of a "value" key means that this is a `CompoundResult`
-# 			throw(ArgumentError("Illegal to retrieve CompoundResult directly from cache. You must specify sub-result(s) using cached(spec,sub...)."))
-# 		end
-# 	else
-# 		children = io["children"]
-# 		child = children[sub[1]]
-# 		_cache_load_item(child, @view(sub[2:end]))
-# 	end
-# end
-
-function _cache_load_item(io, sub; return_keys::Bool)
-	if !return_keys && (sub === nothing || isempty(sub))
-		return get(io, "value") do
-			# NB: The abscene of a "value" key means that this is a `CompoundResult`
-			throw(ArgumentError("Illegal to retrieve CompoundResult directly from cache. You must specify sub-result(s) using cached(spec,sub...)."))
-		end
-	end
-
-	children = io["children"]
-
-	if return_keys
-		return get(io, "keys") do
-			# NB: The abscene of a "keys" key means that this is not `CompoundResult`
-			throw(ArgumentError("Tried to retrieve keys from result that was not a CompoundResult."))
+function _cache_load_item(io, sub::Union{AbstractVector,Tuple}; return_keys)
+	if isempty(sub)
+		if return_keys
+			get(io, "keys") do
+				# NB: The abscene of a "keys" key means that this is not a `CompoundResult`
+				throw(ArgumentError("Tried to retrieve keys from result that was not a CompoundResult."))
+			end
+		else
+			get(io, "value") do
+				# NB: The abscene of a "value" key means that this is a `CompoundResult`
+				throw(ArgumentError("Cannot retrieve CompoundResult directly from cache. You must specify sub-result(s) using cached(spec,sub...)."))
+			end
 		end
 	else
+		children = io["children"]
 		child = children[sub[1]]
-		return _cache_load_item(child, @view(sub[2:end]); return_keys)
+		_cache_load_item(child, @view(sub[2:end]); return_keys)
 	end
 end
 
-
-function _cache_load(fp, sa::SpecArgs, sub; return_keys::Bool)
-	if sub === nothing
-		@info "Loading $(sa.f) $(return_keys ? "keys " : "")from cache"
-	else
-		@info "Loading $(*(string(sa.f), string.('.',sub)...)) $(return_keys ? "keys " : "")from cache"
-	end
+function _cache_load(fp, sa::SpecArgs, sub; return_keys=false)
+	sub = @something sub ()
+	s = prod(string.('.',sub); init="")
+	@info string("Loading ", sa.f, s, return_keys ? " keys" : "", " from cache")
 
 	value = jldopen(fp, "r") do io
 		cached_sa = io["spec_args"]
