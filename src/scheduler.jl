@@ -191,12 +191,15 @@ end
 function get_cached end # `get_cached` is actually never called. We just use it as singleton value to show that something is using the on-disk cache.
 
 # Use `sub` to retrieve parts of `CompoundResult`s
-cached(spec, sub::String...) = create_spec(get_cached, spec, sub...; __version=v"1.0.0")
+function cached(spec, sub::String...; return_keys=false)
+	extra_kwargs = (return_keys ? (; return_keys) : (;)) # only pass kwarg if set to true
+	create_spec(get_cached, spec, sub...; extra_kwargs..., __version=v"1.0.0")
+end
 
 
 
 
-function cached_call!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, deps::Vector{Spec}; sub::Union{Nothing, Vector{String}})
+function cached_call!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, deps::Vector{Spec}; sub::Union{Nothing, Vector{String}}, return_keys::Bool)
 	@assert all(x->x.op === Call(), deps) # Probably remove, it is already checked in process_once!
 	sa = ro.value
 	@assert sa.f !== get_cached # Probably remove, it is already checked in process_once!
@@ -204,7 +207,7 @@ function cached_call!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, deps::Vector
 	key = get_cache_key(ro)
 
 	# Load from cache if it's already in there
-	res = cache_load(key, sub)
+	res = cache_load(key, sub; return_keys)
 	res !== nothing && return res
 
 	# Compute
@@ -218,11 +221,12 @@ function cached_call!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, deps::Vector
 		# Insert all parts of the result into the in-RAM cache
 		_insert_partial_results!(scheduler, ro, res)
 
-		sub === nothing && throw(ArgumentError("Cannot retrieve CompoundResult directly, sub-result must be specified."))
+		# sub === nothing && throw(ArgumentError("Cannot retrieve CompoundResult directly, sub-result must be specified."))
 
 		# But only return the sub we asked for
-		return get_subresult(res, sub)
+		return get_subresult(res, sub; return_keys)
 	else
+		return_keys && throw(ArgumentError("return_keys can only be used on CompoundResults."))
 		sub === nothing || throw(ArgumentError("Cannot retrieve sub-result unless the result is a CompoundResult (tried to retrieve: $sub)."))
 		return res
 	end
@@ -275,8 +279,10 @@ function process_once!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, op::T) wher
 				# The remaining args specify subresults of `CompoundResult`s
 				sub = length(sa.args)==1 ? nothing : collect(String, @view(sa.args[2:end]))
 
+				return_keys = _get_kwarg(sa.kwargs, :return_keys, false)
+
 				res = get!(scheduler.results, ro) do # the key is the `get_cached` spec
-					cached_call!(scheduler, inner_ro, inner_deps; sub) # but we compute the inner spec
+					cached_call!(scheduler, inner_ro, inner_deps; sub, return_keys) # but we compute the inner spec
 				end
 			else
 				res = get!(scheduler.results, ro) do

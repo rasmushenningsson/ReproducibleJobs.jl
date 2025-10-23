@@ -6,24 +6,46 @@ end
 spec2path(cache::Cache, ro::ReadOnly{SpecArgs}) = joinpath(cache.dir, string(get_hash(ro),".jld2"))
 
 
-function _cache_load_item(io, sub)
-	if sub === nothing || isempty(sub)
-		get(io, "value") do
+# function _cache_load_item(io, sub)
+# 	if sub === nothing || isempty(sub)
+# 		get(io, "value") do
+# 			# NB: The abscene of a "value" key means that this is a `CompoundResult`
+# 			throw(ArgumentError("Illegal to retrieve CompoundResult directly from cache. You must specify sub-result(s) using cached(spec,sub...)."))
+# 		end
+# 	else
+# 		children = io["children"]
+# 		child = children[sub[1]]
+# 		_cache_load_item(child, @view(sub[2:end]))
+# 	end
+# end
+
+function _cache_load_item(io, sub; return_keys::Bool)
+	if !return_keys && (sub === nothing || isempty(sub))
+		return get(io, "value") do
 			# NB: The abscene of a "value" key means that this is a `CompoundResult`
 			throw(ArgumentError("Illegal to retrieve CompoundResult directly from cache. You must specify sub-result(s) using cached(spec,sub...)."))
 		end
+	end
+
+	children = io["children"]
+
+	if return_keys
+		return get(io, "keys") do
+			# NB: The abscene of a "keys" key means that this is not `CompoundResult`
+			throw(ArgumentError("Tried to retrieve keys from result that was not a CompoundResult."))
+		end
 	else
-		children = io["children"]
 		child = children[sub[1]]
-		_cache_load_item(child, @view(sub[2:end]))
+		return _cache_load_item(child, @view(sub[2:end]); return_keys)
 	end
 end
 
-function _cache_load(fp, sa::SpecArgs, sub)
+
+function _cache_load(fp, sa::SpecArgs, sub; return_keys::Bool)
 	if sub === nothing
-		@info "Loading $(sa.f) from cache"
+		@info "Loading $(sa.f) $(return_keys ? "keys " : "")from cache"
 	else
-		@info "Loading $(*(string(sa.f), string.('.',sub)...)) from cache"
+		@info "Loading $(*(string(sa.f), string.('.',sub)...)) $(return_keys ? "keys " : "")from cache"
 	end
 
 	value = jldopen(fp, "r") do io
@@ -35,7 +57,7 @@ function _cache_load(fp, sa::SpecArgs, sub)
 		#       or by using a custom comparison function...
 		isequal(sa, cached_sa) || @warn "Job specification did not match job specification in cache (possible cause, Regex within a Base.Fix2)."
 
-		_cache_load_item(io, sub)
+		_cache_load_item(io, sub; return_keys)
 	end
 
 	touch(fp) # update file timestamp (in case we want to remove old cached files later)
@@ -68,8 +90,8 @@ end
 
 get_cache_key(ro::ReadOnly{SpecArgs}) = spec2path(get_cache(),ro), ro.value
 
-function cache_load((fp,sa)::Tuple{String, SpecArgs}, sub)
-	isfile(fp) ? _cache_load(fp, sa, sub) : nothing
+function cache_load((fp,sa)::Tuple{String, SpecArgs}, sub; return_keys=false)
+	isfile(fp) ? _cache_load(fp, sa, sub; return_keys) : nothing
 end
 
 function cache_save((fp,sa)::Tuple{String, SpecArgs}, value)
