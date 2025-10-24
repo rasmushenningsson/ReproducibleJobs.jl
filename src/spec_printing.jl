@@ -70,8 +70,7 @@ end
 wrap_item(x) = x
 
 wrap_item(x::Union{<:Base.Fix1,<:Base.Fix2}) = ItemWrapper(x)
-wrap_item(x::AbstractString) = ItemWrapper(x)
-wrap_item(x::Symbol) = ItemWrapper(x)
+wrap_item(x::Union{Symbol,AbstractString,AbstractChar}) = ItemWrapper(x)
 
 wrap_item(x::AbstractRange) = ItemWrapper(x)
 wrap_item(x::Union{<:AbstractArray,<:Tuple}) = wrap_item.(x)
