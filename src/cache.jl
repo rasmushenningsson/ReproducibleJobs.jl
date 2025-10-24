@@ -28,7 +28,7 @@ end
 
 function _cache_load(fp, sa::SpecArgs, sub; return_keys=false)
 	sub = @something sub ()
-	s = prod(string.('.',sub); init="")
+	s = prod(string.(".\"",sub,'"'); init="")
 	@info string("Loading ", sa.f, s, return_keys ? " keys" : "", " from cache")
 
 	value = jldopen(fp, "r") do io
@@ -63,7 +63,7 @@ end
 
 function _cache_save(fp, spec_args::SpecArgs, value)
 	if !(value isa ProcessingException)
-		jldopen(fp, "w"; compress=ZstdFrameCompressor()) do io
+		jldopen(fp, "w"; compress=ZstdFrameCompressor()) do io # should we set compression level?
 			io["spec_args"] = spec_args
 			_cache_save_item(io, value)
 		end
