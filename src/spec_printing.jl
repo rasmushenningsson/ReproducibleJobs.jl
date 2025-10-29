@@ -184,6 +184,7 @@ function _should_collapse(::Type{T}) where T
 	T <: AbstractString && return true
 	T <: Symbol && return true
 	T <: AbstractChar && return true
+	T <: Missing && return true
 	if (T <: Pair) || (T <: Tuple) || (T <: NamedTuple)
 		return all(_should_collapse, fieldtypes(T))
 	end
