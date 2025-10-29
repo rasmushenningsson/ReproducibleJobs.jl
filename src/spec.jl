@@ -139,7 +139,9 @@ deduplicate!(dedup::Deduplicator, spec::Spec) = Spec(deduplicate!(dedup, spec.ro
 
 
 forwarded(spec::Spec) = Spec(spec.ro, forward(spec.op))
+forwarded(x) = x
 forwarded(predicate, spec::Spec) = Spec(spec.ro, Forward(predicate))
+forwarded(::Any, x) = x
 
 
 

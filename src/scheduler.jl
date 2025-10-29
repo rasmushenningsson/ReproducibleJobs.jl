@@ -50,6 +50,19 @@ process_dependencies!(scheduler, deps) = process_dependencies!(identity, schedul
 
 
 
+function deduplicate_result(res)
+	if res isa Spec
+		res
+	elseif res isa Managed
+		# By returning a Managed result, the computing function takes responsibility of the contents, otherwise we need to standardize
+		res = res.x
+	else
+		f = deduplicate_leaves(default_deduplicator()) # TODO: avoid using default_deduplicator() here - we need to get it from somewhere
+		copy_nested(f, res)
+	end
+end
+
+
 function propagate_error(sa, vals)::Union{Nothing, ProcessingException}
 	if any(x->x isa ProcessingException, vals)
 		causes = filter!(x->x isa ProcessingException, collect(vals))
@@ -69,6 +82,7 @@ function preprocess(sa::SpecArgs)
 
 		res = f(sa.args...; sa.kwargs...)
 		@assert res !== nothing "Preprocessing of $f returned nothing"
+		res = deduplicate_result(res) # needed because forwarding can return a value
 		return res
 	catch e
 		# TODO: Do not show anything/much here, it will be shown later instead
@@ -110,6 +124,7 @@ function compute(sa::SpecArgs, upstream::IdDict{Spec,Any})
 
 		v = _get_kwarg(sa, :__version, nothing)
 		@assert v !== nothing "__version kwarg must be provided for all (non-preprocessing) specs."
+		# @assert v !== nothing "__version kwarg must be provided for all (non-preprocessing) specs. Missing for $f."
 
 		unwrapper = _unwrap_value(upstream)
 		args = (copy_nested(unwrapper, a) for a in sa.args)
@@ -117,6 +132,7 @@ function compute(sa::SpecArgs, upstream::IdDict{Spec,Any})
 
 		res = f(args...; kwargs...)
 		@assert res !== nothing "Computation of $f returned nothing"
+		res = deduplicate_result(res)
 		return res
 	catch e
 		# TODO: Do not show anything/much here, it will be shown later instead
@@ -140,15 +156,6 @@ function _fetch_and_compute!(scheduler, sa::SpecArgs, deps::Vector{Spec})
 	deps = fetch_dependencies!(scheduler, deps)
 	res = compute(sa, deps)
 	@assert !(res isa Spec)
-
-	# By returning a Managed result, the computing function takes responsibility of the contents, otherwise we need to standardize
-	if res isa Managed
-		res = res.x
-	else
-		f = deduplicate_leaves(default_deduplicator()) # TODO: avoid using default_deduplicator() here - we need to get it from somewhere
-		res = copy_nested(f, res)
-	end
-
 	res
 end
 
