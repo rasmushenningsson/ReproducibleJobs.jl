@@ -143,8 +143,8 @@ function extend_print_node!(pn::PrintNode2, spec::Spec)
 
 		spec = spec.args[1]::Spec # unwrap the spec
 	end
-	# Standard case
 
+	# Standard handling
 	extend_title!(pn, styled"{green:$(spec.f)}")
 	if spec.f isa AbstractPreprocess
 		extend_title!(pn, styled"{bright_black:($(nameof(typeof(spec.f))))}")

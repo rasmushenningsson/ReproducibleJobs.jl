@@ -24,7 +24,7 @@ manage(x) = Managed(x)
 manage(x::Managed) = x
 
 # Basic immutable types - should this list be extended?
-manage(x::Union{Number,String,Char,Symbol,Nothing,Missing,DataType}) = x
+manage(x::Union{Number,AbstractString,AbstractChar,Symbol,Nothing,Missing,DataType,AbstractRange}) = x
 
 
 """

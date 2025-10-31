@@ -14,7 +14,8 @@ end
 
 # "Shortcut" for some simple types, to lower risk of type instabilities in deduplicate!
 deduplicate_type(::Deduplicator, ::Type{<:Union{<:Pair,<:Tuple,<:NamedTuple}}) = false
-deduplicate_type(::Deduplicator, ::Type{<:Union{<:Integer,<:AbstractFloat,String,Char,Symbol}}) = false
+deduplicate_type(::Deduplicator, ::Type{<:Union{<:Number,<:AbstractString,<:AbstractChar,Symbol}}) = false
+deduplicate_type(::Deduplicator, ::Type{<:AbstractRange}) = false
 deduplicate_type(::Deduplicator, ::Type{VersionNumber}) = false # Fix for VersionNumber that otherwise runs into Vararg problems below
 deduplicate_type(::Deduplicator, ::Type{<:Exception}) = false
 
