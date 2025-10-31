@@ -68,8 +68,11 @@ function _limited_string(f, max_n, items; prefix, sep, suffix)
 	join(parts)
 end
 
-nt_item_str((k,v)::Pair) = styled"{blue:$k}=" * item_str(v)
-dict_item_str((k,v)::Pair) = styled"{blue:$k}=>" * item_str(v)
+nt_key_str(k) = styled"{blue:$k}"
+dict_key_str(k) = styled"{blue:$k}"
+
+nt_item_str((k,v)::Pair) = nt_key_str(k) * "=" * item_str(v)
+dict_item_str((k,v)::Pair) = dict_key_str(k) * "=>" * item_str(v)
 
 limited_string(max_n, v::AbstractVector; kwargs...) =
 	_limited_string(item_str, max_n, v; prefix="[", sep=", ", suffix="]", kwargs...)
@@ -132,7 +135,7 @@ item_str(ts::TimestampedFilePath) = styled"$(ts.path){bright_black:@$(Dates.unix
 
 
 
-function extend_print_node!(pn::PrintNode2, spec::Spec)
+function extend_print_node!(pn::PrintNode2, spec::Spec; suffix_space=0)
 	# Special handling of `get_cached`, to make things more compact
 	suffix = ""
 	if spec.f == get_cached
@@ -182,24 +185,28 @@ function extend_print_node_collapsed!(pn::PrintNode2, a::T; suffix_space=0) wher
 	pn
 end
 
-function extend_print_node_expanded!(pn::PrintNode2, a::T) where T
-	max_n = 10
-
+function extend_print_node_expanded!(f, pn::PrintNode2, a::T; unwrap=identity) where T
+	max_n = 20
 	extend_title!(pn, styled"{magenta:$(_nameof(T))}")
 
 	context2 = descend(pn.context)
-	for (i,x) in enumerate(a)
+	for (i,x) in enumerate(unwrap(a))
 		i > max_n && break
-		push!(pn.children, build_print_node(context2, x))
+		val,prefix = f(x)
+		push!(pn.children, build_print_node(context2, val; prefix))
 	end
 	length(a) > max_n && push!(pn.children, build_print_node(context2, PrintRaw(styled"{bright_black:...}")))
 	pn
 end
+extend_print_node_expanded!(pn, x) = extend_print_node_expanded!(x->(x,""), pn, x)
+extend_print_node_expanded!(pn, x::NamedTuple) = extend_print_node_expanded!(p->(p[2],nt_key_str(p[1])*" ="), pn, x; unwrap=pairs)
+extend_print_node_expanded!(pn, x::AbstractDict{<:Union{String,Symbol,Char,Number,DataType}}) =
+	extend_print_node_expanded!(p->(p[2],dict_key_str(p[1]) * " =>"), pn, x)
 
 
-function extend_print_node!(pn::PrintNode2, x::T) where T<:Union{<:Tuple,<:NamedTuple}
+function extend_print_node!(pn::PrintNode2, x::T; suffix_space=0) where T<:Union{<:Tuple,<:NamedTuple}
 	if _should_collapse(T)
-		extend_print_node_collapsed!(pn, x)
+		extend_print_node_collapsed!(pn, x; suffix_space)
 	else
 		extend_print_node_expanded!(pn, x)
 	end
@@ -215,12 +222,12 @@ function extend_print_node!(pn::PrintNode2, x::T; suffix_space=0) where T<:Union
 end
 
 
-function extend_print_node!(pn::PrintNode2, (k,v)::Pair{<:Union{String,Symbol,Char,Number,DataType}})
+function extend_print_node!(pn::PrintNode2, (k,v)::Pair{<:Union{String,Symbol,Char,Number,DataType}}; suffix_space=0)
 	extend_title!(pn, item_str(k)*" =>")
 	extend_print_node!(pn, v)
 end
 
-function extend_print_node!(pn::PrintNode2, (k,v)::T) where T<:Pair
+function extend_print_node!(pn::PrintNode2, (k,v)::T; suffix_space=0) where T<:Pair
 	extend_title!(pn, styled"{magenta:$(_nameof(T))}")
 	context2 = descend(pn.context)
 	push!(pn.children, build_print_node(context2, k))
@@ -231,14 +238,14 @@ end
 
 
 
-function extend_print_node!(pn::PrintNode2, r::AbstractRange) # This is need to not dispatch to the AbstractArray case
-	extend_title!(pn, limited_string(chars_remaining(pn), item_str(r)))
+function extend_print_node!(pn::PrintNode2, r::AbstractRange; suffix_space=0) # This is need to not dispatch to the AbstractArray case
+	extend_title!(pn, limited_string(chars_remaining(pn)-suffix_space, item_str(r)))
 	pn
 end
 
 
 
-function extend_print_node!(pn::PrintNode2, ro::ReadOnly{T}) where T
+function extend_print_node!(pn::PrintNode2, ro::ReadOnly{T}; suffix_space=0) where T
 	set_hash!(pn, ro.h)
 	if ro.h in pn.context.hashes
 		# Seen before
@@ -248,7 +255,7 @@ function extend_print_node!(pn::PrintNode2, ro::ReadOnly{T}) where T
 		# First time
 		push!(pn.context.hashes, ro.h)
 		# extend_title!(pn, limited_string(chars_remaining(pn)-4, item_str(ro.value))) # make some space for ordinal at end
-		extend_print_node!(pn, ro.value; suffix_space=5)
+		extend_print_node!(pn, ro.value; suffix_space=suffix_space+5)
 	end
 	pn
 end
