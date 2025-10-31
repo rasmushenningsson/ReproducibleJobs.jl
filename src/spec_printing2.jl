@@ -109,7 +109,7 @@ end
 item_str(x::Any) = repr(x; context=(:compact=>true, :short=>true))
 
 item_str(x::PrintRaw) = x.raw
-item_str(s::Union{String,Symbol,Bool,Number,Char}) = repr(s)
+item_str(s::Union{String,Symbol,Char,Number}) = repr(s)
 item_str(::Missing) = styled"{italic,bright_black:missing}"
 
 
@@ -236,9 +236,17 @@ end
 
 
 
-function extend_print_node!(pn::PrintNode2, (k,v)::Pair{<:Union{String,Symbol}})
+function extend_print_node!(pn::PrintNode2, (k,v)::Pair{<:Union{String,Symbol,Char,Number,DataType}})
 	extend_title!(pn, item_str(k)*" =>")
 	extend_print_node!(pn, v)
+end
+
+function extend_print_node!(pn::PrintNode2, (k,v)::T) where T<:Pair
+	extend_title!(pn, styled"{magenta:$(_nameof(T))}")
+	context2 = descend(pn.context)
+	push!(pn.children, build_print_node(context2, k))
+	push!(pn.children, build_print_node(context2, v))
+	pn
 end
 
 
@@ -248,10 +256,17 @@ function extend_print_node!(pn::PrintNode2, ro::ReadOnly)
 end
 
 
+
+function extend_print_node!(pn::PrintNode2, r::AbstractRange) # This is need to not dispatch to the AbstractArray case
+	extend_title!(pn, limited_string(chars_remaining(pn), item_str(r)))
+	pn
+end
+
 function extend_print_node!(pn::PrintNode2, x)
 	extend_title!(pn, limited_string(chars_remaining(pn), item_str(x)))
 	pn
 end
+
 
 
 
