@@ -30,7 +30,7 @@ end
 chars_remaining(pn::PrintNode2) = pn.context.line_length - pn.context.depth*3 - length(pn.title) - !isempty(pn.title)
 
 
-function limited_string(max_n, v::Union{AbstractVector,Tuple}, prefix, sep, suffix)
+function _limited_string(f, max_n, items; prefix, sep, suffix)
 	parts = Union{String,AnnotatedString}[prefix]
 	n_remaining = max_n - length(prefix) - length(suffix)
 	n_remaining = max(n_remaining, 10) # We need to print something...
@@ -38,15 +38,15 @@ function limited_string(max_n, v::Union{AbstractVector,Tuple}, prefix, sep, suff
 	sep_len = length(sep)
 
 	# Convert enough items to strings
-	n_items = length(v)
-	for (i,x) in enumerate(v)
-		s = item_str(x) * (i != n_items ? sep : "") # Skip separator for the last item
+	n_items = length(items)
+	for (i,x) in enumerate(items)
+		s = f(x) * (i != n_items ? sep : "") # Skip separator for the last item
 		push!(parts, s)
 		n_remaining -= length(s)
 		n_remaining<=0 && break
 	end
 
-	if n_remaining>=0 && length(parts) == length(v)+1 # +1 due to the prefix string in parts
+	if n_remaining>=0 && length(parts) == length(items)+1 # +1 due to the prefix string in parts
 		# The whole string fits!
 		push!(parts, suffix)
 	else
@@ -68,11 +68,35 @@ function limited_string(max_n, v::Union{AbstractVector,Tuple}, prefix, sep, suff
 	join(parts)
 end
 
+nt_item_str((k,v)::Pair) = styled"{blue:$k}=" * item_str(v)
+dict_item_str((k,v)::Pair) = styled"{blue:$k}=>" * item_str(v)
+
+limited_string(max_n, v::AbstractVector; kwargs...) =
+	_limited_string(item_str, max_n, v; prefix="[", sep=", ", suffix="]", kwargs...)
+
+limited_string(max_n, s::T; kwargs...) where T<:AbstractSet =
+	_limited_string(item_str, max_n, s; prefix=styled"{magenta:$(_nameof(T))}([", sep=", ", suffix="])", kwargs...)
+
+limited_string(max_n, d::T; kwargs...) where T<:AbstractDict =
+	_limited_string(dict_item_str, max_n, d; prefix=styled"{magenta:$(_nameof(T))}(", sep=", ", suffix="]", kwargs...)
+
+limited_string(max_n, tup::Tuple; kwargs...) =
+	_limited_string(item_str, max_n, tup; prefix="(", sep=", ", suffix=")", kwargs...)
+
+limited_string(max_n, nt::NamedTuple; kwargs...) =
+	_limited_string(nt_item_str, max_n, pairs(nt); prefix="(; ", sep=", ", suffix=")", kwargs...)
+
+
 function limited_string(max_n, s::AbstractString)
 	length(s) <= max_n && return s
 	@views(s[1:max_n-3]) * "..."
 end
 
+
+function limited_string(max_n, a::AbstractArray) # For matrices and higher-dimensional tensors
+	s = repr(x; context=(:compact=>true, :short=>true))
+	limited_string(max_n, s)
+end
 
 
 
@@ -110,8 +134,6 @@ item_str(ts::TimestampedFilePath) = styled"$(ts.path){bright_black:@$(Dates.unix
 
 
 function extend_print_node!(pn::PrintNode2, spec::Spec)
-	# TODO: Hash context for duplicates etc.
-
 	extend_title!(pn, styled"{green:$(spec.f)}")
 	if spec.f isa AbstractPreprocess
 		extend_title!(pn, styled"{bright_black:($(nameof(typeof(spec.f))))}")
@@ -120,21 +142,14 @@ function extend_print_node!(pn::PrintNode2, spec::Spec)
 		extend_title!(pn, styled"{italic,bright_black:($(spec.op))}")
 	end
 
-
-	# TODO: Print ordinal instead. But then we need to keep track of that.
-	# h_short = spec.ro.h[1:6]
 	set_hash!(pn, spec.ro.h)
-
 
 	if spec.ro.h in pn.context.hashes
 		# Seen before
 		get!(pn.context.duplicates, spec.ro.h, length(pn.context.duplicates)+1)
-		# extend_title!(pn, styled"{blue:0x$(h_short)}")
 	else
 		# First time
 		push!(pn.context.hashes, spec.ro.h)
-
-		# extend_title!(pn, styled"{blue:0x$(h_short)}")
 		
 		context2 = descend(pn.context)
 		for a in spec.ro.value.args
@@ -149,40 +164,63 @@ function extend_print_node!(pn::PrintNode2, spec::Spec)
 end
 
 
-function extend_print_node!(pn::PrintNode2, a::T) where T<:AbstractArray{S} where S
-	# TODO: Hash context for duplicates etc.
-
-	max_n = 10
-
-	if _should_collapse(S)
-		extend_title!(pn, limited_string(chars_remaining(pn), a, "[", ", ", "]"))
-	else
-		extend_title!(pn, styled"{magenta:$(_nameof(T))}")
-
-		context2 = descend(pn.context)
-		for x in a[1:min(max_n,end)]
-			push!(pn.children, build_print_node(context2, x))
-		end
-		length(a) > max_n && push!(pn.children, build_print_node(context2, PrintRaw(styled"{bright_black:...}")))
-	end
+function extend_print_node_collapsed!(pn::PrintNode2, a::T) where T
+	extend_title!(pn, limited_string(chars_remaining(pn), a))
 	pn
 end
 
-function extend_print_node!(pn::PrintNode2, a::T) where T<:Tuple
-	# TODO: Hash context for duplicates etc.
-	# TODO: Print on a single line if suitable types
-
+function extend_print_node_expanded!(pn::PrintNode2, a::T) where T
 	max_n = 10
 
 	extend_title!(pn, styled"{magenta:$(_nameof(T))}")
 
 	context2 = descend(pn.context)
-	for x in a[1:min(max_n,end)]
+	for (i,x) in enumerate(a)
+		i > max_n && break
 		push!(pn.children, build_print_node(context2, x))
 	end
 	length(a) > max_n && push!(pn.children, build_print_node(context2, PrintRaw(styled"{bright_black:...}")))
 	pn
 end
+
+
+function extend_print_node!(pn::PrintNode2, a::T) where T<:Union{<:Tuple,<:NamedTuple}
+	if _should_collapse(T)
+		extend_print_node_collapsed!(pn, a)
+	else
+		extend_print_node_expanded!(pn, a)
+	end
+end
+
+
+function extend_print_node!(pn::PrintNode2, a::AbstractArray{T}) where T
+	# TODO: Hash context for duplicates etc.
+	if _should_collapse(T)
+		extend_print_node_collapsed!(pn, a)
+	else
+		extend_print_node_expanded!(pn, a)
+	end
+end
+
+function extend_print_node!(pn::PrintNode2, a::AbstractSet{T}) where T
+	# TODO: Hash context for duplicates etc.
+	if _should_collapse(T)
+		extend_print_node_collapsed!(pn, a)
+	else
+		extend_print_node_expanded!(pn, a)
+	end
+end
+
+
+function extend_print_node!(pn::PrintNode2, a::AbstractDict{K,V}) where {K,V}
+	# TODO: Hash context for duplicates etc.
+	if _should_collapse(K) && _should_collapse(V)
+		extend_print_node_collapsed!(pn, a)
+	else
+		extend_print_node_expanded!(pn, a)
+	end
+end
+
 
 
 function extend_print_node!(pn::PrintNode2, (k,v)::Pair{<:Union{String,Symbol}})
@@ -191,7 +229,7 @@ function extend_print_node!(pn::PrintNode2, (k,v)::Pair{<:Union{String,Symbol}})
 end
 
 
-# TODO: Handle hashes?
+# TODO: Handle hashes here?
 function extend_print_node!(pn::PrintNode2, ro::ReadOnly)
 	extend_print_node!(pn, ro.value)
 end

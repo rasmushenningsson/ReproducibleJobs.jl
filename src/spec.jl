@@ -160,8 +160,8 @@ function Base.show(io::IO, spec::Spec)
 	if get(io,:compact,false)
 		show(io, spec.f)
 	else
-		# print_spec(io, spec; maxdepth=15)
-		print_spec2(io, spec; maxdepth=15)
+		# print_spec(io, spec; maxdepth=20)
+		print_spec2(io, spec; maxdepth=20)
 	end
 end
 
