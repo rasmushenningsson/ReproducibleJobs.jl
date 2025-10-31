@@ -78,7 +78,7 @@ limited_string(max_n, s::T; kwargs...) where T<:AbstractSet =
 	_limited_string(item_str, max_n, s; prefix=styled"{magenta:$(_nameof(T))}([", sep=", ", suffix="])", kwargs...)
 
 limited_string(max_n, d::T; kwargs...) where T<:AbstractDict =
-	_limited_string(dict_item_str, max_n, d; prefix=styled"{magenta:$(_nameof(T))}(", sep=", ", suffix="]", kwargs...)
+	_limited_string(dict_item_str, max_n, d; prefix=styled"{magenta:$(_nameof(T))}(", sep=", ", suffix=")", kwargs...)
 
 limited_string(max_n, tup::Tuple; kwargs...) =
 	_limited_string(item_str, max_n, tup; prefix="(", sep=", ", suffix=")", kwargs...)
@@ -177,8 +177,8 @@ function extend_print_node!(pn::PrintNode2, spec::Spec)
 end
 
 
-function extend_print_node_collapsed!(pn::PrintNode2, a::T) where T
-	extend_title!(pn, limited_string(chars_remaining(pn), a))
+function extend_print_node_collapsed!(pn::PrintNode2, a::T; suffix_space=0) where T
+	extend_title!(pn, limited_string(chars_remaining(pn)-suffix_space, a))
 	pn
 end
 
@@ -197,40 +197,37 @@ function extend_print_node_expanded!(pn::PrintNode2, a::T) where T
 end
 
 
-function extend_print_node!(pn::PrintNode2, a::T) where T<:Union{<:Tuple,<:NamedTuple}
+function extend_print_node!(pn::PrintNode2, x::T) where T<:Union{<:Tuple,<:NamedTuple}
 	if _should_collapse(T)
-		extend_print_node_collapsed!(pn, a)
+		extend_print_node_collapsed!(pn, x)
 	else
-		extend_print_node_expanded!(pn, a)
+		extend_print_node_expanded!(pn, x)
 	end
 end
 
 
-function extend_print_node!(pn::PrintNode2, a::AbstractArray{T}) where T
-	# TODO: Hash context for duplicates etc.
+function extend_print_node!(pn::PrintNode2, x::AbstractArray{T}; suffix_space=0) where T
 	if _should_collapse(T)
-		extend_print_node_collapsed!(pn, a)
+		extend_print_node_collapsed!(pn, x; suffix_space)
 	else
-		extend_print_node_expanded!(pn, a)
+		extend_print_node_expanded!(pn, x)
 	end
 end
 
-function extend_print_node!(pn::PrintNode2, a::AbstractSet{T}) where T
-	# TODO: Hash context for duplicates etc.
+function extend_print_node!(pn::PrintNode2, x::AbstractSet{T}; suffix_space=0) where T
 	if _should_collapse(T)
-		extend_print_node_collapsed!(pn, a)
+		extend_print_node_collapsed!(pn, x; suffix_space)
 	else
-		extend_print_node_expanded!(pn, a)
+		extend_print_node_expanded!(pn, x)
 	end
 end
 
 
-function extend_print_node!(pn::PrintNode2, a::AbstractDict{K,V}) where {K,V}
-	# TODO: Hash context for duplicates etc.
+function extend_print_node!(pn::PrintNode2, x::AbstractDict{K,V}; suffix_space=0) where {K,V}
 	if _should_collapse(K) && _should_collapse(V)
-		extend_print_node_collapsed!(pn, a)
+		extend_print_node_collapsed!(pn, x; suffix_space)
 	else
-		extend_print_node_expanded!(pn, a)
+		extend_print_node_expanded!(pn, x)
 	end
 end
 
@@ -250,11 +247,6 @@ function extend_print_node!(pn::PrintNode2, (k,v)::T) where T<:Pair
 end
 
 
-# TODO: Handle hashes here?
-function extend_print_node!(pn::PrintNode2, ro::ReadOnly)
-	extend_print_node!(pn, ro.value)
-end
-
 
 
 function extend_print_node!(pn::PrintNode2, r::AbstractRange) # This is need to not dispatch to the AbstractArray case
@@ -262,8 +254,26 @@ function extend_print_node!(pn::PrintNode2, r::AbstractRange) # This is need to 
 	pn
 end
 
-function extend_print_node!(pn::PrintNode2, x)
-	extend_title!(pn, limited_string(chars_remaining(pn), item_str(x)))
+
+
+function extend_print_node!(pn::PrintNode2, ro::ReadOnly{T}) where T
+	set_hash!(pn, ro.h)
+	if ro.h in pn.context.hashes
+		# Seen before
+		get!(pn.context.duplicates, ro.h, length(pn.context.duplicates)+1)
+		extend_title!(pn, styled"{magenta:$(_nameof(T))}")
+	else
+		# First time
+		push!(pn.context.hashes, ro.h)
+		# extend_title!(pn, limited_string(chars_remaining(pn)-4, item_str(ro.value))) # make some space for ordinal at end
+		extend_print_node!(pn, ro.value; suffix_space=5)
+	end
+	pn
+end
+
+
+function extend_print_node!(pn::PrintNode2, x; suffix_space=0)
+	extend_title!(pn, limited_string(chars_remaining(pn)-suffix_space, item_str(x)))
 	pn
 end
 
