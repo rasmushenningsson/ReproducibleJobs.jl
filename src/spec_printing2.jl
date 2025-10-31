@@ -1,22 +1,23 @@
-struct PrintNode2
+mutable struct PrintNode2
 	title::AnnotatedString
-	indent::Int
+	indent::Int # Use to know how much space we have left on the line
+	h::String
 	children::Vector{PrintNode2}
 end
-PrintNode2(context::PrintContext, title, children) = PrintNode2(title, context.depth*2, children)
-PrintNode2(context::PrintContext, title) = PrintNode2(context, title, PrintNode2[])
+PrintNode2(context, title) = PrintNode2(title, context.depth*3, "", PrintNode2[])
+PrintNode2(context) = PrintNode2(context, "")
 
 AbstractTrees.children(x::PrintNode2) = x.children
-function AbstractTrees.printnode(io::IO, x::PrintNode2)
-	print(io, x.title)
+AbstractTrees.printnode(io::IO, x::PrintNode2) = print(io, x.title)
+
+
+function extend_title!(pn::PrintNode2, new)
+	@assert isempty(pn.children) "Cannot change title after node has children"
+	pn.title = isempty(pn.title) ? convert(AnnotatedString,new) : pn.title*" "*new
 end
 
 
-build_print_node(context, value; prefix="") = build_print_node(context, convert(AnnotatedString,prefix), value)
-build_print_node(value; kwargs...) = build_print_node(PrintContext(), value; kwargs...)
 
-
-extend_prefix(prefix, new) = isempty(prefix) ? convert(AnnotatedString,new) : prefix*" "*new
 
 
 struct PrintRaw{T<:AbstractString}
@@ -51,90 +52,92 @@ item_str(ts::TimestampedFilePath) = styled"$(ts.path){bright_black:@$(Dates.unix
 
 
 
-function build_print_node(context::PrintContext, prefix::AnnotatedString, spec::Spec)
+
+
+
+function extend_print_node!(pn::PrintNode2, context::PrintContext, spec::Spec)
 	# TODO: Hash context for duplicates etc.
-	prefix = extend_prefix(prefix, styled"{green:$(spec.f)}")
+
+	extend_title!(pn, styled"{green:$(spec.f)}")
 	if spec.f isa AbstractPreprocess
-		prefix = extend_prefix(prefix, styled"{bright_black:($(nameof(typeof(spec.f))))}")
+		extend_title!(pn, styled"{bright_black:($(nameof(typeof(spec.f))))}")
 	end
 	if spec.op !== default_spec_op()
-		prefix = extend_prefix(prefix, styled"{italic,bright_black:($(spec.op))}")
+		extend_title!(pn, styled"{italic,bright_black:($(spec.op))}")
 	end
 
-	children = PrintNode2[]
 
 	# TODO: Print ordinal instead. But then we need to keep track of that.
 	h_short = spec.ro.h[1:6]
 
 	if spec.ro.h in context.hashes
 		# Seen before
-		prefix = extend_prefix(prefix, styled"{blue:0x$(h_short)}")
+		extend_title!(pn, styled"{blue:0x$(h_short)}")
 	else
 		# First time
 		push!(context.hashes, spec.ro.h)
 
-		prefix = extend_prefix(prefix, styled"{blue:0x$(h_short)}")
+		extend_title!(pn, styled"{blue:0x$(h_short)}")
 		
 		context2 = descend(context)
 		for a in spec.ro.value.args
-			push!(children, build_print_node(context2, a))
+			push!(pn.children, build_print_node(context2, a))
 		end
 		for (k,v) in spec.ro.value.kwargs
 			startswith(string(k), "__") && continue
-			push!(children, build_print_node(context2, v; prefix=styled"{blue:$k:}"))
+			push!(pn.children, build_print_node(context2, v; prefix=styled"{blue:$k:}"))
 		end
 	end
-	PrintNode2(context, prefix, children)
+	pn
 end
 
 
-function build_print_node(context::PrintContext, prefix::AnnotatedString, a::T) where T<:Union{AbstractArray,Tuple}
+function extend_print_node!(pn::PrintNode2, context::PrintContext, a::T) where T<:Union{AbstractArray,Tuple}
 	# TODO: Hash context for duplicates etc.
 	# TODO: Print on a single line if suitable types
 
 	max_n = 10
 
-	prefix = extend_prefix(prefix, styled"{magenta:$(_nameof(T))}")
+	extend_title!(pn, styled"{magenta:$(_nameof(T))}")
 
 	context2 = descend(context)
-	children = PrintNode2[]
 	for x in a[1:min(max_n,end)]
-		push!(children, build_print_node(context2, x))
+		push!(pn.children, build_print_node(context2, x))
 	end
-	length(a) > max_n && push!(children, build_print_node(context2, PrintRaw(styled"{bright_black:...}")))
-	PrintNode2(context, prefix, children)
+	length(a) > max_n && push!(pn.children, build_print_node(context2, PrintRaw(styled"{bright_black:...}")))
+	pn
 end
 
 
-function build_print_node(context::PrintContext, prefix::AnnotatedString, (k,v)::Pair{<:Union{String,Symbol}})
-	build_print_node(context, extend_prefix(prefix, string(item_str(k), " =>")), v)
+function extend_print_node!(pn::PrintNode2, context::PrintContext, (k,v)::Pair{<:Union{String,Symbol}})
+	extend_title!(pn, string(item_str(k), " =>"))
+	extend_print_node!(pn, context, v)
 end
 
 
-function build_print_node(context::PrintContext, prefix::AnnotatedString, ro::ReadOnly)
-	build_print_node(context, prefix, ro.value)
+# TODO: Handle hashes?
+function extend_print_node!(pn::PrintNode2, context::PrintContext, ro::ReadOnly)
+	extend_print_node!(pn, context, ro.value)
 end
 
 
-function build_print_node(context::PrintContext, prefix::AnnotatedString, x)
-	PrintNode2(context, extend_prefix(prefix, item_str(x)))
+function extend_print_node!(pn::PrintNode2, context::PrintContext, x)
+	extend_title!(pn, item_str(x))
+	pn
 end
 
 
-# function build_print_node(context::PrintContext, prefix::AnnotatedString, s::String)
-# 	PrintNode2(context, extend_prefix(prefix, string('"',s,'"')))
-# end
 
-# function build_print_node(context::PrintContext, prefix::AnnotatedString, ::T) where T
-# 	prefix = extend_prefix(prefix, string(nameof(T), " not implemented"))
-# 	PrintNode2(context, prefix)
-# end
-
-
+function build_print_node(context, value; prefix="")
+	pn = PrintNode2(context)
+	isempty(prefix) || extend_title!(pn, prefix)
+	extend_print_node!(pn, context, value)
+end
 
 
 function print_spec2(io::IO, spec::Spec; kwargs...)
 	io = IOContext(io, :displaysize=>displaysize(io))
-	tree = build_print_node(spec)
+	context = PrintContext()
+	tree = build_print_node(context, spec)
 	AbstractTrees.print_tree(io, tree; kwargs...)
 end
