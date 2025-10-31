@@ -206,31 +206,13 @@ function extend_print_node!(pn::PrintNode2, x::T) where T<:Union{<:Tuple,<:Named
 end
 
 
-function extend_print_node!(pn::PrintNode2, x::AbstractArray{T}; suffix_space=0) where T
-	if _should_collapse(T)
+function extend_print_node!(pn::PrintNode2, x::T; suffix_space=0) where T<:Union{<:AbstractArray,<:AbstractSet,<:AbstractDict}
+	if _should_collapse(eltype(T))
 		extend_print_node_collapsed!(pn, x; suffix_space)
 	else
 		extend_print_node_expanded!(pn, x)
 	end
 end
-
-function extend_print_node!(pn::PrintNode2, x::AbstractSet{T}; suffix_space=0) where T
-	if _should_collapse(T)
-		extend_print_node_collapsed!(pn, x; suffix_space)
-	else
-		extend_print_node_expanded!(pn, x)
-	end
-end
-
-
-function extend_print_node!(pn::PrintNode2, x::AbstractDict{K,V}; suffix_space=0) where {K,V}
-	if _should_collapse(K) && _should_collapse(V)
-		extend_print_node_collapsed!(pn, x; suffix_space)
-	else
-		extend_print_node_expanded!(pn, x)
-	end
-end
-
 
 
 function extend_print_node!(pn::PrintNode2, (k,v)::Pair{<:Union{String,Symbol,Char,Number,DataType}})
