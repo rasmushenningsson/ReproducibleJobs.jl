@@ -14,6 +14,8 @@ using LinearAlgebra # For handling copy_arg(transposed)
 using DataFrames # TODO: Use package extension?
 using SparseArrays # TODO: Use package extension?
 
+using StyledStrings # For Spec printing
+
 export
 	Deduplicator,
 	Spec,
@@ -59,7 +61,6 @@ include("arg_processing.jl")
 include("spec.jl")
 include("spec_meta.jl")
 include("preprocess.jl")
-include("spec_printing.jl")
 include("compound_result.jl")
 include("cache.jl")
 include("job.jl")
@@ -70,6 +71,9 @@ include("paths.jl")
 
 include("ifelse.jl")
 
+
+include("spec_printing.jl") # TO BE REMOVED
+include("spec_printing2.jl") # TO REPLACE spec_printing.jl
 
 
 if VERSION >= v"1.12"
