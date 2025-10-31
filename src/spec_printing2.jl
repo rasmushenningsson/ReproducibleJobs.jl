@@ -134,30 +134,46 @@ item_str(ts::TimestampedFilePath) = styled"$(ts.path){bright_black:@$(Dates.unix
 
 
 function extend_print_node!(pn::PrintNode2, spec::Spec)
-	extend_title!(pn, styled"{green:$(spec.f)}")
-	if spec.f isa AbstractPreprocess
-		extend_title!(pn, styled"{bright_black:($(nameof(typeof(spec.f))))}")
-	end
-	if spec.op !== default_spec_op()
-		extend_title!(pn, styled"{italic,bright_black:($(spec.op))}")
-	end
+	# Special handling of `get_cached`, to make things more compact
+	if spec.f == get_cached
+		# prefix = styled"{yellow:cached()}"
 
-	set_hash!(pn, spec.ro.h)
+		str = "(cached"
+		length(spec.args)>=2 && (str = str*':'*spec.args[2])
+		str *= ')'
+		str = styled"{green,light:$str}"
+		extend_title!(pn, str)
 
-	if spec.ro.h in pn.context.hashes
-		# Seen before
-		get!(pn.context.duplicates, spec.ro.h, length(pn.context.duplicates)+1)
+		# length(spec.args)>=2 && extend_title!(pn, "("*item_str(spec.args[2])*")")
+		extend_print_node!(pn, spec.args[1])
 	else
-		# First time
-		push!(pn.context.hashes, spec.ro.h)
-		
-		context2 = descend(pn.context)
-		for a in spec.ro.value.args
-			push!(pn.children, build_print_node(context2, a))
+		# Standard case
+
+		extend_title!(pn, styled"{green:$(spec.f)}")
+		if spec.f isa AbstractPreprocess
+			extend_title!(pn, styled"{bright_black:($(nameof(typeof(spec.f))))}")
 		end
-		for (k,v) in spec.ro.value.kwargs
-			startswith(string(k), "__") && continue
-			push!(pn.children, build_print_node(context2, v; prefix=styled"{blue:$k:}"))
+		if spec.op !== default_spec_op()
+			extend_title!(pn, styled"{bright_black,light:($(spec.op))}")
+		end
+
+		set_hash!(pn, spec.ro.h)
+
+		if spec.ro.h in pn.context.hashes
+			# Seen before
+			get!(pn.context.duplicates, spec.ro.h, length(pn.context.duplicates)+1)
+		else
+			# First time
+			push!(pn.context.hashes, spec.ro.h)
+
+			context2 = descend(pn.context)
+			for a in spec.ro.value.args
+				push!(pn.children, build_print_node(context2, a))
+			end
+			for (k,v) in spec.ro.value.kwargs
+				startswith(string(k), "__") && continue
+				push!(pn.children, build_print_node(context2, v; prefix=styled"{blue:$k:}"))
+			end
 		end
 	end
 	pn
