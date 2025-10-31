@@ -72,8 +72,8 @@ include("paths.jl")
 include("ifelse.jl")
 
 
-include("spec_printing.jl") # TO BE REMOVED
-include("spec_printing2.jl") # TO REPLACE spec_printing.jl
+include("spec_printing.jl")
+include("spec_printing_old.jl") # TO BE REMOVED
 
 
 if VERSION >= v"1.12"

@@ -5,25 +5,6 @@ _nameof(::Type{<:ReadOnlyArray{V,N,T}}) where {V,N,T} = _nameof(T)
 _typenameof(x::T) where T = _nameof(T)
 
 
-
-function get_max_print(io, min_len=20)
-	n_chars_printed = get(io, :n_chars_printed, 0)
-	width = get(io, :displaysize, (0,0))[2]
-	max_print = max(min_len, width-n_chars_printed)
-end
-
-function _print_limited_string(io::IO, str::AbstractString, suffix, item_color=:normal) # TODO: Better name
-	max_print = get_max_print(io)
-
-	if length(str) <= max_print
-		printstyled(io, str; color=item_color)
-	else
-		printstyled(io, @view(str[1:max_print-length(suffix)]), suffix; color=item_color)
-	end
-end
-
-
-
 struct PrintContext
 	hashes::Set{String} # hashes seen at least once
 	duplicates::Dict{String,Int} # hashes seen at least twice, mapping to an ordinal
@@ -35,289 +16,289 @@ PrintContext(; line_length=80) = PrintContext(Set{String}(), Dict{String,Int}(),
 descend(pc::PrintContext) = PrintContext(pc.hashes, pc.duplicates, pc.depth+1, pc.line_length)
 
 
-struct PrintReference
-	str::String # What to print, usually the type of the referenced thing?
-end
 
-printreference(::T) where T = PrintReference(string(_nameof(T)))
-printreference(sa::SpecArgs; op::T = default_spec_op()) where T =
-	PrintReference(string(sa.f, op === default_spec_op() ? "" : string(" (",op,')')))
-
-Base.show(io::IO, ref::PrintReference) = print(io, ref.str)
-
-
-struct PrintWithOp
-	f::Any
-	op::Any
-	PrintWithOp(f, op) = new(wrap_item(f), op)
-end
-
-function Base.show(io::IO, x::PrintWithOp)
-	show(io, x.f)
-	printstyled(io, " (", x.op, ')'; color=:light_black, italic=true)
-end
-
-
-
-"""
-	ItemWrapper{T}
-
-Items wrapped in a an ItemWrapper object are printed using `show` by default, and printing can be customized.
-"""
-struct ItemWrapper{T}
-	item::T
-end
-
-wrap_item(x) = x
-
-wrap_item(x::Union{<:Base.Fix1,<:Base.Fix2}) = ItemWrapper(x)
-wrap_item(x::Union{Symbol,AbstractString,AbstractChar}) = ItemWrapper(x)
-
-wrap_item(x::AbstractRange) = ItemWrapper(x)
-wrap_item(x::Union{<:AbstractArray,<:Tuple}) = wrap_item.(x)
-wrap_item(p::Pair) = wrap_item(p.first) => wrap_item(p.second)
-wrap_item(d::AbstractDict) = Dict((wrap_item(k)=>wrap_item(v) for (k,v) in pairs(d)))
-wrap_item(s::AbstractSet) = Set((wrap_item(x) for x in s))
-wrap_item(nt::NamedTuple) = map(wrap_item, nt)
-
-wrap_item(df::DataFrame) = ItemWrapper(df)
-
-wrap_item(a::AbstractPreprocess) = ReproducibleJobs.ItemWrapper(a)
-
-Base.show(io::IO, w::ItemWrapper) = show(io, w.item)
-function Base.show(io::IO, w::ItemWrapper{T}) where T<:Union{<:Base.Fix1,<:Base.Fix2}
-	print(io, string(_nameof(T), '(', w.item.f, ", ", repr(w.item.x), ')'))
-end
-function Base.show(io::IO, w::ItemWrapper{<:DataFrame})
-	sz = _dataframe_size(w.item)
-	# item_name = string(join(sz,'×'), " ", _typenameof(w.item))
-	# print(io, item_name)
-
-	# TODO: print type info in different color?
-	cols = join(names(w.item), ", ")
-	str = string(join(sz,'×'), " ", _typenameof(w.item), ": ", cols)
-	_print_limited_string(io, str, "...")
-end
-
-function Base.show(io::IO, w::ItemWrapper{<:T}) where T<:AbstractPreprocess
-	print(io, w.item)
-	printstyled(io, " (", nameof(T), ")"; color=:light_black)
-end
-
-
-
-
-struct PrintNode
-	pc::PrintContext
-	name::Symbol
-	h::Union{Nothing,String}
-	item::Any # ::T
-	item_color::Symbol # for printstyled - TODO: other printstyled options
+mutable struct PrintNode
+	context::PrintContext
+	title::AnnotatedString
+	h::String
 	children::Vector{PrintNode}
 end
-
-create_print_node(pc::PrintContext, name::Symbol, h, item; children=PrintNode[], item_color=:normal) =
-	PrintNode(pc, name, h, wrap_item(item), item_color, children)
-
+PrintNode(context, title) = PrintNode(context, title, "", PrintNode[])
+PrintNode(context) = PrintNode(context, "")
 
 AbstractTrees.children(x::PrintNode) = x.children
-
-
-
-_printitem(io::IO, item, item_color) =
-	printstyled(IOContext(io, :limit=>true, :compact=>true, :short=>true), item; color=item_color) # Not great, but better than no IOContext
-
-
-function _printitem(io::IO, a::AbstractArray, item_color)
-	# This is a bit of a hack.
-	# Print to a string and skip the initial type info.
-	# But otherwise we need to rewrite the entire Array printing, or rely on internals.
-	str = repr(a)
-	i = findfirst('[', str)
-	i !== nothing && (str = @view str[i:end])
-	_print_limited_string(io, str, "...]", item_color)
-end
-
-function _printitem(io::IO, a::AbstractDict, item_color)
-	# This is a bit of a hack.
-	# Print to a string and skip the initial type info.
-	# But otherwise we need to rewrite the entire Dict printing, or rely on internals.
-	str = repr(a)
-	str = replace(str, r"^Dict\{.+\}\("=>"Dict("; count=1) # There might be some weird edge case where this doesn't work
-	_print_limited_string(io, str, "...)", item_color)
+function AbstractTrees.printnode(io::IO, x::PrintNode)
+	print(io, x.title)
+	ordinal = get(x.context.duplicates, x.h, 0)
+	ordinal > 0 && print(io, styled" {blue:#$ordinal}")
 end
 
 
+function extend_title!(pn::PrintNode, new)
+	@assert isempty(pn.children) "Cannot change title after node has children"
+	pn.title = isempty(pn.title) ? convert(AnnotatedString,new) : pn.title*" "*new
+end
 
-function AbstractTrees.printnode(io::IO, x::PrintNode; kwargs...)
-	indent = x.pc.depth*3
-	if x.name != Symbol("")
-		printstyled(io, x.name, ": "; color=:light_blue)
-		indent += length(string(x.name))+2
+function set_hash!(pn::PrintNode, h)
+	@assert isempty(pn.children) "Cannot set hash after node has children"
+	@assert isempty(pn.h) "Hash already set"
+	pn.h = h
+end
+
+
+chars_remaining(pn::PrintNode) = pn.context.line_length - pn.context.depth*3 - length(pn.title) - !isempty(pn.title)
+
+
+function _limited_string(f, max_n, items; prefix, sep, suffix)
+	parts = Union{String,AnnotatedString}[prefix]
+	n_remaining = max_n - length(prefix) - length(suffix)
+	n_remaining = max(n_remaining, 10) # We need to print something...
+
+	sep_len = length(sep)
+
+	# Convert enough items to strings
+	n_items = length(items)
+	for (i,x) in enumerate(items)
+		s = f(x) * (i != n_items ? sep : "") # Skip separator for the last item
+		push!(parts, s)
+		n_remaining -= length(s)
+		n_remaining<=0 && break
 	end
 
-	ord = get(x.pc.duplicates, x.h, nothing)
-	suffix = ord !== nothing ? " #$ord" : ""
-	io = IOContext(io, :n_chars_printed=>indent+length(suffix))
-	_printitem(io, x.item, x.item_color)
-	isempty(suffix) || printstyled(io, suffix; color=:blue)
-end
-
-
-
-to_print_node!(pc::PrintContext, x::Any) = to_print_node!(pc, x, Symbol(""), nothing)
-
-
-# Fallback
-to_print_node!(pc::PrintContext, x::Any, name, h) = create_print_node(pc, name, h, x)
-
-
-
-function _should_collapse(::Type{T}) where T
-	T isa Union && return _should_collapse(T.a) && _should_collapse(T.b)
-	T <: Spec && return false
-	T <: ReadOnly && return false
-	T <: AbstractRange && return true
-	T <: AbstractArray && return false
-	T <: AbstractDict && return false
-	T <: AbstractSet && return false
-	T <: Number && return true
-	T <: AbstractString && return true
-	T <: Symbol && return true
-	T <: AbstractChar && return true
-	T <: Missing && return true
-	if (T <: Pair) || (T <: Tuple) || (T <: NamedTuple)
-		return all(_should_collapse, fieldtypes(T))
-	end
-
-	# We do not collapse when the eltype is Any
-	return false
-end
-
-function to_print_node!(pc::PrintContext, x::AbstractRange{T}, name, h) where T
-	create_print_node(pc, name, h, x)
-end
-
-
-function to_print_node!(pc::PrintContext, x::AbstractArray{T}, name, h) where T
-	if _should_collapse(T)
-		create_print_node(pc, name, h, x)
+	if n_remaining>=0 && length(parts) == length(items)+1 # +1 due to the prefix string in parts
+		# The whole string fits!
+		push!(parts, suffix)
 	else
-		create_print_node(pc, name, h, _typenameof(x); children=to_print_node!.(Ref(descend(pc)),x), item_color=:magenta)
-	end
-end
+		# We need to cut something off
+		n_remaining -= 3 # we need space for ellipsis
 
-function to_print_node!(pc::PrintContext, d::AbstractDict{K,V}, name, h) where {K,V}
-	if _should_collapse(K)
-		if _should_collapse(V)
-			create_print_node(pc, name, h, d)
-		else
-			children = [to_print_node!(descend(pc),v,Symbol(string(k)),nothing) for (k,v) in d]
-			create_print_node(pc, name, h, _typenameof(d); children, item_color=:magenta)
+		while n_remaining<0
+			s = pop!(parts)
+			n_remaining += length(s)
+			if n_remaining > 0
+				push!(parts, AnnotatedString(s[1:n_remaining]))
+				n_remaining = 0
+			end
+			n_remaining == 0 && break
 		end
-	else
-		children = [to_print_node!(descend(pc),k=>v) for (k,v) in d]
-		create_print_node(pc, name, h, _typenameof(d); children, item_color=:magenta)
+
+		push!(parts, "...", suffix)
 	end
-end
-function to_print_node!(pc::PrintContext, s::AbstractSet{T}, name, h) where T
-	if _should_collapse(T)
-		create_print_node(pc, name, h, s)
-	else
-		children = [to_print_node!(descend(pc),x) for x in s]
-		create_print_node(pc, name, h, _typenameof(s); children, item_color=:magenta)
-	end
+	join(parts)
 end
 
-function to_print_node!(pc::PrintContext, x::T, name, h) where T<:Union{Pair,Tuple}
-	if _should_collapse(T)
-		create_print_node(pc, name, h, x)
-	else
-		children = [to_print_node!(descend(pc),y) for y in x]
-		create_print_node(pc, name, h, _typenameof(x); children, item_color=:magenta)
-	end
-end
-function to_print_node!(pc::PrintContext, x::T, name, h) where T<:NamedTuple
-	if _should_collapse(T)
-		create_print_node(pc, name, h, x)
-	else
-		children = [to_print_node!(descend(pc),v,Symbol(string(k)),nothing) for (k,v) in pairs(x)]
-		create_print_node(pc, name, h, _typenameof(x); children, item_color=:magenta)
-	end
+nt_key_str(k) = styled"{blue:$k}"
+dict_key_str(k) = styled"{blue:$k}"
+
+nt_item_str((k,v)::Pair) = nt_key_str(k) * "=" * item_str(v)
+dict_item_str((k,v)::Pair) = dict_key_str(k) * "=>" * item_str(v)
+
+limited_string(max_n, v::AbstractVector; kwargs...) =
+	_limited_string(item_str, max_n, v; prefix="[", sep=", ", suffix="]", kwargs...)
+
+limited_string(max_n, s::T; kwargs...) where T<:AbstractSet =
+	_limited_string(item_str, max_n, s; prefix=styled"{magenta:$(_nameof(T))}([", sep=", ", suffix="])", kwargs...)
+
+limited_string(max_n, d::T; kwargs...) where T<:AbstractDict =
+	_limited_string(dict_item_str, max_n, d; prefix=styled"{magenta:$(_nameof(T))}(", sep=", ", suffix=")", kwargs...)
+
+function limited_string(max_n, tup::Tuple; kwargs...)
+	suffix = length(tup) == 1 ? ",)" : ")"
+	_limited_string(item_str, max_n, tup; prefix="(", sep=", ", suffix, kwargs...)
 end
 
-function _dataframe_size(df::AbstractDataFrame)
-	# A little hack to get the actual DataFrame size. Might not be needed later.
-	if size(df,2)>0
-		col = df[!,1] # get the first column
-		if col isa Vector{<:ReadOnly}
-			ro = only(col)
-			return (length(ro.value), size(df,2))
+limited_string(max_n, nt::NamedTuple; kwargs...) =
+	_limited_string(nt_item_str, max_n, pairs(nt); prefix="(; ", sep=", ", suffix=")", kwargs...)
+
+
+function limited_string(max_n, s::AbstractString)
+	length(s) <= max_n && return s
+	@views(s[1:max_n-3]) * "..."
+end
+
+
+function limited_string(max_n, a::AbstractArray) # For matrices and higher-dimensional tensors
+	s = repr(x; context=(:compact=>true, :short=>true))
+	limited_string(max_n, s)
+end
+
+
+
+struct PrintRaw{T<:AbstractString}
+	raw::T
+end
+
+
+
+item_str(x::Any) = repr(x; context=(:compact=>true, :short=>true))
+
+item_str(x::PrintRaw) = x.raw
+item_str(s::Union{String,Symbol,Char,Number}) = repr(s)
+item_str(::Missing) = styled"{italic,bright_black:missing}"
+
+
+item_str(t::Tuple) = "(" * join(item_str.(t), ", ") * ")"
+
+
+item_str(d::DataType) = styled"{cyan:$d}"
+
+item_str(f::Function) = styled"{cyan:$f}"
+
+_fix_suffix(::Base.Fix1) = "1"
+_fix_suffix(::Base.Fix2) = "2"
+_fix_suffix(::Base.Fix{N}) where N = "{$N}"
+item_str(f::Base.Fix) = styled"Base.Fix" * _fix_suffix(f) * "(" * item_str(f.f) * ", " * item_str(f.x) * ")"
+
+
+item_str(ts::TimestampedFilePath) = styled"$(ts.path){bright_black:@$(Dates.unix2datetime(ts.timestamp))}"
+
+
+
+
+
+function extend_print_node!(pn::PrintNode, spec::Spec; suffix_space=0)
+	# Special handling of `get_cached`, to make things more compact
+	suffix = ""
+	if spec.f == get_cached
+		suffix = "(cached"
+		length(spec.args)>=2 && (suffix = suffix*':'*spec.args[2])
+		suffix *= ')'
+		suffix = styled"{green,light:$suffix}"
+
+		spec = spec.args[1]::Spec # unwrap the spec
+	end
+
+	# Standard handling
+	extend_title!(pn, styled"{green:$(spec.f)}")
+	if spec.f isa AbstractPreprocess
+		extend_title!(pn, styled"{bright_black:($(nameof(typeof(spec.f))))}")
+	end
+	if spec.op !== default_spec_op()
+		extend_title!(pn, styled"{bright_black,light:($(spec.op))}")
+	end
+
+	isempty(suffix) || extend_title!(pn, suffix)
+
+	set_hash!(pn, spec.ro.h)
+
+	if spec.ro.h in pn.context.hashes
+		# Seen before
+		get!(pn.context.duplicates, spec.ro.h, length(pn.context.duplicates)+1)
+	else
+		# First time
+		push!(pn.context.hashes, spec.ro.h)
+
+		context2 = descend(pn.context)
+		for a in spec.ro.value.args
+			push!(pn.children, build_print_node(context2, a))
+		end
+		for (k,v) in spec.ro.value.kwargs
+			startswith(string(k), "__") && continue
+			push!(pn.children, build_print_node(context2, v; prefix=styled"{blue:$k:}"))
 		end
 	end
-	return (0,0)
-end
-
-function to_print_node!(pc::PrintContext, df::AbstractDataFrame, name, h)
-	# collapsing version
-	create_print_node(pc, name, h, df)
-
-	# # non-collapsing version
-	# children = [to_print_node!(descend(pc),v,Symbol(string(k)),nothing) for (k,v) in pairs(eachcol(df))]
-	# # item_name = Symbol(string(join(size(df),'×'), " ", _typenameof(df))) # If the size of the DataFrame was correct, we could use this.
-	# sz = _dataframe_size(df)
-	# item_name = Symbol(join(sz,'×'), " ", _typenameof(df))
-	# create_print_node(pc, name, h, item_name; children, item_color=:magenta)
+	pn
 end
 
 
+function extend_print_node_collapsed!(pn::PrintNode, a::T; suffix_space=0) where T
+	extend_title!(pn, limited_string(chars_remaining(pn)-suffix_space, a))
+	pn
+end
 
-# Unwrap Spec
-to_print_node!(pc::PrintContext, spec::Spec, name, h) = to_print_node!(pc, spec.ro, name, h; spec.op)
+function extend_print_node_expanded!(f, pn::PrintNode, a::T; unwrap=identity) where T
+	max_n = 20
+	extend_title!(pn, styled"{magenta:$(_nameof(T))}")
 
-# Unwrap ReadOnly
-function to_print_node!(pc::PrintContext, ro::ReadOnly, name, h; kwargs...)
-	@assert h === nothing
-	if ro.h in pc.hashes
-		get!(pc.duplicates, ro.h, length(pc.duplicates)+1)
-		create_print_node(pc, name, ro.h, printreference(ro.value; kwargs...); item_color=:blue) # TODO: color differently for Spec?
+	context2 = descend(pn.context)
+	for (i,x) in enumerate(unwrap(a))
+		i > max_n && break
+		val,prefix = f(x)
+		push!(pn.children, build_print_node(context2, val; prefix))
+	end
+	length(a) > max_n && push!(pn.children, build_print_node(context2, PrintRaw(styled"{bright_black:...}")))
+	pn
+end
+extend_print_node_expanded!(pn, x) = extend_print_node_expanded!(x->(x,""), pn, x)
+extend_print_node_expanded!(pn, x::NamedTuple) = extend_print_node_expanded!(p->(p[2],nt_key_str(p[1])*" ="), pn, x; unwrap=pairs)
+extend_print_node_expanded!(pn, x::AbstractDict{<:Union{String,Symbol,Char,Number,DataType}}) =
+	extend_print_node_expanded!(p->(p[2],dict_key_str(p[1]) * " =>"), pn, x)
+
+
+function extend_print_node!(pn::PrintNode, x::T; suffix_space=0) where T<:Union{<:Tuple,<:NamedTuple}
+	if _should_collapse(T)
+		extend_print_node_collapsed!(pn, x; suffix_space)
 	else
-		# first time we see the node
-		push!(pc.hashes, ro.h)
-		to_print_node!(pc, ro.value, name, ro.h; kwargs...)
+		extend_print_node_expanded!(pn, x)
 	end
 end
 
 
-# TODO: Refactor how `op` is propagated. It's not a good design at the moment.
-# function to_print_node!(pc::PrintContext, sa::SpecArgs, name, h; op::T) where T
-function to_print_node!(pc::PrintContext, sa::SpecArgs, name, h; op::T = default_spec_op()) where T
-	c1 = to_print_node!.(Ref(descend(pc)), sa.args)
-	c2 = [to_print_node!(descend(pc),v,k,nothing) for (k,v) in sa.kwargs if !startswith(string(k),"__")] # skip "hidden" kwargs
-	children = vcat(c1,c2)
-
-	if sa.f !== nothing
-		f = sa.f
-		item_color = :green
+function extend_print_node!(pn::PrintNode, x::T; suffix_space=0) where T<:Union{<:AbstractArray,<:AbstractSet,<:AbstractDict}
+	if _should_collapse(eltype(T))
+		extend_print_node_collapsed!(pn, x; suffix_space)
 	else
-		f = Symbol("Function not specified")
-		item_color = :red
+		extend_print_node_expanded!(pn, x)
 	end
+end
 
-	if op !== default_spec_op()
-		f = PrintWithOp(f, op)
-	end
 
-	create_print_node(pc, name, h, f; children, item_color)
+function extend_print_node!(pn::PrintNode, (k,v)::Pair{<:Union{String,Symbol,Char,Number,DataType}}; suffix_space=0)
+	extend_title!(pn, item_str(k)*" =>")
+	extend_print_node!(pn, v)
+end
+
+function extend_print_node!(pn::PrintNode, (k,v)::T; suffix_space=0) where T<:Pair
+	extend_title!(pn, styled"{magenta:$(_nameof(T))}")
+	context2 = descend(pn.context)
+	push!(pn.children, build_print_node(context2, k))
+	push!(pn.children, build_print_node(context2, v))
+	pn
 end
 
 
 
-to_print_node(spec::Spec) = to_print_node!(PrintContext(), spec)
+
+function extend_print_node!(pn::PrintNode, r::AbstractRange; suffix_space=0) # This is need to not dispatch to the AbstractArray case
+	extend_title!(pn, limited_string(chars_remaining(pn)-suffix_space, item_str(r)))
+	pn
+end
+
+
+
+function extend_print_node!(pn::PrintNode, ro::ReadOnly{T}; suffix_space=0) where T
+	set_hash!(pn, ro.h)
+	if ro.h in pn.context.hashes
+		# Seen before
+		get!(pn.context.duplicates, ro.h, length(pn.context.duplicates)+1)
+		extend_title!(pn, styled"{magenta:$(_nameof(T))}")
+	else
+		# First time
+		push!(pn.context.hashes, ro.h)
+		# extend_title!(pn, limited_string(chars_remaining(pn)-4, item_str(ro.value))) # make some space for ordinal at end
+		extend_print_node!(pn, ro.value; suffix_space=suffix_space+5)
+	end
+	pn
+end
+
+
+function extend_print_node!(pn::PrintNode, x; suffix_space=0)
+	extend_title!(pn, limited_string(chars_remaining(pn)-suffix_space, item_str(x)))
+	pn
+end
+
+
+
+
+function build_print_node(context, value; prefix="")
+	pn = PrintNode(context)
+	isempty(prefix) || extend_title!(pn, prefix)
+	extend_print_node!(pn, value)
+end
 
 
 function print_spec(io::IO, spec::Spec; kwargs...)
-	io = IOContext(io, :displaysize=>displaysize(io))
-	tree = to_print_node(spec)
+	context = PrintContext(; line_length=displaysize(io)[2])
+	tree = build_print_node(context, spec)
 	AbstractTrees.print_tree(io, tree; kwargs...)
 end
