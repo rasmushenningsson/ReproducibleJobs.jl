@@ -1,14 +1,18 @@
 mutable struct PrintNode2
+	context::PrintContext
 	title::AnnotatedString
-	indent::Int # Use to know how much space we have left on the line
 	h::String
 	children::Vector{PrintNode2}
 end
-PrintNode2(context, title) = PrintNode2(title, context.depth*3, "", PrintNode2[])
+PrintNode2(context, title) = PrintNode2(context, title, "", PrintNode2[])
 PrintNode2(context) = PrintNode2(context, "")
 
 AbstractTrees.children(x::PrintNode2) = x.children
-AbstractTrees.printnode(io::IO, x::PrintNode2) = print(io, x.title)
+function AbstractTrees.printnode(io::IO, x::PrintNode2)
+	print(io, x.title)
+	ordinal = get(x.context.duplicates, x.h, 0)
+	ordinal > 0 && print(io, styled" {blue:#$ordinal}")
+end
 
 
 function extend_title!(pn::PrintNode2, new)
@@ -16,7 +20,11 @@ function extend_title!(pn::PrintNode2, new)
 	pn.title = isempty(pn.title) ? convert(AnnotatedString,new) : pn.title*" "*new
 end
 
-
+function set_hash!(pn::PrintNode2, h)
+	@assert isempty(pn.children) "Cannot set hash after node has children"
+	@assert isempty(pn.h) "Hash already set"
+	pn.h = h
+end
 
 
 
@@ -55,7 +63,7 @@ item_str(ts::TimestampedFilePath) = styled"$(ts.path){bright_black:@$(Dates.unix
 
 
 
-function extend_print_node!(pn::PrintNode2, context::PrintContext, spec::Spec)
+function extend_print_node!(pn::PrintNode2, spec::Spec)
 	# TODO: Hash context for duplicates etc.
 
 	extend_title!(pn, styled"{green:$(spec.f)}")
@@ -68,18 +76,20 @@ function extend_print_node!(pn::PrintNode2, context::PrintContext, spec::Spec)
 
 
 	# TODO: Print ordinal instead. But then we need to keep track of that.
-	h_short = spec.ro.h[1:6]
+	# h_short = spec.ro.h[1:6]
+	set_hash!(pn, spec.ro.h)
 
-	if spec.ro.h in context.hashes
+	if spec.ro.h in pn.context.hashes
 		# Seen before
-		extend_title!(pn, styled"{blue:0x$(h_short)}")
+		get!(pn.context.duplicates, spec.ro.h, length(pn.context.duplicates)+1)
+		# extend_title!(pn, styled"{blue:0x$(h_short)}")
 	else
 		# First time
-		push!(context.hashes, spec.ro.h)
+		push!(pn.context.hashes, spec.ro.h)
 
-		extend_title!(pn, styled"{blue:0x$(h_short)}")
+		# extend_title!(pn, styled"{blue:0x$(h_short)}")
 		
-		context2 = descend(context)
+		context2 = descend(pn.context)
 		for a in spec.ro.value.args
 			push!(pn.children, build_print_node(context2, a))
 		end
@@ -92,7 +102,7 @@ function extend_print_node!(pn::PrintNode2, context::PrintContext, spec::Spec)
 end
 
 
-function extend_print_node!(pn::PrintNode2, context::PrintContext, a::T) where T<:Union{AbstractArray,Tuple}
+function extend_print_node!(pn::PrintNode2, a::T) where T<:Union{AbstractArray,Tuple}
 	# TODO: Hash context for duplicates etc.
 	# TODO: Print on a single line if suitable types
 
@@ -100,7 +110,7 @@ function extend_print_node!(pn::PrintNode2, context::PrintContext, a::T) where T
 
 	extend_title!(pn, styled"{magenta:$(_nameof(T))}")
 
-	context2 = descend(context)
+	context2 = descend(pn.context)
 	for x in a[1:min(max_n,end)]
 		push!(pn.children, build_print_node(context2, x))
 	end
@@ -109,19 +119,19 @@ function extend_print_node!(pn::PrintNode2, context::PrintContext, a::T) where T
 end
 
 
-function extend_print_node!(pn::PrintNode2, context::PrintContext, (k,v)::Pair{<:Union{String,Symbol}})
+function extend_print_node!(pn::PrintNode2, (k,v)::Pair{<:Union{String,Symbol}})
 	extend_title!(pn, string(item_str(k), " =>"))
-	extend_print_node!(pn, context, v)
+	extend_print_node!(pn, v)
 end
 
 
 # TODO: Handle hashes?
-function extend_print_node!(pn::PrintNode2, context::PrintContext, ro::ReadOnly)
-	extend_print_node!(pn, context, ro.value)
+function extend_print_node!(pn::PrintNode2, ro::ReadOnly)
+	extend_print_node!(pn, ro.value)
 end
 
 
-function extend_print_node!(pn::PrintNode2, context::PrintContext, x)
+function extend_print_node!(pn::PrintNode2, x)
 	extend_title!(pn, item_str(x))
 	pn
 end
@@ -131,7 +141,7 @@ end
 function build_print_node(context, value; prefix="")
 	pn = PrintNode2(context)
 	isempty(prefix) || extend_title!(pn, prefix)
-	extend_print_node!(pn, context, value)
+	extend_print_node!(pn, value)
 end
 
 
