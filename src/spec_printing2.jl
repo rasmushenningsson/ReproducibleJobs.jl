@@ -27,6 +27,54 @@ function set_hash!(pn::PrintNode2, h)
 end
 
 
+chars_remaining(pn::PrintNode2) = pn.context.line_length - pn.context.depth*3 - length(pn.title) - !isempty(pn.title)
+
+
+function limited_string(max_n, v::Union{AbstractVector,Tuple}, prefix, sep, suffix)
+	parts = Union{String,AnnotatedString}[prefix]
+	n_remaining = max_n - length(prefix) - length(suffix)
+	n_remaining = max(n_remaining, 10) # We need to print something...
+
+	sep_len = length(sep)
+
+	# Convert enough items to strings
+	n_items = length(v)
+	for (i,x) in enumerate(v)
+		s = item_str(x) * (i != n_items ? sep : "") # Skip separator for the last item
+		push!(parts, s)
+		n_remaining -= length(s)
+		n_remaining<=0 && break
+	end
+
+	if n_remaining>=0 && length(parts) == length(v)+1 # +1 due to the prefix string in parts
+		# The whole string fits!
+		push!(parts, suffix)
+	else
+		# We need to cut something off
+		n_remaining -= 3 # we need space for ellipsis
+
+		while n_remaining<0
+			s = pop!(parts)
+			n_remaining += length(s)
+			if n_remaining > 0
+				push!(parts, AnnotatedString(s[1:n_remaining]))
+				n_remaining = 0
+			end
+			n_remaining == 0 && break
+		end
+
+		push!(parts, "...", suffix)
+	end
+	join(parts)
+end
+
+function limited_string(max_n, s::AbstractString)
+	length(s) <= max_n && return s
+	@views(s[1:max_n-3]) * "..."
+end
+
+
+
 
 struct PrintRaw{T<:AbstractString}
 	raw::T
@@ -34,17 +82,15 @@ end
 
 
 
-# item_str(x::T) where T = styled"{italic,shadow:$(nameof(T)) not implemented}"
-# item_str(x::Any) = repr(x) # TODO: Print with 
-function item_str(x::Any)
-	io = IOBuffer()
-	show(IOContext(io, :limit=>true, :compact=>true, :short=>true), x)
-	String(take!(io))
-end
+item_str(x::Any) = repr(x; context=(:compact=>true, :short=>true))
 
 item_str(x::PrintRaw) = x.raw
 item_str(s::Union{String,Symbol,Bool,Number,Char}) = repr(s)
 item_str(::Missing) = styled"{italic,bright_black:missing}"
+
+
+item_str(t::Tuple) = "(" * join(item_str.(t), ", ") * ")"
+
 
 item_str(d::DataType) = styled"{cyan:$d}"
 
@@ -79,6 +125,7 @@ function extend_print_node!(pn::PrintNode2, spec::Spec)
 	# h_short = spec.ro.h[1:6]
 	set_hash!(pn, spec.ro.h)
 
+
 	if spec.ro.h in pn.context.hashes
 		# Seen before
 		get!(pn.context.duplicates, spec.ro.h, length(pn.context.duplicates)+1)
@@ -102,7 +149,26 @@ function extend_print_node!(pn::PrintNode2, spec::Spec)
 end
 
 
-function extend_print_node!(pn::PrintNode2, a::T) where T<:Union{AbstractArray,Tuple}
+function extend_print_node!(pn::PrintNode2, a::T) where T<:AbstractArray{S} where S
+	# TODO: Hash context for duplicates etc.
+
+	max_n = 10
+
+	if _should_collapse(S)
+		extend_title!(pn, limited_string(chars_remaining(pn), a, "[", ", ", "]"))
+	else
+		extend_title!(pn, styled"{magenta:$(_nameof(T))}")
+
+		context2 = descend(pn.context)
+		for x in a[1:min(max_n,end)]
+			push!(pn.children, build_print_node(context2, x))
+		end
+		length(a) > max_n && push!(pn.children, build_print_node(context2, PrintRaw(styled"{bright_black:...}")))
+	end
+	pn
+end
+
+function extend_print_node!(pn::PrintNode2, a::T) where T<:Tuple
 	# TODO: Hash context for duplicates etc.
 	# TODO: Print on a single line if suitable types
 
@@ -120,7 +186,7 @@ end
 
 
 function extend_print_node!(pn::PrintNode2, (k,v)::Pair{<:Union{String,Symbol}})
-	extend_title!(pn, string(item_str(k), " =>"))
+	extend_title!(pn, item_str(k)*" =>")
 	extend_print_node!(pn, v)
 end
 
@@ -132,7 +198,7 @@ end
 
 
 function extend_print_node!(pn::PrintNode2, x)
-	extend_title!(pn, item_str(x))
+	extend_title!(pn, limited_string(chars_remaining(pn), item_str(x)))
 	pn
 end
 
@@ -146,8 +212,7 @@ end
 
 
 function print_spec2(io::IO, spec::Spec; kwargs...)
-	io = IOContext(io, :displaysize=>displaysize(io))
-	context = PrintContext()
+	context = PrintContext(; line_length=displaysize(io)[2])
 	tree = build_print_node(context, spec)
 	AbstractTrees.print_tree(io, tree; kwargs...)
 end

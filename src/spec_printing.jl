@@ -28,10 +28,11 @@ struct PrintContext
 	hashes::Set{String} # hashes seen at least once
 	duplicates::Dict{String,Int} # hashes seen at least twice, mapping to an ordinal
 	depth::Int
+	line_length::Int
 end
-PrintContext() = PrintContext(Set{String}(), Dict{String,Int}(), 0)
+PrintContext(; line_length=80) = PrintContext(Set{String}(), Dict{String,Int}(), 0, line_length)
 
-descend(pc::PrintContext) = PrintContext(pc.hashes, pc.duplicates, pc.depth+1)
+descend(pc::PrintContext) = PrintContext(pc.hashes, pc.duplicates, pc.depth+1, pc.line_length)
 
 
 struct PrintReference
