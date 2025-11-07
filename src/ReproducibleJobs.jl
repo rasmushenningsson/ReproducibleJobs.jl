@@ -76,15 +76,36 @@ include("spec_printing.jl")
 include("spec_printing_old.jl") # TO BE REMOVED
 
 
-if VERSION >= v"1.12"
-	const get_cache = OncePerProcess{Cache}() do
-		Cache(@get_scratch!("ReproducibleJobs"))
+# if VERSION >= v"1.12"
+# 	const get_cache = OncePerProcess{Cache}() do
+# 		Cache(@get_scratch!("ReproducibleJobs"))
+# 	end
+# else # Prior to Julia 1.12 we don't have OncePerProcess
+# 	global_cache = Ref{Union{Nothing,Cache}}()
+# 	get_cache() = global_cache[]
+# 	function __init__()
+# 		global_cache[] = Cache(@get_scratch!("ReproducibleJobs"))
+# 	end
+# end
+
+# Do this to allow setting a custom cache for unit tests (even when just including "runtests.jl").
+# Might be refactored later.
+let cache::Union{Nothing,Cache} = nothing
+	global function get_cache()::Cache
+		cache = @something cache Cache(@get_scratch!("ReproducibleJobs"))
+		cache
 	end
-else # Prior to Julia 1.12 we don't have OncePerProcess
-	global_cache = Ref{Union{Nothing,Cache}}()
-	get_cache() = global_cache[]
-	function __init__()
-		global_cache[] = Cache(@get_scratch!("ReproducibleJobs"))
+	global function set_cache!(c)
+		cache = c
+	end
+	global function with_cache(f, c)
+		old_cache = cache
+		try
+			cache = c
+			f()
+		finally
+			cache = old_cache
+		end
 	end
 end
 
