@@ -50,6 +50,7 @@ unmanage_rec(x::Union{String,Char,Symbol,Missing,Colon}) = x # doesn't define co
 
 unmanage_rec(x::Array) = unmanage_rec.(x)
 unmanage_rec(x::ReadOnly{<:Array}) = ReadOnlyArray(x.value)
+unmanage_rec(x::ReadOnlyArray) = x
 
 unmanage_rec(x::Dict) = Dict(unmanage_rec(k)=>unmanage_rec(v) for (k,v) in x)
 unmanage_rec(x::Set) = Set(unmanage_rec(a) for a in x)
