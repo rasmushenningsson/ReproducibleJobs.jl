@@ -51,6 +51,14 @@ end
 Forward() = Forward(Returns(false))
 
 
+# Why is this needed? Probably because of F being a SingletonType.
+function StableHashTraits.transformer(::Type{T}) where T<:Forward
+	StableHashTraits.Transformer(x->(nameof(T), x.predicate))
+end
+
+
+
+
 forward(::Call) = Call()
 forward(::Fetch) = Fetch()
 forward(::Prefetch) = Prefetch()
