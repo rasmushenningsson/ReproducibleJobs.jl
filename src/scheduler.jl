@@ -30,6 +30,7 @@ _unwrap_value() = _unwrap_value(IdDict{Spec,Any}())
 
 function _unwrap_value(x, upstream)
 	x isa Spec && return copy_nested(_unwrap_value(), upstream[x]) # Needed to handle e.g. a result which is a vector of `ReadOnly`s
+	# x isa ReadOnly{<:Array} && return ReadOnlyArray(x.value) # TODO: Should we add this?
 	x isa ReadOnly && return x.value
 	x
 end
@@ -56,6 +57,8 @@ function deduplicate_result(res)
 	elseif res isa Managed
 		# By returning a Managed result, the computing function takes responsibility of the contents, otherwise we need to standardize
 		res = res.x
+	elseif res isa CompoundResult
+		CompoundResult(Pair{String,Any}[k=>deduplicate_result(v) for (k,v) in res.children])
 	else
 		f = deduplicate_leaves(default_deduplicator()) # TODO: avoid using default_deduplicator() here - we need to get it from somewhere
 		copy_nested(f, res)
@@ -238,11 +241,11 @@ function cached_call!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, deps::Vector
 
 		# But only return the sub we asked for
 		return get_subresult(res, sub; return_keys)
-	else
+	elseif !(res isa ProcessingException)
 		return_keys && throw(ArgumentError("return_keys can only be used on CompoundResults."))
 		sub === nothing || throw(ArgumentError("Cannot retrieve sub-result unless the result is a CompoundResult (tried to retrieve: $sub)."))
-		return res
 	end
+	return res
 end
 
 # Rename?
