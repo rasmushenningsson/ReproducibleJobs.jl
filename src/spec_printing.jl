@@ -76,7 +76,7 @@ function _limited_string(f, max_n, items; prefix, sep, suffix)
 			s = pop!(parts)
 			n_remaining += length(s)
 			if n_remaining > 0
-				push!(parts, AnnotatedString(s[1:n_remaining]))
+				push!(parts, AnnotatedString(first(s,n_remaining)))
 				n_remaining = 0
 			end
 			n_remaining == 0 && break
@@ -113,7 +113,7 @@ limited_string(max_n, nt::NamedTuple; kwargs...) =
 
 function limited_string(max_n, s::AbstractString)
 	length(s) <= max_n && return s
-	@views(s[1:max_n-3]) * "..."
+	first(s, max_n-3) * "..."
 end
 
 
