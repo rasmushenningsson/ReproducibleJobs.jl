@@ -166,20 +166,18 @@ end
 function _process_once!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, deps::Vector{Spec})
 	sa = ro.value
 
-	if is_preprocessing(sa)
-		if !isempty(deps)
-			forwarded_deps = process_dependencies!(scheduler, deps; parent_f=sa.f)
-			sa = replace_forwarded(sa, forwarded_deps)::Union{SpecArgs,ProcessingException}
-		end
-		preprocessed = preprocess(sa)
-		return preprocessed # Should we strip `op` for Specs here?
+	forwarded_deps = process_dependencies!(scheduler, deps; parent_f=sa.f)
+	if !isempty(forwarded_deps)
+		sa = replace_forwarded(sa, forwarded_deps)::Union{SpecArgs,ProcessingException}
 	end
 
-	forwarded_deps = process_dependencies!(scheduler, deps; parent_f=sa.f)
-	sa_forwarded = replace_forwarded(sa, forwarded_deps)::Union{SpecArgs,ProcessingException}
-	sa_forwarded isa ProcessingException && return sa_forwarded
-	ro_forwarded = default_deduplicator()(sa_forwarded) # TODO: avoid using default_deduplicator() here - we need to get it from somewhere
-	return Spec(ro_forwarded, Call())
+	if is_preprocessing(sa)
+		preprocess(sa)
+	else
+		sa isa ProcessingException && return sa
+		ro_forwarded = default_deduplicator()(sa) # TODO: avoid using default_deduplicator() here - we need to get it from somewhere
+		Spec(ro_forwarded, Call())
+	end
 end
 
 
@@ -273,46 +271,39 @@ function process_once!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, op::T; pare
 		end
 	end
 
+	deps = get_dependencies(sa)
 
-	if is_preprocessing(sa)
-		# TODO: This should probably be changed. Even when op is Prefetch, we might still want to forward preprocessing specs.
-		deps = get_dependencies(op->!(op isa Prefetch), sa) # No need to collect dependencies with op Prefetch, since they will not be changed.
-	else
-		deps = get_dependencies(sa)
+	if !is_preprocessing(sa) && all(s->s.op === Call(), deps)
+		# ready to call
 
+		# Stop if we are forwarding, nothing left to do
+		T <: Forward && return (Spec(ro, Call()), true)
 
-		if all(s->s.op === Call(), deps)
-			# ready to call
+		if sa.f === get_cached
+			inner_spec = sa.args[1]::Spec
+			inner_ro = inner_spec.ro
+			inner_sa = inner_ro.value
+			@assert inner_sa.f !== get_cached # we cannot handle nested get_cached
+			inner_deps = get_dependencies(inner_sa)
+			@assert all(s->s.op === Call(), inner_deps) # The out Call has enforced all inner `op`s to be called has well.
 
-			# Stop if we are forwarding, nothing left to do
-			T <: Forward && return (Spec(ro, Call()), true)
+			# The remaining args specify subresults of `CompoundResult`s
+			sub = length(sa.args)==1 ? nothing : collect(String, @view(sa.args[2:end]))
 
-			if sa.f === get_cached
-				inner_spec = sa.args[1]::Spec
-				inner_ro = inner_spec.ro
-				inner_sa = inner_ro.value
-				@assert inner_sa.f !== get_cached # we cannot handle nested get_cached
-				inner_deps = get_dependencies(inner_sa)
-				@assert all(s->s.op === Call(), inner_deps) # The out Call has enforced all inner `op`s to be called has well.
+			return_keys = _get_kwarg(sa.kwargs, :return_keys, false)
 
-				# The remaining args specify subresults of `CompoundResult`s
-				sub = length(sa.args)==1 ? nothing : collect(String, @view(sa.args[2:end]))
-
-				return_keys = _get_kwarg(sa.kwargs, :return_keys, false)
-
-				res = get!(scheduler.results, ro) do # the key is the `get_cached` spec
-					cached_call!(scheduler, inner_ro, inner_deps; sub, return_keys) # but we compute the inner spec
-				end
-			else
-				res = get!(scheduler.results, ro) do
-					standard_call!(scheduler, ro, deps)
-				end
+			res = get!(scheduler.results, ro) do # the key is the `get_cached` spec
+				cached_call!(scheduler, inner_ro, inner_deps; sub, return_keys) # but we compute the inner spec
 			end
-
-
-			@assert !(res isa Spec)
-			return res, true
+		else
+			res = get!(scheduler.results, ro) do
+				standard_call!(scheduler, ro, deps)
+			end
 		end
+
+
+		@assert !(res isa Spec)
+		return res, true
 	end
 
 	res = get!(scheduler.forwarded, ro) do
