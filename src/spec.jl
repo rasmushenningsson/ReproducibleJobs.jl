@@ -45,32 +45,21 @@ _get_kwarg(f, sa::SpecArgs) = _get_kwarg(f, sa.kwargs)
 struct Call end
 struct Fetch end # Means fetch immediately (e.g. get as value during preprocessing)
 struct Prefetch end # Replace spec by result just before computing - useful to collapse multiple specs that yield the same result onto the same spec.
-struct Forward{F} # Rename to something that would indicate that we should stop if predicate is true?
-	predicate::F # true means we found what we want, so forwarding will stop
-end
-Forward() = Forward(Returns(false))
+struct Forward end # Is this a good name?
 
 
-# Why is this needed? Probably because of F being a SingletonType.
-function StableHashTraits.transformer(::Type{T}) where T<:Forward
-	StableHashTraits.Transformer(x->(nameof(T), x.predicate))
-end
-
-
-
-
+# Are these still needed?
 forward(::Call) = Call()
 forward(::Fetch) = Fetch()
 forward(::Prefetch) = Prefetch()
-forward(::Forward) = Forward() # get rid of the predicate
+forward(::Forward) = Forward()
 
-default_forwarding_predicate(x) = !(x.f isa Preprocess)
-default_spec_op() = Forward(default_forwarding_predicate)
+default_spec_op() = Forward()
 
 
 struct Spec
 	ro::ReadOnly{SpecArgs}
-	op::Any # Call/Fetch/Prefetch/Forward{F} - is it better to use a Union?
+	op::Any # Call/Fetch/Prefetch/Forward - is it better to use a Union? (Or a sum type?)
 end
 Spec(ro::ReadOnly{SpecArgs}) = Spec(ro, default_spec_op())
 
@@ -145,11 +134,9 @@ deduplicate!(dedup::Deduplicator, spec::Spec) = Spec(deduplicate!(dedup, spec.ro
 
 
 
-
+# Are these still needed?
 forwarded(spec::Spec) = Spec(spec.ro, forward(spec.op))
 forwarded(x) = x
-forwarded(predicate, spec::Spec) = Spec(spec.ro, Forward(predicate))
-forwarded(::Any, x) = x
 
 
 
@@ -176,10 +163,4 @@ end
 Base.show(io::IO, ::Call) = print(io, "call")
 Base.show(io::IO, ::Fetch) = print(io, "fetched")
 Base.show(io::IO, ::Prefetch) = print(io, "prefetched")
-function Base.show(io::IO, fwd::Forward{F}) where F
-	if fwd.predicate === Returns(false)
-		print(io, "forwarded")
-	else
-		print(io, "forwarded(", fwd.predicate, ")")
-	end
-end
+Base.show(io::IO, ::Forward) = print(io, "forwarded")

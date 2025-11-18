@@ -42,6 +42,7 @@ export
 if VERSION >= v"1.11.0-DEV.469"
 	let str = """
 		public
+			Preprocessing,
 			unsafe_unmanage,
 			create_spec,
 			cached

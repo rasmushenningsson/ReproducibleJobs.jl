@@ -20,7 +20,6 @@ _fetched(job::Job) = _fetched(_to_spec(job))
 _prefetched(job::Job) = _prefetched(_to_spec(job))
 
 forwarded(job::Job) = forwarded(_to_spec(job))
-forwarded(predicate, job::Job) = forwarded(predicate, _to_spec(job))
 
 
 

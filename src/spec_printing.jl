@@ -113,7 +113,7 @@ limited_string(max_n, nt::NamedTuple; kwargs...) =
 
 function limited_string(max_n, s::AbstractString)
 	length(s) <= max_n && return s
-	first(s, max_n-3) * "..."
+	first(s, max(3, max_n-3)) * "..."
 end
 
 

@@ -40,14 +40,14 @@ fetch_dependencies!(scheduler, deps) = IdDict{Spec,Any}(dep=>fetch!(scheduler, d
 
 
 
-function process_dependency!(f, scheduler, dep)
-	dep = f(dep)
+function process_dependency!(scheduler, dep; parent_f)
 	dep.op === Call() && return dep # Already preprocessed as far as it gets
-	process!(scheduler, dep)
+	process!(scheduler, dep; parent_f)
 end
-process_dependencies!(f::F, scheduler, deps) where F =
-	IdDict{Spec,Any}(dep=>process_dependency!(f, scheduler, dep) for dep in deps)
-process_dependencies!(scheduler, deps) = process_dependencies!(identity, scheduler, deps)
+process_dependencies!(scheduler, deps; parent_f) =
+	IdDict{Spec,Any}(dep=>process_dependency!(scheduler, dep; parent_f) for dep in deps)
+
+
 
 
 
@@ -168,14 +168,14 @@ function _process_once!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, deps::Vect
 
 	if is_preprocessing(sa)
 		if !isempty(deps)
-			forwarded_deps = process_dependencies!(scheduler, deps)
+			forwarded_deps = process_dependencies!(scheduler, deps; parent_f=sa.f)
 			sa = replace_forwarded(sa, forwarded_deps)::Union{SpecArgs,ProcessingException}
 		end
 		preprocessed = preprocess(sa)
 		return preprocessed # Should we strip `op` for Specs here?
 	end
 
-	forwarded_deps = process_dependencies!(forwarded, scheduler, deps)
+	forwarded_deps = process_dependencies!(scheduler, deps; parent_f=sa.f)
 	sa_forwarded = replace_forwarded(sa, forwarded_deps)::Union{SpecArgs,ProcessingException}
 	sa_forwarded isa ProcessingException && return sa_forwarded
 	ro_forwarded = default_deduplicator()(sa_forwarded) # TODO: avoid using default_deduplicator() here - we need to get it from somewhere
@@ -262,17 +262,20 @@ end
 
 
 # Return tuple with result and Bool telling if it's done (TODO: Make code more clear)
-function process_once!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, op::T) where T
+function process_once!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, op::T; parent_f) where T
 	sa = ro.value
 
 	# Early out, we don't need to consider dependencies for this
-	if T <: Forward && op.predicate(sa)
-		return Spec(ro), true # should op ever be set to something here?
-		# return Spec(ro, op), true # Maybe it makes more sense to keep the op in case it has some custom forwarding rule?
+	if parent_f !== nothing && T <: Union{Forward,Prefetch}
+		if !should_forward_child(parent_f, sa.f)
+			# return Spec(ro), true # should op ever be set to something here?
+			return Spec(ro, op), true # Keep Forward/Prefetch op
+		end
 	end
 
 
 	if is_preprocessing(sa)
+		# TODO: This should probably be changed. Even when op is Prefetch, we might still want to forward preprocessing specs.
 		deps = get_dependencies(op->!(op isa Prefetch), sa) # No need to collect dependencies with op Prefetch, since they will not be changed.
 	else
 		deps = get_dependencies(sa)
@@ -324,9 +327,9 @@ function process_once!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, op::T) wher
 end
 
 
-function process!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, op::T) where T
+function process!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, op::T; parent_f=nothing) where T
 	while true
-		res, done = process_once!(scheduler, ro, op)
+		res, done = process_once!(scheduler, ro, op; parent_f)
 		done && return res
 		res::Spec
 		ro = res.ro
@@ -334,15 +337,15 @@ function process!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, op::T) where T
 end
 
 
-fetch!(scheduler::Scheduler, spec::Spec) = process!(scheduler, spec.ro, Fetch())
-forward!(scheduler::Scheduler, spec::Spec) = process!(scheduler, spec.ro, Forward())
+fetch!(scheduler::Scheduler, spec::Spec; kwargs...) = process!(scheduler, spec.ro, Fetch(); kwargs...)
+forward!(scheduler::Scheduler, spec::Spec; kwargs...) = process!(scheduler, spec.ro, Forward(); kwargs...)
 
-function forward_once!(scheduler::Scheduler, spec::Spec)
-	res, _ = process_once!(scheduler, spec.ro, Forward())
+function forward_once!(scheduler::Scheduler, spec::Spec; parent_f=nothing)
+	res, _ = process_once!(scheduler, spec.ro, Forward(); parent_f)
 	res
 end
 
-process!(scheduler::Scheduler, spec::Spec) = process!(scheduler, spec.ro, spec.op)
+process!(scheduler::Scheduler, spec::Spec; kwargs...) = process!(scheduler, spec.ro, spec.op; kwargs...)
 
 
 
