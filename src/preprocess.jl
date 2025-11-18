@@ -8,7 +8,10 @@ Preprocess(f::F) where F = Preprocess{true,F}(f)
 Preprocess{E}(f::F) where {E,F} = Preprocess{E,F}(f)
 
 ReproducibleJobs.is_preprocessing(::AbstractPreprocess) = true
-Base.show(io::IO, p::AbstractPreprocess{F}) where F = print(io, p.f)
+# Base.show(io::IO, p::AbstractPreprocess{F}) where F = print(io, p.f)
+Base.show(io::IO, p::T) where T<:AbstractPreprocess{F} where F = print(io, nameof(T), '(', p.f, ')')
+
+Base.show(io::IO, p::Preprocess{E,F}) where {E,F} = print(io, "Preprocess", E ? "" : "{false}", '(', p.f, ')')
 
 
 struct Preprocessing{E} end

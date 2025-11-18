@@ -170,7 +170,9 @@ function extend_print_node!(pn::PrintNode, spec::Spec; suffix_space=0)
 
 	# Standard handling
 	extend_title!(pn, styled"{green:$(spec.f)}")
-	if spec.f isa AbstractPreprocess
+	if spec.f isa Preprocess{false}
+		extend_title!(pn, styled"{bright_black:(Preprocess (late))}")
+	elseif spec.f isa AbstractPreprocess
 		extend_title!(pn, styled"{bright_black:($(nameof(typeof(spec.f))))}")
 	end
 	if spec.op !== default_spec_op()
