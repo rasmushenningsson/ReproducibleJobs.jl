@@ -38,6 +38,9 @@ Retrieve the object wrapped in a `Managed`.
 See also: [`unmanage`](@ref)
 """
 unsafe_unmanage(m::Managed) = m.x
+unsafe_unmanage(t::Tuple) = unsafe_unmanage.(t) # for use on args...
+unsafe_unmanage(nt::NamedTuple) = map(unsafe_unmanage, nt)
+unsafe_unmanage(kw::Base.Pairs{Symbol,<:Any,<:Any,<:NamedTuple}) = unsafe_unmanage(values(kw)) # for use on kwargs... (via NamedTuple)
 unsafe_unmanage(x) = x
 
 
