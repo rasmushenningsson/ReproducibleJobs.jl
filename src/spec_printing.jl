@@ -154,6 +154,9 @@ item_str(ts::TimestampedFilePath) = styled"$(ts.path){bright_black:@$(Dates.unix
 
 
 
+styled_function_name(f) = styled"{green:$f}"
+styled_function_name(p::AbstractPreprocess) = styled_function_name(p.f) * styled" {bright_black:($(nameof(typeof(p))))}"
+styled_function_name(p::Preprocess{false}) = styled_function_name(p.f) * styled" {bright_black:(Preprocess (late))}"
 
 
 function extend_print_node!(pn::PrintNode, spec::Spec; suffix_space=0)
@@ -169,12 +172,8 @@ function extend_print_node!(pn::PrintNode, spec::Spec; suffix_space=0)
 	end
 
 	# Standard handling
-	extend_title!(pn, styled"{green:$(spec.f)}")
-	if spec.f isa Preprocess{false}
-		extend_title!(pn, styled"{bright_black:(Preprocess (late))}")
-	elseif spec.f isa AbstractPreprocess
-		extend_title!(pn, styled"{bright_black:($(nameof(typeof(spec.f))))}")
-	end
+
+	extend_title!(pn, styled_function_name(spec.f))
 	if spec.op !== default_spec_op()
 		extend_title!(pn, styled"{bright_black,light:($(spec.op))}")
 	end
