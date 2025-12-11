@@ -63,7 +63,7 @@ end
 
 function _cache_save(fp, spec_args::SpecArgs, value)
 	if !(value isa ProcessingException)
-		jldopen(fp, "w"; compress=ZstdFrameCompressor()) do io # should we set compression level?
+		jldopen(fp, "w"; compress=ZstdFilter()) do io # should we set compression level?
 			io["spec_args"] = spec_args
 			_cache_save_item(io, value)
 		end

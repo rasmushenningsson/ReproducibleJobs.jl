@@ -3,9 +3,8 @@ module ReproducibleJobs
 using StableHashTraits
 using ReadOnlyArrays
 using Scratch: @get_scratch!
-using JLD2: JLD2, jldopen, load
+using JLD2: JLD2, jldopen, load, ZstdFilter
 import AbstractTrees # for pretty printing
-using CodecZstd: ZstdFrameCompressor
 using SHA
 import Dates # for printing of timestamped paths
 
