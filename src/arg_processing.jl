@@ -61,15 +61,17 @@ copy_arg(x::Symbol) = x # symbols are immutable, pass through
 copy_arg(v::VersionNumber) = v
 copy_arg(c::Colon) = c
 copy_arg(m::Missing) = m
-copy_arg(f::Union{<:Base.Fix1,<:Base.Fix2}) = f # TODO: revise (or revise in copy_nested)
 copy_arg(x::DataType) = x
+
+copy_arg(f::Union{<:Base.Fix1,<:Base.Fix2}) = f # function and fixed value are already copied (if needed) in copy_nested
 
 
 copy_arg(f::Returns{T}) where T = Returns(copy_arg(f.value))
 copy_arg(f::ComposedFunction) = copy_arg(f.outer) ∘ copy_arg(f.inner)
 
-# Simple temporary solution for allowing some functions to be used as arguments
-copy_arg(f::Union{typeof(identity), typeof(!), typeof(iszero), typeof(ismissing)}) = f
+# Simple temporary(?) solution for allowing some functions to be used as arguments
+copy_arg(f::Union{typeof(identity), typeof(!), typeof(iszero), typeof(ismissing), typeof(isequal), typeof(in), typeof(<), typeof(<=), typeof(>), typeof(>=), typeof(==), typeof(!=)}) = f
+
 
 
 

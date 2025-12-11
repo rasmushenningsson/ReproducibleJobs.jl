@@ -32,6 +32,14 @@ function visit_nested(f, pred, df::AbstractDataFrame)
 	end
 end
 
+
+function visit_nested(f, pred, fix::Base.Fix{N}) where N
+	pred(fix.f) && visit_nested(f, pred, fix.f)
+	pred(fix.x) && visit_nested(f, pred, fix.x)
+end
+
+
+
 visit_nested(f, x) = visit_nested(f, Returns(true), x)
 
 
@@ -50,6 +58,11 @@ copy_nested(f,(k,v)::Pair) = copy_nested(f, k)=>copy_nested(f, v)
 
 copy_nested(f,a::Adjoint) = Adjoint(copy_nested(f,parent(a)))
 copy_nested(f,a::Transpose) = Transpose(copy_nested(f,parent(a)))
+
+function copy_nested(f, fix::Base.Fix{N}) where N
+	Base.Fix{N}(copy_nested(f,fix.f), copy_nested(f,fix.x))
+end
+
 
 # TODO: Move to package extension?
 copy_nested(f,a::AbstractSparseArray) = f(a) # ensure that sparse matrices are not converted to dense
