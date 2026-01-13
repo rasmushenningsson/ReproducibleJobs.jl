@@ -35,6 +35,7 @@ export
 	prefetched,
 	forwarded,
 	ifelse_job,
+	error_job,
 	checksummedfilepath_job
 
 # Use public keyword in Julia versions where it is available
@@ -70,6 +71,7 @@ include("scheduler.jl")
 include("paths.jl")
 
 include("ifelse.jl")
+include("error.jl")
 
 
 include("spec_printing.jl")

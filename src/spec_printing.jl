@@ -118,7 +118,7 @@ end
 
 
 function limited_string(max_n, a::AbstractArray) # For matrices and higher-dimensional tensors
-	s = repr(x; context=(:compact=>true, :short=>true))
+	s = repr(a; context=(:compact=>true, :short=>true))
 	limited_string(max_n, s)
 end
 
