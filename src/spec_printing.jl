@@ -146,8 +146,12 @@ item_str(f::Function) = styled"{cyan:$f}"
 
 _fix_suffix(::Base.Fix1) = "1"
 _fix_suffix(::Base.Fix2) = "2"
-_fix_suffix(::Base.Fix{N}) where N = "{$N}"
-item_str(f::Base.Fix) = styled"Base.Fix" * _fix_suffix(f) * "(" * item_str(f.f) * ", " * item_str(f.x) * ")"
+@static if VERSION >= v"1.12.0"
+	_fix_suffix(::Base.Fix{N}) where N = "{$N}"
+	item_str(f::Base.Fix) = styled"Base.Fix" * _fix_suffix(f) * "(" * item_str(f.f) * ", " * item_str(f.x) * ")"
+else
+	item_str(f::Union{Base.Fix1,Base.Fix2}) = styled"Base.Fix" * _fix_suffix(f) * "(" * item_str(f.f) * ", " * item_str(f.x) * ")"
+end
 
 
 item_str(ts::TimestampedFilePath) = styled"$(ts.path){bright_black:@$(Dates.unix2datetime(ts.timestamp))}"

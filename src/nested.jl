@@ -33,9 +33,16 @@ function visit_nested(f, pred, df::AbstractDataFrame)
 end
 
 
-function visit_nested(f, pred, fix::Base.Fix{N}) where N
-	pred(fix.f) && visit_nested(f, pred, fix.f)
-	pred(fix.x) && visit_nested(f, pred, fix.x)
+@static if VERSION >= v"1.12.0"
+	function visit_nested(f, pred, fix::Base.Fix{N}) where N
+		pred(fix.f) && visit_nested(f, pred, fix.f)
+		pred(fix.x) && visit_nested(f, pred, fix.x)
+	end
+else
+	function visit_nested(f, pred, fix::Union{Base.Fix1, Base.Fix2})
+		pred(fix.f) && visit_nested(f, pred, fix.f)
+		pred(fix.x) && visit_nested(f, pred, fix.x)
+	end
 end
 
 
@@ -59,8 +66,14 @@ copy_nested(f,(k,v)::Pair) = copy_nested(f, k)=>copy_nested(f, v)
 copy_nested(f,a::Adjoint) = Adjoint(copy_nested(f,parent(a)))
 copy_nested(f,a::Transpose) = Transpose(copy_nested(f,parent(a)))
 
-function copy_nested(f, fix::Base.Fix{N}) where N
-	Base.Fix{N}(copy_nested(f,fix.f), copy_nested(f,fix.x))
+@static if VERSION >= v"1.12.0"
+	function copy_nested(f, fix::Base.Fix{N}) where N
+		Base.Fix{N}(copy_nested(f,fix.f), copy_nested(f,fix.x))
+	end
+else
+	function copy_nested(f, fix::T) where T<:Union{Base.Fix1, Base.Fix2}
+		T(copy_nested(f,fix.f), copy_nested(f,fix.x))
+	end
 end
 
 
