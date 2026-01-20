@@ -71,8 +71,11 @@ copy_nested(f,a::Transpose) = Transpose(copy_nested(f,parent(a)))
 		Base.Fix{N}(copy_nested(f,fix.f), copy_nested(f,fix.x))
 	end
 else
-	function copy_nested(f, fix::T) where T<:Union{Base.Fix1, Base.Fix2}
-		T(copy_nested(f,fix.f), copy_nested(f,fix.x))
+	function copy_nested(f, fix::Base.Fix1)
+		Base.Fix1(copy_nested(f,fix.f), copy_nested(f,fix.x))
+	end
+	function copy_nested(f, fix::Base.Fix2)
+		Base.Fix2(copy_nested(f,fix.f), copy_nested(f,fix.x))
 	end
 end
 
