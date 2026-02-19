@@ -23,6 +23,7 @@ export
 	AbstractPreprocess,
 	Preprocess,
 	TimestampedFilePath,
+	ChecksummedFilePath,
 	unmanage,
 	deduplicate!,
 	print_spec,
@@ -36,7 +37,7 @@ export
 	forwarded,
 	ifelse_job,
 	error_job,
-	checksummedfilepath_job
+	checksummedfilepath_spec
 
 # Use public keyword in Julia versions where it is available
 if VERSION >= v"1.11.0-DEV.469"

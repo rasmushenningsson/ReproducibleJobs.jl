@@ -44,11 +44,11 @@ Base.show(io::IO, x::ChecksummedFilePath) = print(io, "ChecksummedFilePath(", x.
 
 
 checksummedfilepath_spec(ts::TimestampedFilePath; kwargs...) =
-	cached(create_spec(checksummedfilepath, ts; kwargs..., __version=v"0.1.0"))
+	prefetched(cached(create_spec(checksummedfilepath, ts; kwargs..., __version=v"0.1.0")))
 checksummedfilepath_spec(fp::AbstractString; kwargs...) =
 	checksummedfilepath_spec(TimestampedFilePath(fp); kwargs...)
 
-checksummedfilepath_job(fp; kwargs...) = Job(checksummedfilepath_spec(fp; kwargs...))
+# checksummedfilepath_job(fp; kwargs...) = Job(checksummedfilepath_spec(fp; kwargs...))
 
 
 copy_arg(ts::TimestampedFilePath) = ts # Already managed, no need to copy
