@@ -52,13 +52,19 @@ if VERSION >= v"1.11.0-DEV.469"
 	end
 end
 
+include("Deduplicators/Deduplicators.jl")
+using .Deduplicators
+
+
 
 include("read_only.jl")
 include("managed.jl")
 include("kwarg_vector.jl")
 include("nested.jl")
-include("hash.jl")
-include("deduplicator.jl")
+
+# include("hash.jl")
+# include("deduplicator.jl")
+
 include("arg_processing.jl")
 include("spec.jl")
 include("spec_meta.jl")
