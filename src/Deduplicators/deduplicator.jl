@@ -1,6 +1,3 @@
-
-
-
 deduplicate_type(::Type{T}) where T<:Union{<:Number,String,Symbol,Char,DataType,Colon,Nothing,Missing,VersionNumber,Regex} = false
 
 deduplicate_type(::Type{<:AbstractUnitRange{T}}) where T<:Union{Number,Char} = false
@@ -30,8 +27,11 @@ end
 
 
 
+deduplication_type_already_copied(::Type{T}) where T = false
 
+deduplication_preprocess(x::Any) = x # NB: deduplicate_type should be specified also for types that unwrap using deduplication_preprocess, otherwise nesting is not handled properly, since we need to look at eltypes before preprocessing has occurred.
 deduplication_postprocess(x::Any) = x
+
 deduplication_pointer(::Any) = nothing
 canonicalize(x::Any) = x
 
@@ -54,6 +54,7 @@ struct Deduplicator{H}
 end
 Deduplicator(hash_context::H) where H = Deduplicator{H}(hash_context, Dict{Ptr{Nothing},Tuple{WeakRef,Hash}}(), Dict{Hash,WeakRef}())
 Deduplicator() = Deduplicator(DeduplicatorHashContext())
+
 
 function Base.empty!(d::Deduplicator)
 	empty!(d.pointer2obj)
@@ -224,8 +225,10 @@ reconstruct(::Type{<:CompoundResult}, (keys,values)::Tuple{ROVec{String},ROVec{T
 
 
 
-function _deduplicate!(d::Union{Deduplicator,Nothing}, x::T, transfer_ownership::Bool, already_copied=transfer_ownership) where T # can we find a better name than transfer_ownership?
+function _deduplicate!(d::Union{Deduplicator,Nothing}, x::T, transfer_ownership::Bool, already_copied::Bool) where T # can we find a better name than transfer_ownership?
 	# _deduplication_cleanup!(d) # TODO: Add
+
+	already_copied = already_copied || transfer_ownership
 
 	# # TODO: Can we find a nicer way to do this?
 	# if x isa ReadOnlyArray
@@ -285,26 +288,27 @@ function _deduplicate!(d::Union{Deduplicator,Nothing}, x::T, transfer_ownership:
 
 	return x
 end
-@inline function _deduplicate!(d::Union{Deduplicator,Nothing}, x::ROArray{T,N}, transfer_ownership::Bool) where {T,N}
-	_deduplicate!(d, parent(x), transfer_ownership, true)
-end
-@inline function _deduplicate!(d::Union{Deduplicator,Nothing}, x::ROBitArray{N}, transfer_ownership::Bool) where N
-	_deduplicate!(d, parent(x), transfer_ownership, true)
+
+
+function deduplicate_impl!(d::Union{Deduplicator,Nothing}, x::T, transfer_ownership, already_copied) where T
+	if deduplicate_type(T)
+		# This is needed to infer the return type for values that have already been deduplicated! (Because we store everything in one Dict and value type is thus lost.)
+		T2 = Core.Compiler.return_type(_deduplicate!, Tuple{Nothing, T, Bool, Bool})
+		x_dedup = _deduplicate!(d, x, transfer_ownership, already_copied)
+		x_dedup::T2
+	else
+		x # for simple types like Int
+	end
 end
 
 
 # public
 # TODO: can we find a better name than transfer_ownership?
-# TODO: can we ensure that `transfer_ownership` is always passed internally, but still has a default in the public interface?
 function deduplicate!(d::Union{Deduplicator,Nothing}, x::T; transfer_ownership=false) where T
-	if deduplicate_type(T)
-		T2 = Core.Compiler.return_type(_deduplicate!, Tuple{Nothing, T, Bool})
-		x_dedup = _deduplicate!(d, x, transfer_ownership)
-		x_dedup::T2
-		deduplication_postprocess(x_dedup)
-	else
-		x # for simple types like Int
-	end
+	already_copied = deduplication_type_already_copied(T)
+	x = deduplication_preprocess(x)
+	x_dedup = deduplicate_impl!(d, x, transfer_ownership, already_copied)
+	deduplication_postprocess(x_dedup)
 end
 
 
@@ -313,6 +317,12 @@ end
 
 # AbstractArrays (deduplicated as ReadOnlyArrays wrapping Arrays)
 deduplicate_type(::Type{<:AbstractArray}) = true
+
+deduplication_type_already_copied(::Type{<:Union{ROArray,ROBitArray}}) = true
+
+deduplication_preprocess(x::ROArray{T,N}) where {T,N} = parent(x)
+deduplication_preprocess(x::ROBitArray{N}) where N = parent(x)
+
 deduplication_postprocess(x::Array{T,N}) where {T,N} = ReadOnlyArray(x)
 deduplication_postprocess(x::BitArray{N}) where N = ReadOnlyArray(x)
 
