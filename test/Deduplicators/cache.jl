@@ -1,7 +1,7 @@
 using Test
 using ReproducibleJobs
 using ReproducibleJobs.Deduplicators
-using ReproducibleJobs.Deduplicators: ROArray, ROVec, ROMat, ROBitArray, ROBitVec, ROBitMat, Hash, CustomStorage, hash_string, key2path, DeconstructedWeak, reconstruct_weak_rec, NotValid, CompoundResult, cache_get_subresult!
+using ReproducibleJobs.Deduplicators: ROArray, ROVec, ROMat, ROBitArray, ROBitVec, ROBitMat, lookup_hash, deduplication_pointer, DeconstructedWeak, reconstruct_weak_rec, NotValid, CompoundResult, key2path, cache_get_subresult!
 using ReadOnlyArrays
 using StableHashTraits
 using SparseArrays
@@ -45,25 +45,30 @@ end
 create_test_key(cache, f) = deduplicate!(cache.deduplicator, CacheKey(f))
 
 
-# We wrap this in a function, because otherwise I do not get the GC to do anything
-@noinline function _put_old_key!(cache::Cache; kwargs...)
+function _remove_from_deduplicator!(d::Deduplicator, x)
+	h = lookup_hash(d, x)
+	@assert h !== nothing
+	p = deduplication_pointer(x)
+	@assert p !== nothing
+	d.pointer2obj[p] = (WeakRef(), h)
+	d.hash2obj[h] = WeakRef()
+	d
+end
+
+function put_old_key!(cache::Cache; kwargs...)
 	key = create_test_key(cache, "GC")
 	r = cache_get!(()->key2result(key), cache, key; kwargs...)
 	@test r == ["GC"]
-end
-function put_old_key!(cache::Cache; kwargs...)
-	_put_old_key!(cache; kwargs...)
-	GC.gc(true)
+	delete!(cache.mem, key) # Fake that key is GCed
+	_remove_from_deduplicator!(cache.deduplicator, key) # Do it in deduplicator too
 	cache
 end
 
-# We wrap this in a function, because otherwise I do not get the GC to do anything
-@noinline function _put_old_result!(cache::Cache, key::CacheKey; kwargs...)
-	cache_get!(()->key2result(key), cache, key; kwargs...)
-end
 function put_old_result!(cache::Cache, key::CacheKey; kwargs...)
-	_put_old_result!(cache, key; kwargs...)
-	GC.gc(true)
+	x = cache_get!(()->key2result(key), cache, key; kwargs...)
+	@assert cache.mem[key] isa WeakRef # We can generalize this to deconstructed results, but we don't use that in the tests
+	cache.mem[key] = WeakRef()
+	_remove_from_deduplicator!(cache.deduplicator, parent(x)) # Do it in deduplicator too
 	cache
 end
 
