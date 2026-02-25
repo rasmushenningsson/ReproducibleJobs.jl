@@ -1,7 +1,7 @@
 using Test
 using ReproducibleJobs
 using ReproducibleJobs.Deduplicators
-using ReproducibleJobs.Deduplicators: ROArray, ROVec, ROMat, ROBitArray, ROBitVec, ROBitMat, Hash, deduplication_hash, deduplicate_type, deduplication_pointer, CompoundResult
+using ReproducibleJobs.Deduplicators: ROArray, ROVec, ROMat, ROBitArray, ROBitVec, ROBitMat, Hash, deduplication_hash, lookup_hash, deduplicate_type, deduplication_pointer, CompoundResult
 using ReadOnlyArrays
 using StableHashTraits
 using SparseArrays
@@ -20,6 +20,18 @@ function Deduplicators.deduplicate_children!(d, r::Reporter; transfer_ownership)
 end
 function Deduplicators.deduplication_hash(d, r::Reporter)
 	Hash((UInt64(1),UInt64(2),UInt64(3),UInt64(4))) # dummy
+end
+
+
+function put_old_weakref!(d::Deduplicator)
+	x = parent(deduplicate!(d, [9,5,2]))
+	h = lookup_hash(d, x)
+	@assert h !== nothing
+	p = deduplication_pointer(x)
+	@assert p !== nothing
+	d.pointer2obj[p] = (WeakRef(), h)
+	d.hash2obj[h] = WeakRef()
+	d
 end
 
 
@@ -553,16 +565,6 @@ function run_deduplicator_tests()
 			end
 		end
 
-		# We wrap this in a function, because otherwise I do not get the GC to do anything
-		@noinline function _put_old_weakref!(d::Deduplicator)
-			@inferred deduplicate!(d, [9,5,2])
-		end
-		function put_old_weakref!(d::Deduplicator)
-			_put_old_weakref!(d)
-			GC.gc(true)
-			d
-		end
-
 		@testset "WeakRefs" begin
 			d = Deduplicator()
 			put_old_weakref!(d)
@@ -690,6 +692,8 @@ function run_deduplicator_tests()
 			vecs2 = [deduplicate!(d, fill(i,10)) for i in 1:N] # keep them around
 			@test length(d.pointer2obj) == N
 			@test length(d.hash2obj) == N
+
+			@test vecs == vecs2 # use them so they are not GCed too early
 		end
 
 		@testset "transfer_ownership" begin
