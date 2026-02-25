@@ -54,35 +54,41 @@ end
 
 include("Deduplicators/Deduplicators.jl")
 using .Deduplicators
+using .Deduplicators: ROArray, ROVec, ROMat
+
+
+# TODO: Revise this approach
+let deduplicator_singleton = Deduplicator()
+	global default_deduplicator() = deduplicator_singleton
+end
 
 
 
-include("read_only.jl")
-include("managed.jl")
+# include("read_only.jl")
+# include("managed.jl")
 include("kwarg_vector.jl")
-include("nested.jl")
+# include("nested.jl")
 
 # include("hash.jl")
 # include("deduplicator.jl")
 
-include("arg_processing.jl")
+# include("arg_processing.jl")
 include("spec.jl")
 include("spec_meta.jl")
 include("preprocess.jl")
-include("compound_result.jl")
-include("cache.jl")
+# include("compound_result.jl")
+# include("cache.jl")
 include("job.jl")
 include("processing_exception.jl")
-include("scheduler.jl")
+# include("scheduler.jl")
 
-include("paths.jl")
+# include("paths.jl")
 
-include("ifelse.jl")
-include("error.jl")
+# include("ifelse.jl")
+# include("error.jl")
 
 
-include("spec_printing.jl")
-include("spec_printing_old.jl") # TO BE REMOVED
+# include("spec_printing.jl")
 
 
 # if VERSION >= v"1.12"
