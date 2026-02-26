@@ -562,6 +562,16 @@ function run_deduplicator_tests()
 					@test @inferred(ST, deduplicate!(d, x)) === x2
 					@test @inferred(ST, deduplicate!(d, x2)) === x2
 				end
+
+				let x = Set{Real}((0, 3.5))
+					x2 = deduplicate!(d, x)
+					@test x2 == x
+					@test x2 !== x
+					@test typeof(x2) == Set{Real}
+
+					@test deduplicate!(d, x) === x2
+					@test deduplicate!(d, x2) === x2
+				end
 			end
 		end
 
@@ -839,6 +849,30 @@ function run_deduplicator_tests()
 				@test x2.keys === x.keys
 				@test x2.values == x.values
 				@test x2.values !== x.values
+
+				@test deduplicate!(d, x) === x2
+				@test deduplicate!(d, x2) === x2
+			end
+		end
+
+		# TODO: We might want to canonicalize empty arrays to Any[] because what else can we get when loading from file?
+		#       But that would be bad for inferring the deduplicate! return type...
+		@testset "Empty" begin
+			d = Deduplicator()
+			let x = Int[]
+				x2 = @inferred deduplicate!(d, x)
+				@test x2 == x
+				@test x2 isa ROVec{Int}
+				@test parent(x2) !== x
+
+				@test @inferred(deduplicate!(d, x)) === x2
+				@test @inferred(deduplicate!(d, x2)) === x2
+			end
+			let x = Union{Int,Nothing}[]
+				x2 = deduplicate!(d, x)
+				@test x2 == x
+				@test x2 isa ROVec{Union{Int,Nothing}}
+				@test parent(x2) !== x
 
 				@test deduplicate!(d, x) === x2
 				@test deduplicate!(d, x2) === x2
