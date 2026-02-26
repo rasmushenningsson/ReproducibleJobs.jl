@@ -1,5 +1,5 @@
-struct Cache{K}
-	deduplicator::Deduplicator
+struct Cache{K,H}
+	deduplicator::Deduplicator{H}
 
 	# In-memory cache
 	# mem::Dict{Hash,WeakRef} # Value is a WeakRef to the result
@@ -8,12 +8,18 @@ struct Cache{K}
 	# On-disk cache
 	dir::Union{String, Nothing}
 end
-function Cache(::Type{K}, deduplicator; dir=".cache") where K
+function Cache(::Type{K}, deduplicator::Deduplicator{H}; dir=".cache") where {K,H}
 	if dir !== nothing
 		dir = abspath(dir) # In case the user changes working directory afterwards
 	end
-	Cache{K}(deduplicator, Dict(), dir)
+	Cache{K,H}(deduplicator, Dict(), dir)
 end
+
+function Base.empty!(cache::Cache)
+	empty!(cache.mem)
+	cache
+end
+
 
 
 struct NotValid end # we cannot use Nothing below, because that could be a real value

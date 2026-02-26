@@ -1,4 +1,4 @@
-mutable struct SpecArgs
+mutable struct SpecArgs # Add template parameters for args/kwargs?
 	f::Any
 	args::ROVec # ROVec{Any}
 	kwargs::ROVec # ROVec{Pair{Symbol,Any}}
@@ -45,19 +45,19 @@ Deduplicators.deduplication_copy(sa::SpecArgs) = sa
 
 
 
-function _get_kwarg_index(kwargs::Vector{Pair{Symbol,Any}}, name::Symbol)
+function _get_kwarg_index(kwargs::ROVec{T}, name::Symbol) where T
 	r = searchsorted(kwargs, name=>nothing; by=first)
 	isempty(r) && return nothing
 	only(r)
 end
 
-function _get_kwarg(f, kwargs::Vector{Pair{Symbol,Any}}, name::Symbol)
+function _get_kwarg(f, kwargs::ROVec{T}, name::Symbol) where T
 	i = _get_kwarg_index(kwargs, name)
 	i === nothing ? f() : last(kwargs[i])
 end
-_get_kwarg(kwargs::Vector{Pair{Symbol,Any}}, name::Symbol, default) =
+_get_kwarg(kwargs::ROVec{T}, name::Symbol, default) where T =
 	_get_kwarg(Returns(default), kwargs, name)
-_get_kwarg(kwargs::Vector{Pair{Symbol,Any}}, name::Symbol) =
+_get_kwarg(kwargs::ROVec{T}, name::Symbol) where T =
 	_get_kwarg(()->throw(KeyError(name)), kwargs, name)
 
 
@@ -65,11 +65,16 @@ _get_kwarg(sa::SpecArgs, args...) = _get_kwarg(sa.kwargs, args...)
 _get_kwarg(f, sa::SpecArgs) = _get_kwarg(f, sa.kwargs)
 
 
+abstract type AbstractSpecOp end
 
-struct Call end
-struct Fetch end # Means fetch immediately (e.g. get as value during preprocessing)
-struct Prefetch end # Replace spec by result just before computing - useful to collapse multiple specs that yield the same result onto the same spec.
-struct Forward end # Is this a good name?
+struct Call <: AbstractSpecOp end
+struct Fetch <: AbstractSpecOp end # Means fetch immediately (e.g. get as value during preprocessing)
+struct Prefetch <: AbstractSpecOp end # Replace spec by result just before computing - useful to collapse multiple specs that yield the same result onto the same spec.
+struct Forward <: AbstractSpecOp end # Is this a good name?
+
+Deduplicators.deduplicate_type(::Type{<:AbstractSpecOp}) = false
+Deduplicators.deconstruct_weak_rec(x::T) where T<:AbstractSpecOp = x
+Deduplicators.reconstruct_weak_rec(x::T) where T<:AbstractSpecOp = x
 
 
 # Are these still needed?
@@ -98,9 +103,9 @@ Base.Broadcast.broadcastable(sa::SpecArgs) = Ref(sa) # treat as scalar for broad
 # get_kwargs(spec::Spec) = KwargVector(_get_spec_args(spec).kwargs)
 
 # Usually accessed through getproperty
-get_function(spec::Spec) = _get_spec_args(spec).f
-get_args(spec::Spec) = _get_spec_args(spec).args
-get_kwargs(spec::Spec) = KwargVector(_get_spec_args(spec).kwargs)
+get_function(spec::Spec) = spec.sa.f
+get_args(spec::Spec) = spec.sa.args
+get_kwargs(spec::Spec) = KwargVector(spec.sa.kwargs)
 
 
 function Base.getproperty(spec::Spec, s::Symbol)
@@ -163,6 +168,90 @@ _get_spec_args(spec::Spec) = spec.sa
 
 
 
+# Can/should we implement visit_dependencies in a more general fashion? (So that custom, non-destructable, user types do not need to add methods.)
+
+# visit_dependencies(f, spec::Spec) = _visit_dependencies(f, spec.sa)
+_visit_dependencies(f, spec::Spec) = f(spec)
+
+function visit_dependencies(f, sa::SpecArgs)
+	_visit_dependencies(f, sa.args)
+	_visit_dependencies(f, sa.kwargs)
+end
+
+function _visit_dependencies(f, v::AbstractVector{T}) where T
+	# The eltype check gives some false positives, but it prevents some unnecessary traversal and mostly gets the job done
+	Deduplicators._deduplicate_eltype(T) && _visit_dependencies.(Ref(f), v)
+end
+function _visit_dependencies(f, d::Dict{K,V}) where {K,V}
+	# The eltype check gives some false positives, but it prevents some unnecessary traversal and mostly gets the job done
+	Deduplicators._deduplicate_eltype(K) && _visit_dependencies.(Ref(f), keys(d))
+	Deduplicators._deduplicate_eltype(V) && _visit_dependencies.(Ref(f), values(d))
+end
+
+function _visit_dependencies(f, nt::T) where T<:NamedTuple
+	foreach(x->visit_dependencies(f,x), nt)
+end
+
+function _visit_dependencies(f, df::DataFrame)
+	foreach(col->visit_dependencies(f,col), eachcol(df)) # This handles the somewhat strange case of putting Specs as elements of DataFrame column vectors
+end
+
+function _visit_dependencies(f, x::T) where T
+	@assert deconstruct_type(T) "_visit_dependencies fallback only available for types that can be deconstructed, got $T."
+	dx = deconstruct(x)::Tuple
+	_visit_dependencies.(Ref(f), dx)
+end
+
+
+# Can/should we implement replace_dependencies in a more general fashion? (So that custom, non-destructable, user types do not need to add methods.)
+
+_replace_dependencies(upstream, spec::Spec) = get(upstream, spec, spec)
+
+function replace_dependencies(upstream, sa::SpecArgs)
+	a = _replace_dependencies(upstream, sa.args)
+	kw = _replace_dependencies(upstream, sa.kwargs)
+	SpecArgs(sa.f, a, kw)
+end
+
+function _replace_dependencies(upstream, v::AbstractVector{T}) where T
+	# The eltype check gives some false positives, but it prevents some unnecessary traversal and mostly gets the job done
+	if Deduplicators._deduplicate_eltype(T)
+		ReadOnlyArray(_replace_dependencies.(Ref(upstream), v))
+	else
+		v # keep as is
+	end
+end
+function _replace_dependencies(upstream, dict::Dict{K,V}) where {K,V}
+	# The eltype check gives some false positives, but it prevents some unnecessary traversal and mostly gets the job done
+	replace_keys = Deduplicators._deduplicate_eltype(K)
+	replace_values = Deduplicators._deduplicate_eltype(V)
+
+	if dedup_keys && dedup_values
+		Dict(_replace_dependencies(upstream, k)=>_replace_dependencies(upstream, v) for (k,v) in dict)
+	elseif dedup_values
+		Dict(k=>_replace_dependencies(upstream, v) for (k,v) in dict)
+	elseif dedup_keys
+		Dict(_replace_dependencies(upstream, k)=>v for (k,v) in dict)
+	else
+		dict
+	end
+end
+
+function _replace_dependencies(upstream, nt::T) where T<:NamedTuple
+	map(x->_replace_dependencies(upstream,x), nt)
+end
+
+function _replace_dependencies(upstream, df::DataFrame)
+	map(col->_replace_dependencies(upstream,col), eachcol(df)) # This handles the somewhat strange case of putting Specs as elements of DataFrame column vectors
+end
+
+function _replace_dependencies(upstream, x::T) where T
+	@assert deconstruct_type(T) "_replace_dependencies fallback only available for types that can be deconstructed, got $T."
+	dx = deconstruct(x)::Tuple
+	dx = map(x->_replace_dependencies(upstream,x), dx)
+	reconstruct(T, xd)
+end
+
 
 
 
@@ -203,14 +292,14 @@ prefetched(spec::Spec) = Spec(spec.sa, Prefetch())
 
 
 # --- printing ---
-function Base.show(io::IO, spec::Spec)
-	if get(io,:compact,false)
-		show(io, spec.f)
-	else
-		# print_spec_old(io, spec; maxdepth=20)
-		print_spec(io, spec; maxdepth=20)
-	end
-end
+# function Base.show(io::IO, spec::Spec)
+# 	if get(io,:compact,false)
+# 		show(io, spec.f)
+# 	else
+# 		# print_spec_old(io, spec; maxdepth=20)
+# 		print_spec(io, spec; maxdepth=20)
+# 	end
+# end
 
 Base.show(io::IO, ::Call) = print(io, "call")
 Base.show(io::IO, ::Fetch) = print(io, "fetched")

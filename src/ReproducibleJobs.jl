@@ -66,7 +66,7 @@ end
 
 # include("read_only.jl")
 # include("managed.jl")
-include("kwarg_vector.jl")
+# include("kwarg_vector.jl")
 # include("nested.jl")
 
 # include("hash.jl")
@@ -80,12 +80,12 @@ include("preprocess.jl")
 # include("cache.jl")
 include("job.jl")
 include("processing_exception.jl")
-# include("scheduler.jl")
+include("scheduler.jl")
 
-# include("paths.jl")
+include("paths.jl")
 
-# include("ifelse.jl")
-# include("error.jl")
+include("ifelse.jl")
+include("error.jl")
 
 
 # include("spec_printing.jl")
