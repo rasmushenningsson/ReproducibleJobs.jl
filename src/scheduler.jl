@@ -8,7 +8,7 @@ struct Scheduler{H}
 	# forwarded::Dict{ReadOnly{SpecArgs}, Any} # Maps a spec to what it becomes after forwarding one step - either a Spec or a value (Any), but the former is way more common, maybe wrap in a union type?
 	# results::Dict{ReadOnly{SpecArgs},Any} # spec -> result
 
-	results::Cache{SpecArgs,H} # spec -> forwarded spec or result
+	cache::Cache{SpecArgs,H} # spec -> forwarded spec or result
 end
 # Scheduler() = Scheduler(Dict{ReadOnly{SpecArgs}, ReadOnly{SpecArgs}}(), Dict{Tuple{ReadOnly{SpecArgs},Vector{String}},Any}())
 Scheduler(cache::Cache{SpecArgs,H}) where H = Scheduler{H}(cache.deduplicator, cache)
@@ -18,7 +18,7 @@ Scheduler() = Scheduler(default_deduplicator())
 
 function Base.empty!(scheduler::Scheduler)
 	empty!(scheduler.deduplicator)
-	empty!(scheduler.results)
+	empty!(scheduler.cache)
 	scheduler
 end
 
@@ -273,15 +273,15 @@ end
 # 	return res
 # end
 
-# Rename?
-function standard_call!(scheduler::Scheduler, sa::SpecArgs, deps::Vector{Spec})
-	@assert all(x->x.op === Call(), deps) # Probably remove, it is already checked in process_once!
+# # Rename? Remove?
+# function standard_call!(scheduler::Scheduler, sa::SpecArgs, deps::Vector{Spec})
+# 	@assert all(x->x.op === Call(), deps) # Probably remove, it is already checked in process_once!
 
-	@info "Bypassing on-disk cache"
-	res = _fetch_and_compute!(scheduler, sa, deps)
-	@assert !(res isa CompoundResult) # We only support CompoundResults when using the on-disk cache
-	return res
-end
+# 	@info "Bypassing on-disk cache"
+# 	res = _fetch_and_compute!(scheduler, sa, deps)
+# 	@assert !(res isa CompoundResult) # We only support CompoundResults when using the on-disk cache
+# 	return res
+# end
 
 
 
@@ -303,34 +303,39 @@ function process_once!(scheduler::Scheduler, sa::SpecArgs, op::T; parent_f) wher
 		T <: Forward && return (Spec(sa, Call()), true)
 
 		if sa.f === get_cached
-			error("cached() is currently not implemented.")
+			inner_spec = sa.args[1]::Spec
+			inner_sa = inner_spec.sa
+			@assert inner_sa.f !== get_cached # we cannot handle nested get_cached
+			inner_deps = get_dependencies(inner_sa)
+			@assert all(s->s.op === Call(), inner_deps) # The outer Call has enforced all inner `op`s to be called has well.
 
-			# inner_spec = sa.args[1]::Spec
-			# inner_sa = inner_spec.sa
-			# @assert inner_sa.f !== get_cached # we cannot handle nested get_cached
-			# inner_deps = get_dependencies(inner_sa)
-			# @assert all(s->s.op === Call(), inner_deps) # The out Call has enforced all inner `op`s to be called has well.
-
-			# # The remaining args specify subresults of `CompoundResult`s
+			# The remaining args specify subresults of `CompoundResult`s
 			# sub = length(sa.args)==1 ? nothing : collect(String, @view(sa.args[2:end]))
+			sub = length(sa.args)==1 ? nothing : only(@view(sa.args[2:end])) # we only support one level atm
+			return_keys = _get_kwarg(sa.kwargs, :return_keys, false)
 
-			# return_keys = _get_kwarg(sa.kwargs, :return_keys, false)
-
-			# res = get!(scheduler.results, sa) do # the key is the `get_cached` spec
-			# 	cached_call!(scheduler, inner_sa, inner_deps; sub, return_keys) # but we compute the inner spec
-			# end
+			# TODO: Cleanup and simplify code
+			if sub !== nothing || return_keys
+				res = cache_get_subresult!(cache, inner_sa; use_disk=true, sub, return_keys) do
+					_fetch_and_compute!(scheduler, inner_sa, inner_deps)
+				end
+			else
+				res = cache_get!(scheduler.cache, inner_sa; use_disk=true) do
+					_fetch_and_compute!(scheduler, inner_sa, inner_deps)
+				end
+			end
 		else
-			res = cache_get!(scheduler.results, sa; use_disk=false) do
-				standard_call!(scheduler, sa, deps)
+			res = cache_get!(scheduler.cache, sa; use_disk=false) do
+				# standard_call!(scheduler, sa, deps)
+				_fetch_and_compute!(scheduler, sa, deps)
 			end
 		end
-
 
 		@assert !(res isa Spec)
 		return res, true
 	end
 
-	res = cache_get!(scheduler.results, sa; use_disk=false) do
+	res = cache_get!(scheduler.cache, sa; use_disk=false) do
 		_process_once!(scheduler, sa, deps) # Should we add op back in?
 	end
 
@@ -367,13 +372,13 @@ process!(scheduler::Scheduler, spec::Spec; kwargs...) = process!(scheduler, spec
 # --- printing ---
 function Base.show(io::IO, ::MIME"text/plain", scheduler::Scheduler)
 	print(io, "Scheduler(")
-	println("Results: ")
-	compact_io = IOContext(io, :compact=>true)
-	for (k,v) in scheduler.results
-		show(compact_io, k)
-		print(compact_io, " => ")
-		show(compact_io, v)
-		println(io)
-	end
+	# println("Results: ")
+	# compact_io = IOContext(io, :compact=>true)
+	# for (k,v) in scheduler.cache
+	# 	show(compact_io, k)
+	# 	print(compact_io, " => ")
+	# 	show(compact_io, v)
+	# 	println(io)
+	# end
 	print(io,')')
 end
