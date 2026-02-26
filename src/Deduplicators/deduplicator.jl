@@ -7,6 +7,8 @@ deduplicate_type(::Type{<:AbstractRange{T}}) where T<:Union{Number,Char} = false
 const SupportedFunctions = Union{typeof(identity), typeof(!), typeof(iszero), typeof(ismissing), typeof(isequal), typeof(startswith), typeof(only), typeof(in), typeof(<), typeof(<=), typeof(>), typeof(>=), typeof(==), typeof(!=)}
 deduplicate_type(::Type{T}) where T<:SupportedFunctions = false
 
+deduplicate_type(::Type{<:Exception}) = false
+
 
 
 
@@ -152,8 +154,8 @@ function reconstruct end
 # Default implementation (only possible for deconstructed types)
 function deduplication_hash(d, x::T) where T
 	@assert deconstruct_type(T)
-	dx = deconstruct(x)::Tuple
-	compute_hash(d, (type_to_tag(T), hash_or_value.(Ref(d), dx)...))
+	xd = deconstruct(x)::Tuple
+	compute_hash(d, (type_to_tag(T), hash_or_value.(Ref(d), xd)...))
 end
 
 deconstruct_type(::Type{<:Tuple}) = true
@@ -431,9 +433,38 @@ deduplicate_type(::Type{<:Dict}) = true
 
 deduplication_pointer(dict::Dict) = pointer_from_objref(dict)
 
+
+
 function deduplicate_children!(d, dict::Dict{K,V}; kwargs...) where {K,V}
+	# dedup_keys = _deduplicate_eltype(K)
+	# dedup_values = _deduplicate_eltype(V)
+	# if dedup_keys && dedup_values
+	# 	Dict(deduplicate!(d, k; kwargs...)=>deduplicate!(d, v; kwargs...) for (k,v) in dict)
+	# elseif dedup_values
+	# 	Dict(k=>deduplicate!(d, v; kwargs...) for (k,v) in dict)
+	# elseif dedup_keys
+	# 	Dict(deduplicate!(d, k; kwargs...)=>v for (k,v) in dict)
+	# else
+	# 	dict # nothing to do
+	# end
+
 	dedup_keys = _deduplicate_eltype(K)
 	dedup_values = _deduplicate_eltype(V)
+
+	if dedup_keys && dedup_values
+		ks = deduplicate!.(Ref(d), keys(dict); kwargs...)
+		vs = deduplicate!.(Ref(d), values(dict); kwargs...)
+		Dict{eltype(ks), eltype(vs)}(k=>v for (k,v) in zip(ks,vs))
+	elseif dedup_values
+		vs = deduplicate!.(Ref(d), values(dict); kwargs...)
+		Dict{K, eltype(vs)}(k=>v for (k,v) in zip(keys(dict),vs))
+	elseif dedup_keys
+		ks = deduplicate!.(Ref(d), keys(dict); kwargs...)
+		Dict{eltype(ks), V}(k=>v for (k,v) in zip(ks,values(dict)))
+	else
+		dict # nothing to do
+	end
+
 	if dedup_keys && dedup_values
 		Dict(deduplicate!(d, k; kwargs...)=>deduplicate!(d, v; kwargs...) for (k,v) in dict)
 	elseif dedup_values
@@ -443,13 +474,31 @@ function deduplicate_children!(d, dict::Dict{K,V}; kwargs...) where {K,V}
 	else
 		dict # nothing to do
 	end
+
 end
 
 function canonicalize(dict::Dict{K,V}) where {K,V}
-	if isconcretetype(K) && isconcretetype(V)
+	# if isconcretetype(K) && isconcretetype(V)
+	# 	dict # TODO: Are there more cases where we can ensure the eltype will not be changed?
+	# else
+	# 	Dict(k=>v for (k,v) in dict) # narrow eltype
+	# end
+
+	concrete_keys = isconcretetype(K)
+	concrete_values = isconcretetype(V)
+
+	if concrete_keys && concrete_values
 		dict # TODO: Are there more cases where we can ensure the eltype will not be changed?
+	elseif concrete_keys
+		vs = identity.(values(dict)) # narrow eltype
+		Dict{K, eltype(vs)}(k=>v for (k,v) in zip(keys(dict),vs))
+	elseif concrete_values
+		ks = identity.(keys(dict)) # narrow eltype
+		Dict{eltype(ks), V}(k=>v for (k,v) in zip(ks,values(dict)))
 	else
-		Dict(k=>v for (k,v) in dict) # narrow eltype
+		ks = identity.(keys(dict)) # narrow eltype
+		vs = identity.(values(dict)) # narrow eltype
+		Dict{eltype(ks), eltype(vs)}(k=>v for (k,v) in zip(ks,vs))
 	end
 end
 
@@ -460,23 +509,46 @@ function deduplication_hash(d, dict::Dict{K,V}) where {K,V}
 
 	# Replace deduplicatable children by their hash, sort and compute stable_hash
 
-	# TODO: Not good enough, StableHashTraits cannot handle the eltypes of the arrays with mixed types, split keys and values into separate arrays (but sort by keys still)
-	if dedup_keys && dedup_values
-		pairs = [hash_or_value(d,k)=>hash_or_value(d,v) for (k,v) in dict]
-		sort!(pairs; by=first, lt=mixed_isless)
-		return compute_hash(d, (TypeTag(:Dict), pairs))
-	elseif dedup_values
-		pairs = [k=>hash_or_value(d,v) for (k,v) in dict]
-		sort!(pairs; by=first)
-		return compute_hash(d, (TypeTag(:Dict), pairs))
-	elseif dedup_keys
-		pairs = [hash_or_value(d,k)=>v for (k,v) in dict]
-		sort!(pairs; by=first, lt=mixed_isless)
-		return compute_hash(d, (TypeTag(:Dict), pairs))
-	else
+	if !dedup_keys && !dedup_values
 		# Fast path
 		return compute_hash(d, dict)
 	end
+
+	if dedup_keys
+		ks = hash_or_value.(Ref(d), keys(dict))
+		ks = _fix_pair_eltype(ks) # Workaround for handling UnionAll Pairs (e.g. Pair{Int} or Pair{K,Int} where K)
+	else
+		ks = collect(keys(dict))
+	end
+	if dedup_values
+		vs = hash_or_value.(Ref(d), values(dict))
+		vs = _fix_pair_eltype(vs) # Workaround for handling UnionAll Pairs (e.g. Pair{Int} or Pair{K,Int} where K)
+	else
+		vs = collect(values(dict))
+	end
+
+	perm = sortperm(ks; lt=mixed_isless)
+	ks = ks[perm]
+	vs = vs[perm]
+	return compute_hash(d, (TypeTag(:Dict), ks, vs))
+
+	# # TODO: Not good enough, StableHashTraits cannot handle the eltypes of the arrays with mixed types - split keys and values into separate arrays (but sort by keys still)
+	# if dedup_keys && dedup_values
+	# 	pairs = [hash_or_value(d,k)=>hash_or_value(d,v) for (k,v) in dict]
+	# 	sort!(pairs; by=first, lt=mixed_isless)
+	# 	return compute_hash(d, (TypeTag(:Dict), pairs))
+	# elseif dedup_values
+	# 	pairs = [k=>hash_or_value(d,v) for (k,v) in dict]
+	# 	sort!(pairs; by=first)
+	# 	return compute_hash(d, (TypeTag(:Dict), pairs))
+	# elseif dedup_keys
+	# 	pairs = [hash_or_value(d,k)=>v for (k,v) in dict]
+	# 	sort!(pairs; by=first, lt=mixed_isless)
+	# 	return compute_hash(d, (TypeTag(:Dict), pairs))
+	# else
+	# 	# Fast path
+	# 	return compute_hash(d, dict)
+	# end
 end
 
 deduplication_copy(dict::Dict) = copy(dict)

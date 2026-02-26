@@ -140,8 +140,13 @@ Deduplicators.reconstruct(::Type{Spec}, (sa,op)::Tuple{SpecArgs,<:Any}) = Spec(s
 # manage(spec::Spec) = spec # Already managed
 
 function create_spec(f, args...; deduplicator=default_deduplicator(), kwargs...)
-	a = deduplicate!(deduplicator, collect(args))
-	kw = deduplicate!(deduplicator, collect(kwargs))
+	# a = deduplicate!(deduplicator, collect(args))
+	# kw = deduplicate!(deduplicator, collect(kwargs))
+	a = deduplicate!(deduplicator, isempty(args) ? [] : collect(args)) # Use Any as eltype if no args
+
+	# kw = deduplicate!(deduplicator, isempty(kwargs) ? [] : collect(kwargs)) # Use Any as eltype if no kwargs
+	kw = isempty(kwargs) ? [] : sort!(collect(kwargs); by=first) # Use Any as eltype if no kwargs
+	kw = deduplicate!(deduplicator, kw)
 	sa = deduplicate!(deduplicator, SpecArgs(f, a, kw))
 	spec = Spec(sa)
 
@@ -197,9 +202,14 @@ function _visit_dependencies(f, df::DataFrame)
 end
 
 function _visit_dependencies(f, x::T) where T
-	@assert deconstruct_type(T) "_visit_dependencies fallback only available for types that can be deconstructed, got $T."
-	dx = deconstruct(x)::Tuple
-	_visit_dependencies.(Ref(f), dx)
+	# @assert Deduplicators.deconstruct_type(T) "_visit_dependencies fallback only available for types that can be deconstructed, got $T."
+	if Deduplicators.deconstruct_type(T)
+		xd = Deduplicators.deconstruct(x)::Tuple
+		_visit_dependencies.(Ref(f), xd)
+	else
+		# TODO: Should we have this fallback? Or define _visit_dependencies for everything including Int, String, etc.
+		x
+	end
 end
 
 
@@ -246,10 +256,15 @@ function _replace_dependencies(upstream, df::DataFrame)
 end
 
 function _replace_dependencies(upstream, x::T) where T
-	@assert deconstruct_type(T) "_replace_dependencies fallback only available for types that can be deconstructed, got $T."
-	dx = deconstruct(x)::Tuple
-	dx = map(x->_replace_dependencies(upstream,x), dx)
-	reconstruct(T, xd)
+	# @assert Deduplicators.deconstruct_type(T) "_replace_dependencies fallback only available for types that can be deconstructed, got $T."
+	if Deduplicators.deconstruct_type(T)
+		xd = Deduplicators.deconstruct(x)::Tuple
+		xd = map(x->_replace_dependencies(upstream,x), xd)
+		Deduplicators.reconstruct(T, xd)
+	else
+		# TODO: Should we have this fallback? Or define _replace_dependencies for everything including Int, String, etc.
+		x
+	end
 end
 
 

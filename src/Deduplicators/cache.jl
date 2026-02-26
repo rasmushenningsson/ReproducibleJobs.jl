@@ -55,6 +55,9 @@ deconstruct_weak_rec(x::SupportedFunctions) = x
 deconstruct_weak_rec(x::ROArray{T,N}) where {T,N} = deconstruct_weak_rec(parent(x))
 deconstruct_weak_rec(x::ROBitArray{N}) where N = deconstruct_weak_rec(parent(x))
 
+deconstruct_weak_rec(x::T) where T<:Exception = x
+
+
 function reconstruct_weak_rec(dw::DeconstructedWeak{R,T}) where {R,T<:Tuple}
 	xd = map(reconstruct_weak_rec, dw.value)
 	any(==(NotValid()), xd) && return NotValid()
@@ -74,7 +77,7 @@ reconstruct_weak_rec(x::AbstractUnitRange{T}) where T<:Union{Number,Char} = x
 reconstruct_weak_rec(x::AbstractRange{T}) where T<:Union{Number,Char} = x
 reconstruct_weak_rec(x::SupportedFunctions) = x
 
-
+reconstruct_weak_rec(x::T) where T<:Exception = x
 
 
 function cache_mem_get(cache::Cache{K}, key::K) where K
@@ -221,12 +224,12 @@ end
 # Default implementation (only possible for deconstructed types)
 function cache_save(io, name, x::T) where T
 	@assert deconstruct_type(T) "cache_save fallback only available for types that can be deconstructed, got $T."
-	dx = deconstruct(x)::Tuple
+	xd = deconstruct(x)::Tuple
 	# Save as a group
 	g = JLD2.Group(io, name)
 	g["type"] = String(type_to_tag(T).name)
-	g["length"] = length(dx)
-	for (i,xi) in enumerate(dx)
+	g["length"] = length(xd)
+	for (i,xi) in enumerate(xd)
 		cache_save(g, string(i), xi)
 	end
 end
@@ -419,7 +422,7 @@ function cache_get!(f, cache::Cache{K}, key::K; use_disk=nothing) where K
 		result = f()
 		result isa CompoundResult && throw(ArgumentError("Cannot retrieve CompoundResult directly from cache. You must specify sub-result(s) using cached(key,sub...)."))
 		result = deduplicate!(cache.deduplicator, result; transfer_ownership=true)
-		use_disk && _save_file(cache, key, fp, result)
+		use_disk && !(result isa Exception) && _save_file(cache, key, fp, result)
 	end
 
 	cache_mem_set!(cache, key, result)
@@ -445,6 +448,8 @@ function cache_get_subresult!(f, cache::Cache{K}, key::K; use_disk=nothing, sub=
 		subresult = get_subresult(cr, sub)
 		subresult = reconstruct_weak_rec(subresult)
 		subresult !== NotValid() && return subresult
+	elseif cr isa Exception
+		return cr
 	elseif cr !== NotValid()
 		throw(ArgumentError("Tried to retrieve sub-result from result that was not a CompoundResult."))
 	end
@@ -467,9 +472,9 @@ function cache_get_subresult!(f, cache::Cache{K}, key::K; use_disk=nothing, sub=
 	@assert cr === NotValid() "CompoundResult found in in-mem Cache was not matched by file on disk."
 
 	cr = f()
-	cr isa CompoundResult || throw(ArgumentError("Tried to retrieve sub-result from result that was not a CompoundResult."))
+	cr isa Exception || cr isa CompoundResult || throw(ArgumentError("Tried to retrieve sub-result from result that was not a CompoundResult."))
 	cr = deduplicate!(cache.deduplicator, cr; transfer_ownership=true)
-	_save_file(cache, key, fp, cr)
+	cr isa Exception || _save_file(cache, key, fp, cr)
 	cache_mem_set!(cache, key, cr)
 	return_keys && return get_keys(cr)
 	return get_subresult(cr, sub)
