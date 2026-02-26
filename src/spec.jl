@@ -307,14 +307,14 @@ prefetched(spec::Spec) = Spec(spec.sa, Prefetch())
 
 
 # --- printing ---
-# function Base.show(io::IO, spec::Spec)
-# 	if get(io,:compact,false)
-# 		show(io, spec.f)
-# 	else
-# 		# print_spec_old(io, spec; maxdepth=20)
-# 		print_spec(io, spec; maxdepth=20)
-# 	end
-# end
+function Base.show(io::IO, spec::Spec)
+	if get(io,:compact,false)
+		show(io, spec.f)
+	else
+		# print_spec_old(io, spec; maxdepth=20)
+		print_spec(io, spec; maxdepth=20)
+	end
+end
 
 Base.show(io::IO, ::Call) = print(io, "call")
 Base.show(io::IO, ::Fetch) = print(io, "fetched")
