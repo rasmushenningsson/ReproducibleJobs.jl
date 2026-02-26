@@ -11,6 +11,7 @@ using DataFrames # TODO: Move to package extension
 export
 	Deduplicator,
 	Cache,
+	CompoundResult,
 	deduplicate!,
 	cache_get!
 

@@ -2,15 +2,22 @@
 # It is expected to change name later.
 # And maybe not be the default.
 
-struct Scheduler
-	forwarded::Dict{ReadOnly{SpecArgs}, Any} # Maps a spec to what it becomes after forwarding one step - either a Spec or a value (Any), but the former is way more common, maybe wrap in a union type?
-	results::Dict{ReadOnly{SpecArgs},Any} # spec -> result
+struct Scheduler{H}
+	deduplicator::Deduplicator{H}
+
+	# forwarded::Dict{ReadOnly{SpecArgs}, Any} # Maps a spec to what it becomes after forwarding one step - either a Spec or a value (Any), but the former is way more common, maybe wrap in a union type?
+	# results::Dict{ReadOnly{SpecArgs},Any} # spec -> result
+
+	results::Cache{SpecArgs,H} # spec -> forwarded spec or result
 end
-Scheduler() = Scheduler(Dict{ReadOnly{SpecArgs}, ReadOnly{SpecArgs}}(), Dict{Tuple{ReadOnly{SpecArgs},Vector{String}},Any}())
+# Scheduler() = Scheduler(Dict{ReadOnly{SpecArgs}, ReadOnly{SpecArgs}}(), Dict{Tuple{ReadOnly{SpecArgs},Vector{String}},Any}())
+Scheduler(cache::Cache{SpecArgs,H}) where H = Scheduler{H}(cache.deduplicator, cache)
+Scheduler(deduplicator::Deduplicator{H}) where H = Scheduler(Cache(SpecArgs, deduplicator))
+Scheduler() = Scheduler(default_deduplicator())
 
 
 function Base.empty!(scheduler::Scheduler)
-	empty!(scheduler.forwarded)
+	empty!(scheduler.deduplicator)
 	empty!(scheduler.results)
 	scheduler
 end
@@ -22,18 +29,18 @@ end
 
 
 
-_arg_replacer(upstream) = Base.Fix2(_arg_replacer, upstream)
-_arg_replacer(x, upstream) = get(upstream, x, x) # replaces (pre)fetched specs by the value, and leaves everything else in place
+# _arg_replacer(upstream) = Base.Fix2(_arg_replacer, upstream)
+# _arg_replacer(x, upstream) = get(upstream, x, x) # replaces (pre)fetched specs by the value, and leaves everything else in place
 
-_unwrap_value(upstream) = Base.Fix2(_unwrap_value, upstream)
-_unwrap_value() = _unwrap_value(IdDict{Spec,Any}())
+# _unwrap_value(upstream) = Base.Fix2(_unwrap_value, upstream)
+# _unwrap_value() = _unwrap_value(IdDict{Spec,Any}())
 
-function _unwrap_value(x, upstream)
-	x isa Spec && return copy_nested(_unwrap_value(), upstream[x]) # Needed to handle e.g. a result which is a vector of `ReadOnly`s
-	# x isa ReadOnly{<:Array} && return ReadOnlyArray(x.value) # TODO: Should we add this?
-	x isa ReadOnly && return x.value
-	x
-end
+# function _unwrap_value(x, upstream)
+# 	x isa Spec && return copy_nested(_unwrap_value(), upstream[x]) # Needed to handle e.g. a result which is a vector of `ReadOnly`s
+# 	# x isa ReadOnly{<:Array} && return ReadOnlyArray(x.value) # TODO: Should we add this?
+# 	x isa ReadOnly && return x.value
+# 	x
+# end
 
 
 fetch_dependencies!(scheduler, deps) = IdDict{Spec,Any}(dep=>fetch!(scheduler, dep) for dep in deps)
@@ -51,19 +58,19 @@ process_dependencies!(scheduler, deps; parent_f) =
 
 
 
-function deduplicate_result(res)
-	if res isa Spec
-		res
-	elseif res isa Managed
-		# By returning a Managed result, the computing function takes responsibility of the contents, otherwise we need to standardize
-		res = res.x
-	elseif res isa CompoundResult
-		CompoundResult(Pair{String,Any}[k=>deduplicate_result(v) for (k,v) in res.children])
-	else
-		f = deduplicate_leaves(default_deduplicator()) # TODO: avoid using default_deduplicator() here - we need to get it from somewhere
-		copy_nested(f, res)
-	end
-end
+# function deduplicate_result(res)
+# 	if res isa Spec
+# 		res
+# 	elseif res isa Managed
+# 		# By returning a Managed result, the computing function takes responsibility of the contents, otherwise we need to standardize
+# 		res = res.x
+# 	elseif res isa CompoundResult
+# 		CompoundResult(Pair{String,Any}[k=>deduplicate_result(v) for (k,v) in res.children])
+# 	else
+# 		f = deduplicate_leaves(default_deduplicator()) # TODO: avoid using default_deduplicator() here - we need to get it from somewhere
+# 		copy_nested(f, res)
+# 	end
+# end
 
 
 function propagate_error(sa, vals)::Union{Nothing, ProcessingException}
@@ -85,7 +92,12 @@ function preprocess(sa::SpecArgs)
 
 		res = f(sa.args...; sa.kwargs...)
 		@assert res !== nothing "Preprocessing of $f returned nothing"
-		res = deduplicate_result(res) # needed because forwarding can return a value
+
+		# res = deduplicate_result(res) # needed because forwarding can return a value
+
+		# TODO: use deduplicator in scheduler instead
+		res = deduplicate!(default_deduplicator(), res) # needed because forwarding can return a value
+
 		return res
 	catch e
 		# TODO: Do not show anything/much here, it will be shown later instead
@@ -108,13 +120,15 @@ function replace_forwarded(sa::SpecArgs, upstream::IdDict{Spec,Any})
 	err = propagate_error(sa, values(upstream))
 	err !== nothing && return err
 
-	replacer = _arg_replacer(upstream)
+	return replace_dependencies(upstream, sa)
 
-	args = Any[copy_nested(replacer, a) for a in sa.args]
-	kwargs = Pair{Symbol,Any}[k=>copy_nested(replacer,v) for (k,v) in sa.kwargs]
+	# replacer = _arg_replacer(upstream)
 
-	sa_forwarded = SpecArgs(sa.f, args, kwargs)
-	return sa_forwarded
+	# args = Any[copy_nested(replacer, a) for a in sa.args]
+	# kwargs = Pair{Symbol,Any}[k=>copy_nested(replacer,v) for (k,v) in sa.kwargs]
+
+	# sa_forwarded = SpecArgs(sa.f, args, kwargs)
+	# return sa_forwarded
 end
 
 
@@ -129,13 +143,23 @@ function compute(sa::SpecArgs, upstream::IdDict{Spec,Any})
 		@assert v !== nothing "__version kwarg must be provided for all (non-preprocessing) specs."
 		# @assert v !== nothing "__version kwarg must be provided for all (non-preprocessing) specs. Missing for $f."
 
-		unwrapper = _unwrap_value(upstream)
-		args = (copy_nested(unwrapper, a) for a in sa.args)
-		kwargs = (copy_nested(unwrapper, k)=>copy_nested(unwrapper,v) for (k,v) in sa.kwargs if !startswith(string(k),"__"))
+		# unwrapper = _unwrap_value(upstream)
+		# args = (copy_nested(unwrapper, a) for a in sa.args)
+		# kwargs = (copy_nested(unwrapper, k)=>copy_nested(unwrapper,v) for (k,v) in sa.kwargs if !startswith(string(k),"__"))
+
+		sa_replaced = replace_dependencies(upstream, sa)
+		args = sa_replaced.args
+		kwargs = sa_replaced.kwargs
+		kwargs = (k=>v for (k,v) in sa.kwargs if !startswith(string(k),"__")) # TODO: Find a better way to get rid of __ kwargs?
 
 		res = f(args...; kwargs...)
 		@assert res !== nothing "Computation of $f returned nothing"
-		res = deduplicate_result(res)
+
+		# res = deduplicate_result(res)
+
+		# TODO: use deduplicator in scheduler instead
+		res = deduplicate!(default_deduplicator(), res)
+
 		return res
 	catch e
 		# TODO: Do not show anything/much here, it will be shown later instead
@@ -163,9 +187,7 @@ function _fetch_and_compute!(scheduler, sa::SpecArgs, deps::Vector{Spec})
 end
 
 
-function _process_once!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, deps::Vector{Spec})
-	sa = ro.value
-
+function _process_once!(scheduler::Scheduler, sa::SpecArgs, deps::Vector{Spec})
 	forwarded_deps = process_dependencies!(scheduler, deps; parent_f=sa.f)
 	if !isempty(forwarded_deps)
 		sa = replace_forwarded(sa, forwarded_deps)::Union{SpecArgs,ProcessingException}
@@ -175,8 +197,13 @@ function _process_once!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, deps::Vect
 		preprocess(sa)
 	else
 		sa isa ProcessingException && return sa
-		ro_forwarded = default_deduplicator()(sa) # TODO: avoid using default_deduplicator() here - we need to get it from somewhere
-		Spec(ro_forwarded, Call())
+
+		# TODO: use deduplicator in scheduler instead
+		sa = deduplicate!(default_deduplicator(), sa)
+		Spec(sa, Call())
+
+		# ro_forwarded = default_deduplicator()(sa) # TODO: avoid using default_deduplicator() here - we need to get it from somewhere
+		# Spec(ro_forwarded, Call())
 	end
 end
 
@@ -196,62 +223,61 @@ end
 
 
 
-# Helper function for recreating the Specs for retrieving individual parts of a CompoundResult
-_cached_rewrap(ro, sub; kwargs...) = cached(Spec(ro, Call()), sub...; kwargs...).ro
+# # Helper function for recreating the Specs for retrieving individual parts of a CompoundResult
+# _cached_rewrap(ro, sub; kwargs...) = cached(Spec(ro, Call()), sub...; kwargs...).ro
 
-function _insert_partial_results!(scheduler, ro, cr::CompoundResult, curr_sub=String[])
-	# Insert keys as their own result
-	scheduler.results[_cached_rewrap(ro,curr_sub; return_keys=true)] = first.(cr.children)
-	for (k,v) in cr.children
-		_insert_partial_results!(scheduler, ro, v, vcat(curr_sub, k))
-	end
-end
-_insert_partial_results!(scheduler, ro, res, curr_sub) =
-	scheduler.results[_cached_rewrap(ro,curr_sub)] = res
-
-
+# function _insert_partial_results!(scheduler, ro, cr::CompoundResult, curr_sub=String[])
+# 	# Insert keys as their own result
+# 	scheduler.results[_cached_rewrap(ro,curr_sub; return_keys=true)] = first.(cr.children)
+# 	for (k,v) in cr.children
+# 		_insert_partial_results!(scheduler, ro, v, vcat(curr_sub, k))
+# 	end
+# end
+# _insert_partial_results!(scheduler, ro, res, curr_sub) =
+# 	scheduler.results[_cached_rewrap(ro,curr_sub)] = res
 
 
 
-function cached_call!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, deps::Vector{Spec}; sub::Union{Nothing, Vector{String}}, return_keys::Bool)
-	@assert all(x->x.op === Call(), deps) # Probably remove, it is already checked in process_once!
-	sa = ro.value
-	@assert sa.f !== get_cached # Probably remove, it is already checked in process_once!
 
-	key = get_cache_key(ro)
 
-	# Load from cache if it's already in there
-	res = cache_load(key, sub; return_keys)
-	res !== nothing && return res
+# function cached_call!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, deps::Vector{Spec}; sub::Union{Nothing, Vector{String}}, return_keys::Bool)
+# 	@assert all(x->x.op === Call(), deps) # Probably remove, it is already checked in process_once!
+# 	sa = ro.value
+# 	@assert sa.f !== get_cached # Probably remove, it is already checked in process_once!
 
-	# Compute
-	res = _fetch_and_compute!(scheduler, sa, deps)
+# 	key = get_cache_key(ro)
 
-	# Store in on-disk cache
-	cache_save(key, res)
+# 	# Load from cache if it's already in there
+# 	res = cache_load(key, sub; return_keys)
+# 	res !== nothing && return res
 
-	if res isa CompoundResult
-		# TODO: Figure out a better place to do this (we are currently inside a get!(scheduler.results, ro) call, so it works, but it is a bit awkward)
-		# Insert all parts of the result into the in-RAM cache
-		_insert_partial_results!(scheduler, ro, res)
+# 	# Compute
+# 	res = _fetch_and_compute!(scheduler, sa, deps)
 
-		# sub === nothing && throw(ArgumentError("Cannot retrieve CompoundResult directly, sub-result must be specified."))
+# 	# Store in on-disk cache
+# 	cache_save(key, res)
 
-		# But only return the sub we asked for
-		return get_subresult(res, sub; return_keys)
-	elseif !(res isa ProcessingException)
-		return_keys && throw(ArgumentError("return_keys can only be used on CompoundResults."))
-		sub === nothing || throw(ArgumentError("Cannot retrieve sub-result unless the result is a CompoundResult (tried to retrieve: $sub)."))
-	end
-	return res
-end
+# 	if res isa CompoundResult
+# 		# TODO: Figure out a better place to do this (we are currently inside a get!(scheduler.results, ro) call, so it works, but it is a bit awkward)
+# 		# Insert all parts of the result into the in-RAM cache
+# 		_insert_partial_results!(scheduler, ro, res)
+
+# 		# sub === nothing && throw(ArgumentError("Cannot retrieve CompoundResult directly, sub-result must be specified."))
+
+# 		# But only return the sub we asked for
+# 		return get_subresult(res, sub; return_keys)
+# 	elseif !(res isa ProcessingException)
+# 		return_keys && throw(ArgumentError("return_keys can only be used on CompoundResults."))
+# 		sub === nothing || throw(ArgumentError("Cannot retrieve sub-result unless the result is a CompoundResult (tried to retrieve: $sub)."))
+# 	end
+# 	return res
+# end
 
 # Rename?
-function standard_call!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, deps::Vector{Spec})
-	sa = ro.value
+function standard_call!(scheduler::Scheduler, sa::SpecArgs, deps::Vector{Spec})
 	@assert all(x->x.op === Call(), deps) # Probably remove, it is already checked in process_once!
 
-	@info "Bypassing cache"
+	@info "Bypassing on-disk cache"
 	res = _fetch_and_compute!(scheduler, sa, deps)
 	@assert !(res isa CompoundResult) # We only support CompoundResults when using the on-disk cache
 	return res
@@ -260,14 +286,11 @@ end
 
 
 # Return tuple with result and Bool telling if it's done (TODO: Make code more clear)
-function process_once!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, op::T; parent_f) where T
-	sa = ro.value
-
+function process_once!(scheduler::Scheduler, sa::SpecArgs, op::T; parent_f) where T
 	# Early out, we don't need to consider dependencies for this
 	if parent_f !== nothing && T <: Union{Forward,Prefetch}
 		if !should_forward_child(parent_f, sa.f)
-			# return Spec(ro), true # should op ever be set to something here?
-			return Spec(ro, op), true # Keep Forward/Prefetch op
+			return Spec(sa, op), true # Keep Forward/Prefetch op
 		end
 	end
 
@@ -277,27 +300,28 @@ function process_once!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, op::T; pare
 		# ready to call
 
 		# Stop if we are forwarding, nothing left to do
-		T <: Forward && return (Spec(ro, Call()), true)
+		T <: Forward && return (Spec(sa, Call()), true)
 
 		if sa.f === get_cached
-			inner_spec = sa.args[1]::Spec
-			inner_ro = inner_spec.ro
-			inner_sa = inner_ro.value
-			@assert inner_sa.f !== get_cached # we cannot handle nested get_cached
-			inner_deps = get_dependencies(inner_sa)
-			@assert all(s->s.op === Call(), inner_deps) # The out Call has enforced all inner `op`s to be called has well.
+			error("cached() is currently not implemented.")
 
-			# The remaining args specify subresults of `CompoundResult`s
-			sub = length(sa.args)==1 ? nothing : collect(String, @view(sa.args[2:end]))
+			# inner_spec = sa.args[1]::Spec
+			# inner_sa = inner_spec.sa
+			# @assert inner_sa.f !== get_cached # we cannot handle nested get_cached
+			# inner_deps = get_dependencies(inner_sa)
+			# @assert all(s->s.op === Call(), inner_deps) # The out Call has enforced all inner `op`s to be called has well.
 
-			return_keys = _get_kwarg(sa.kwargs, :return_keys, false)
+			# # The remaining args specify subresults of `CompoundResult`s
+			# sub = length(sa.args)==1 ? nothing : collect(String, @view(sa.args[2:end]))
 
-			res = get!(scheduler.results, ro) do # the key is the `get_cached` spec
-				cached_call!(scheduler, inner_ro, inner_deps; sub, return_keys) # but we compute the inner spec
-			end
+			# return_keys = _get_kwarg(sa.kwargs, :return_keys, false)
+
+			# res = get!(scheduler.results, sa) do # the key is the `get_cached` spec
+			# 	cached_call!(scheduler, inner_sa, inner_deps; sub, return_keys) # but we compute the inner spec
+			# end
 		else
-			res = get!(scheduler.results, ro) do
-				standard_call!(scheduler, ro, deps)
+			res = cache_get!(scheduler.results, sa; use_disk=false) do
+				standard_call!(scheduler, sa, deps)
 			end
 		end
 
@@ -306,8 +330,8 @@ function process_once!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, op::T; pare
 		return res, true
 	end
 
-	res = get!(scheduler.forwarded, ro) do
-		_process_once!(scheduler, ro, deps) # Should we add op back in?
+	res = cache_get!(scheduler.results, sa; use_disk=false) do
+		_process_once!(scheduler, sa, deps) # Should we add op back in?
 	end
 
 	if res isa Spec
@@ -318,25 +342,25 @@ function process_once!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, op::T; pare
 end
 
 
-function process!(scheduler::Scheduler, ro::ReadOnly{SpecArgs}, op::T; parent_f=nothing) where T
+function process!(scheduler::Scheduler, sa::SpecArgs, op::T; parent_f=nothing) where T
 	while true
-		res, done = process_once!(scheduler, ro, op; parent_f)
+		res, done = process_once!(scheduler, sa, op; parent_f)
 		done && return res
 		res::Spec
-		ro = res.ro
+		sa = res.sa
 	end
 end
 
 
-fetch!(scheduler::Scheduler, spec::Spec; kwargs...) = process!(scheduler, spec.ro, Fetch(); kwargs...)
-forward!(scheduler::Scheduler, spec::Spec; kwargs...) = process!(scheduler, spec.ro, Forward(); kwargs...)
+fetch!(scheduler::Scheduler, spec::Spec; kwargs...) = process!(scheduler, spec.sa, Fetch(); kwargs...)
+forward!(scheduler::Scheduler, spec::Spec; kwargs...) = process!(scheduler, spec.sa, Forward(); kwargs...)
 
 function forward_once!(scheduler::Scheduler, spec::Spec; parent_f=nothing)
-	res, _ = process_once!(scheduler, spec.ro, Forward(); parent_f)
+	res, _ = process_once!(scheduler, spec.sa, Forward(); parent_f)
 	res
 end
 
-process!(scheduler::Scheduler, spec::Spec; kwargs...) = process!(scheduler, spec.ro, spec.op; kwargs...)
+process!(scheduler::Scheduler, spec::Spec; kwargs...) = process!(scheduler, spec.sa, spec.op; kwargs...)
 
 
 

@@ -5,7 +5,7 @@ mutable struct Job
 	result::Any
 
 	function Job(spec::Spec, result)
-		new(Spec(spec.ro, Fetch()), result) # The only valid op is Fetch.
+		new(Spec(spec.sa, Fetch()), result) # The only valid op is Fetch.
 	end
 end
 Job(spec::Spec) = Job(spec, NotComputed())
@@ -13,7 +13,7 @@ Job(spec::Spec) = Job(spec, NotComputed())
 Base.Broadcast.broadcastable(job::Job) = Ref(job) # treat as scalar for broadcasting
 
 Deduplicators.deduplicate_type(::Type{Job}) = true
-Deduplicators.deduplication_preprocess(job::Job) = job.spec
+Deduplicators.deduplication_preprocess(job::Job) = Spec(job.spec.sa) # Resets the op to default
 
 # _to_spec(job::Job) = Spec(job.spec.ro) # Resets the op to default
 # _to_spec(job::Job) = Spec(job.spec.sa) # Resets the op to default
@@ -31,12 +31,12 @@ prefetched(job::Job) = prefetched(job.spec)
 
 
 
-function fetch!(job::Job; scheduler=default_scheduler(), managed=false)
+function fetch!(job::Job; scheduler=default_scheduler())
 	if job.result === NotComputed()
-		job.result = manage(process!(scheduler, job.spec))
+		job.result = process!(scheduler, job.spec)
 	end
 	job.result isa ProcessingException && throw(job.result)
-	managed ? job.result : unmanage(job.result)
+	job.result
 end
 
 function forward(job::Job; scheduler=default_scheduler())
@@ -55,6 +55,7 @@ end
 function Base.show(io::IO, ::MIME"text/plain", job::Job)
 	println(io, "Job Spec:")
 	show(io, MIME"text/plain"(), job.spec)
+	println(io)
 
 	# TODO: Show better status (also follow forwarding in the Scheduler). Something like:
 	# * Not computed
@@ -69,7 +70,7 @@ function Base.show(io::IO, ::MIME"text/plain", job::Job)
 		let io = IOContext(io, :compact=>true)
 			println(io)
 			print(io, "Job Result: ")
-			show(io, unsafe_unmanage(job.result))
+			show(io, job.result)
 		end
 	end
 end
