@@ -385,6 +385,7 @@ end
 
 # assumes deduplicate! has already been called on result
 function _save_file(cache::Cache{K}, key::K, fp, result) where K
+	isdir(cache.dir) || mkdir(cache.dir)
 	jldopen(fp, "w"; compress=ZstdFilter()) do io # should we set compression level?
 		cache_save(io, "root", result)
 	end
