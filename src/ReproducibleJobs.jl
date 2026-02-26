@@ -88,7 +88,7 @@ include("ifelse.jl")
 include("error.jl")
 
 
-# include("spec_printing.jl")
+include("spec_printing.jl")
 
 
 # if VERSION >= v"1.12"

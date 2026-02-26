@@ -6,12 +6,12 @@ _typenameof(x::T) where T = _nameof(T)
 
 
 struct PrintContext
-	hashes::Set{String} # hashes seen at least once
-	duplicates::Dict{String,Int} # hashes seen at least twice, mapping to an ordinal
+	hashes::Set{Deduplicators.Hash} # hashes seen at least once
+	duplicates::Dict{Deduplicators.Hash,Int} # hashes seen at least twice, mapping to an ordinal
 	depth::Int
 	line_length::Int
 end
-PrintContext(; line_length=80) = PrintContext(Set{String}(), Dict{String,Int}(), 0, line_length)
+PrintContext(; line_length=80) = PrintContext(Set{Deduplicators.Hash}(), Dict{Deduplicators.Hash,Int}(), 0, line_length)
 
 descend(pc::PrintContext) = PrintContext(pc.hashes, pc.duplicates, pc.depth+1, pc.line_length)
 
@@ -20,10 +20,10 @@ descend(pc::PrintContext) = PrintContext(pc.hashes, pc.duplicates, pc.depth+1, p
 mutable struct PrintNode
 	context::PrintContext
 	title::AnnotatedString
-	h::String
+	h::Union{Deduplicators.Hash,Nothing}
 	children::Vector{PrintNode}
 end
-PrintNode(context, title) = PrintNode(context, title, "", PrintNode[])
+PrintNode(context, title) = PrintNode(context, title, nothing, PrintNode[])
 PrintNode(context) = PrintNode(context, "")
 
 AbstractTrees.children(x::PrintNode) = x.children
@@ -41,7 +41,7 @@ end
 
 function set_hash!(pn::PrintNode, h)
 	@assert isempty(pn.children) "Cannot set hash after node has children"
-	@assert isempty(pn.h) "Hash already set"
+	@assert pn.h===nothing "Hash already set"
 	pn.h = h
 end
 
@@ -163,6 +163,31 @@ styled_function_name(p::AbstractPreprocess) = styled_function_name(p.f) * styled
 styled_function_name(p::Preprocess{false}) = styled_function_name(p.f) * styled" {bright_black:(Preprocess (late))}"
 
 
+
+function _should_collapse(::Type{T}) where T
+	T isa Union && return _should_collapse(T.a) && _should_collapse(T.b)
+	T <: Spec && return false
+	# T <: ReadOnly && return false
+	T <: AbstractRange && return true
+	T <: AbstractArray && return false
+	T <: AbstractDict && return false
+	T <: AbstractSet && return false
+	T <: Number && return true
+	T <: AbstractString && return true
+	T <: Symbol && return true
+	T <: AbstractChar && return true
+	T <: Missing && return true
+	T <: Regex && return true
+	if (T <: Pair) || (T <: Tuple) || (T <: NamedTuple)
+		return all(_should_collapse, fieldtypes(T))
+	end
+
+	# We do not collapse when the eltype is Any
+	return false
+end
+
+
+
 function extend_print_node!(pn::PrintNode, spec::Spec; suffix_space=0)
 	# Special handling of `get_cached`, to make things more compact
 	suffix = ""
@@ -184,20 +209,23 @@ function extend_print_node!(pn::PrintNode, spec::Spec; suffix_space=0)
 
 	isempty(suffix) || extend_title!(pn, suffix)
 
-	set_hash!(pn, spec.ro.h)
+	deduplicator = default_deduplicator() # TODO: Use from scheduler somehow?
+	h = Deduplicators.lookup_hash(deduplicator, spec.sa)
 
-	if spec.ro.h in pn.context.hashes
+	set_hash!(pn, h)
+
+	if h in pn.context.hashes
 		# Seen before
-		get!(pn.context.duplicates, spec.ro.h, length(pn.context.duplicates)+1)
+		get!(pn.context.duplicates, h, length(pn.context.duplicates)+1)
 	else
 		# First time
-		push!(pn.context.hashes, spec.ro.h)
+		push!(pn.context.hashes, h)
 
 		context2 = descend(pn.context)
-		for a in spec.ro.value.args
+		for a in spec.sa.args
 			push!(pn.children, build_print_node(context2, a))
 		end
-		for (k,v) in spec.ro.value.kwargs
+		for (k,v) in spec.sa.kwargs
 			startswith(string(k), "__") && continue
 			push!(pn.children, build_print_node(context2, v; prefix=styled"{blue:$k:}"))
 		end
@@ -271,20 +299,20 @@ end
 
 
 
-function extend_print_node!(pn::PrintNode, ro::ReadOnly{T}; suffix_space=0) where T
-	set_hash!(pn, ro.h)
-	if ro.h in pn.context.hashes
-		# Seen before
-		get!(pn.context.duplicates, ro.h, length(pn.context.duplicates)+1)
-		extend_title!(pn, styled"{magenta:$(_nameof(T))}")
-	else
-		# First time
-		push!(pn.context.hashes, ro.h)
-		# extend_title!(pn, limited_string(chars_remaining(pn)-4, item_str(ro.value))) # make some space for ordinal at end
-		extend_print_node!(pn, ro.value; suffix_space=suffix_space+5)
-	end
-	pn
-end
+# function extend_print_node!(pn::PrintNode, ro::ReadOnly{T}; suffix_space=0) where T
+# 	set_hash!(pn, ro.h)
+# 	if ro.h in pn.context.hashes
+# 		# Seen before
+# 		get!(pn.context.duplicates, ro.h, length(pn.context.duplicates)+1)
+# 		extend_title!(pn, styled"{magenta:$(_nameof(T))}")
+# 	else
+# 		# First time
+# 		push!(pn.context.hashes, ro.h)
+# 		# extend_title!(pn, limited_string(chars_remaining(pn)-4, item_str(ro.value))) # make some space for ordinal at end
+# 		extend_print_node!(pn, ro.value; suffix_space=suffix_space+5)
+# 	end
+# 	pn
+# end
 
 
 function extend_print_node!(pn::PrintNode, x; suffix_space=0)
