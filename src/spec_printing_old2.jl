@@ -6,89 +6,43 @@ _typenameof(x::T) where T = _nameof(T)
 
 
 struct PrintContext
-	hashes::Dict{Deduplicators.Hash,Int} # Hashes mapping to how many times they have been seen
-	hash_ordinals::Dict{Deduplicators.Hash,Int} # hashes seen at least twice, mapping to an ordinal
+	hashes::Set{Deduplicators.Hash} # hashes seen at least once
+	duplicates::Dict{Deduplicators.Hash,Int} # hashes seen at least twice, mapping to an ordinal
 	depth::Int
 	line_length::Int
 end
-PrintContext(; line_length=80) = PrintContext(Dict{Deduplicators.Hash,Int}(), Dict{Deduplicators.Hash,Int}(), 0, line_length)
+PrintContext(; line_length=80) = PrintContext(Set{Deduplicators.Hash}(), Dict{Deduplicators.Hash,Int}(), 0, line_length)
 
-function add_hash!(pc::PrintContext, h::Deduplicators.Hash)
-	n = get(pc.hashes, h, 0)
-	pc.hashes[h] = n+1
-	n > 0 # return true if seen before
-end
-
-
-
-descend(pc::PrintContext) = PrintContext(pc.hashes, pc.hash_ordinals, pc.depth+1, pc.line_length)
-
-
-const PrintTitleElement = Union{String, AnnotatedString, Deduplicators.Hash}
-
-struct PrintTitle
-	items::Vector{PrintTitleElement}
-end
-PrintTitle() = PrintTitle([])
-PrintTitle(x::PrintTitleElement) = PrintTitle(PrintTitleElement[x])
-
-Base.isempty(pt::PrintTitle) = isempty(pt.items)
-
-function Base.length(pt::PrintTitle)
-	if isempty(pt)
-		0
-	else
-		sum(length, pt.items) + length(pt.items) - 1 # space between items
-	end
-end
-
-function Base.show(io::IO, pt::PrintTitle)
-	first = true
-	for item in pt.items
-		first || print(io, ' ')
-		print(io, item)
-	end
-end
+descend(pc::PrintContext) = PrintContext(pc.hashes, pc.duplicates, pc.depth+1, pc.line_length)
 
 
 
 mutable struct PrintNode
 	context::PrintContext
-	# title::AnnotatedString
-	title::PrintTitle
-	h::Union{Deduplicators.Hash, Nothing}
+	title::AnnotatedString
+	h::Union{Deduplicators.Hash,Nothing}
 	children::Vector{PrintNode}
 end
-PrintNode(context, title::PrintTitle) = PrintNode(context, title, nothing, PrintNode[])
-PrintNode(context, title) = PrintNode(context, PrintTitle(title))
-PrintNode(context) = PrintNode(context, PrintTitle())
+PrintNode(context, title) = PrintNode(context, title, nothing, PrintNode[])
+PrintNode(context) = PrintNode(context, "")
 
-AbstractTrees.children(pn::PrintNode) = pn.children
-function AbstractTrees.printnode(io::IO, pn::PrintNode) # Maybe rely on nodevalue instead of printnode?
-	print(io, pn.title)
-
-	if pn.h !== nothing && pn.context.hashes[pn.h] > 1
-		ordinal = get!(pn.context.hash_ordinals, pn.h, length(pn.context.hash_ordinals)+1)
-		print(io, styled" {blue:#$ordinal}")
-	end
-
-	# ordinal = get(pn.context.duplicates, pn.h, 0)
-	# ordinal > 0 && print(io, styled" {blue:#$ordinal}")
+AbstractTrees.children(x::PrintNode) = x.children
+function AbstractTrees.printnode(io::IO, x::PrintNode)
+	print(io, x.title)
+	ordinal = get(x.context.duplicates, x.h, 0)
+	ordinal > 0 && print(io, styled" {blue:#$ordinal}")
 end
 
 
 function extend_title!(pn::PrintNode, new)
 	@assert isempty(pn.children) "Cannot change title after node has children"
-	# pn.title = isempty(pn.title) ? convert(AnnotatedString,new) : pn.title*" "*new
-	push!(pn.title.items, new)
-	pn
+	pn.title = isempty(pn.title) ? convert(AnnotatedString,new) : pn.title*" "*new
 end
 
 function set_hash!(pn::PrintNode, h)
 	@assert isempty(pn.children) "Cannot set hash after node has children"
 	@assert pn.h===nothing "Hash already set"
 	pn.h = h
-	pn
 end
 
 
@@ -260,12 +214,12 @@ function extend_print_node!(pn::PrintNode, spec::Spec; suffix_space=0)
 
 	set_hash!(pn, h)
 
-	if add_hash!(pn.context, h)
+	if h in pn.context.hashes
 		# Seen before
-		# get!(pn.context.duplicates, h, length(pn.context.duplicates)+1)
+		get!(pn.context.duplicates, h, length(pn.context.duplicates)+1)
 	else
 		# First time
-		# push!(pn.context.hashes, h)
+		push!(pn.context.hashes, h)
 
 		context2 = descend(pn.context)
 		for a in spec.sa.args
