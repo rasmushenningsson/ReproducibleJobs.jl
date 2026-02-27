@@ -20,11 +20,27 @@ function add_hash!(pc::PrintContext, h::Deduplicators.Hash)
 end
 
 
-
 descend(pc::PrintContext) = PrintContext(pc.hashes, pc.hash_ordinals, pc.depth+1, pc.line_length)
 
 
-const PrintTitleElement = Union{String, AnnotatedString, Deduplicators.Hash}
+
+struct HashOridinal
+	context::PrintContext
+	h::Deduplicators.Hash
+end
+
+Base.length(ho::HashOridinal) = 3 # TODO: Remove this function after refactoring is complete
+function Base.show(io::IO, ho::HashOridinal)
+	if ho.context.hashes[ho.h] > 1
+		ordinal = get!(ho.context.hash_ordinals, ho.h, length(ho.context.hash_ordinals)+1)
+		print(io, styled"{blue:#$ordinal}")
+	end
+end
+
+
+
+
+const PrintTitleElement = Union{String, AnnotatedString, HashOridinal}
 
 struct PrintTitle
 	items::Vector{PrintTitleElement}
@@ -47,6 +63,7 @@ function Base.show(io::IO, pt::PrintTitle)
 	for item in pt.items
 		first || print(io, ' ')
 		print(io, item)
+		first = false
 	end
 end
 
@@ -56,25 +73,30 @@ mutable struct PrintNode
 	context::PrintContext
 	# title::AnnotatedString
 	title::PrintTitle
-	h::Union{Deduplicators.Hash, Nothing}
+	# h::Union{Deduplicators.Hash, Nothing}
 	children::Vector{PrintNode}
 end
-PrintNode(context, title::PrintTitle) = PrintNode(context, title, nothing, PrintNode[])
+PrintNode(context, title::PrintTitle) = PrintNode(context, title, PrintNode[])
 PrintNode(context, title) = PrintNode(context, PrintTitle(title))
 PrintNode(context) = PrintNode(context, PrintTitle())
 
+Base.show(io::IO, pn::PrintNode) = show(io, pn.title)
+
 AbstractTrees.children(pn::PrintNode) = pn.children
-function AbstractTrees.printnode(io::IO, pn::PrintNode) # Maybe rely on nodevalue instead of printnode?
-	print(io, pn.title)
 
-	if pn.h !== nothing && pn.context.hashes[pn.h] > 1
-		ordinal = get!(pn.context.hash_ordinals, pn.h, length(pn.context.hash_ordinals)+1)
-		print(io, styled" {blue:#$ordinal}")
-	end
+# function AbstractTrees.printnode(io::IO, pn::PrintNode) # Maybe rely on nodevalue or just show instead of printnode?
+# 	print(io, pn.title)
 
-	# ordinal = get(pn.context.duplicates, pn.h, 0)
-	# ordinal > 0 && print(io, styled" {blue:#$ordinal}")
-end
+# 	# if pn.h !== nothing && pn.context.hashes[pn.h] > 1
+# 	# 	ordinal = get!(pn.context.hash_ordinals, pn.h, length(pn.context.hash_ordinals)+1)
+# 	# 	print(io, styled" {blue:#$ordinal}")
+# 	# end
+
+# 	# ordinal = get(pn.context.duplicates, pn.h, 0)
+# 	# ordinal > 0 && print(io, styled" {blue:#$ordinal}")
+# end
+
+
 
 
 function extend_title!(pn::PrintNode, new)
@@ -84,12 +106,12 @@ function extend_title!(pn::PrintNode, new)
 	pn
 end
 
-function set_hash!(pn::PrintNode, h)
-	@assert isempty(pn.children) "Cannot set hash after node has children"
-	@assert pn.h===nothing "Hash already set"
-	pn.h = h
-	pn
-end
+# function set_hash!(pn::PrintNode, h)
+# 	@assert isempty(pn.children) "Cannot set hash after node has children"
+# 	@assert pn.h===nothing "Hash already set"
+# 	pn.h = h
+# 	pn
+# end
 
 
 chars_remaining(pn::PrintNode) = pn.context.line_length - pn.context.depth*3 - length(pn.title) - !isempty(pn.title)
@@ -239,7 +261,7 @@ function extend_print_node!(pn::PrintNode, spec::Spec; suffix_space=0)
 	suffix = ""
 	if spec.f == get_cached
 		suffix = "(cached"
-		length(spec.args)>=2 && (suffix = suffix*':'*spec.args[2])
+		length(spec.args)>=2 && (suffix = suffix*':'*only(spec.args[2:end]))
 		suffix *= ')'
 		suffix = styled"{green,light:$suffix}"
 
@@ -258,7 +280,9 @@ function extend_print_node!(pn::PrintNode, spec::Spec; suffix_space=0)
 	deduplicator = default_deduplicator() # TODO: Use from scheduler somehow?
 	h = Deduplicators.lookup_hash(deduplicator, spec.sa)
 
-	set_hash!(pn, h)
+	# set_hash!(pn, h)
+
+	extend_title!(pn, HashOridinal(pn.context, h))
 
 	if add_hash!(pn.context, h)
 		# Seen before
