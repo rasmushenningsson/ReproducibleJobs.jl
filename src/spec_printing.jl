@@ -228,7 +228,6 @@ styled_function_name(p::Preprocess{false}) = styled_function_name(p.f) * styled"
 function _should_collapse(::Type{T}) where T
 	T isa Union && return _should_collapse(T.a) && _should_collapse(T.b)
 	T <: Spec && return false
-	# T <: ReadOnly && return false
 	T <: AbstractRange && return true
 	T <: AbstractArray && return false
 	T <: AbstractDict && return false
