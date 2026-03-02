@@ -179,6 +179,7 @@ end
 
 
 function limited_string(max_n, a::AbstractArray) # For matrices and higher-dimensional tensors
+	# TODO: Improve how type info is written
 	s = repr(a; context=(:compact=>true, :short=>true))
 	limited_string(max_n, s)
 end
@@ -205,14 +206,26 @@ item_str(d::DataType) = styled"{cyan:$d}"
 
 item_str(f::Function) = styled"{cyan:$f}"
 
-_fix_suffix(::Base.Fix1) = "1"
-_fix_suffix(::Base.Fix2) = "2"
+
+_styled_name_fix(::Base.Fix1) = styled"{cyan:Base.Fix1}"
+_styled_name_fix(::Base.Fix2) = styled"{cyan:Base.Fix2}"
 @static if VERSION >= v"1.12.0"
-	_fix_suffix(::Base.Fix{N}) where N = "{$N}"
-	item_str(f::Base.Fix) = styled"Base.Fix" * _fix_suffix(f) * "(" * item_str(f.f) * ", " * item_str(f.x) * ")"
+	_styled_name_fix(::Base.Fix{N}) where N = styled"{cyan:Base.Fix\{$N\}}"
+	item_str(f::Base.Fix) = _styled_name_fix(f) * "(" * item_str(f.f) * ", " * item_str(f.x) * ")"
 else
-	item_str(f::Union{Base.Fix1,Base.Fix2}) = styled"Base.Fix" * _fix_suffix(f) * "(" * item_str(f.f) * ", " * item_str(f.x) * ")"
+	item_str(f::Union{Base.Fix1,Base.Fix2}) = _styled_name_fix(f) * "(" * item_str(f.f) * ", " * item_str(f.x) * ")"
 end
+
+
+item_str(r::Returns{T}) where T = styled"{cyan:Returns(}" * item_str(r.value) * styled"{cyan:)}"
+function item_str(c::ComposedFunction{T1,T2}) where {T1,T2}
+	if c.outer === !
+		item_str(c.outer) * item_str(c.inner)
+	else
+		item_str(c.outer) * "∘" * item_str(c.inner)
+	end
+end
+
 
 
 item_str(ts::TimestampedFilePath) = styled"$(ts.path){bright_black:@$(Dates.unix2datetime(ts.timestamp))}"
@@ -225,27 +238,95 @@ styled_function_name(p::Preprocess{false}) = styled_function_name(p.f) * styled"
 
 
 
-function _should_collapse(::Type{T}) where T
-	T isa Union && return _should_collapse(T.a) && _should_collapse(T.b)
-	T <: Spec && return false
-	T <: AbstractRange && return true
-	T <: AbstractArray && return false
-	T <: AbstractDict && return false
-	T <: AbstractSet && return false
-	T <: Number && return true
-	T <: AbstractString && return true
-	T <: Symbol && return true
-	T <: AbstractChar && return true
-	T <: Missing && return true
-	T <: Regex && return true
-	if (T <: Pair) || (T <: Tuple) || (T <: NamedTuple)
-		return all(_should_collapse, fieldtypes(T))
-	end
+# function _should_collapse(::Type{T}) where T
+# 	T isa Union && return _should_collapse(T.a) && _should_collapse(T.b)
+# 	T <: Spec && return false
+# 	T <: AbstractRange && return true
+# 	T <: AbstractArray && return false
+# 	T <: AbstractDict && return false
+# 	T <: AbstractSet && return false
+# 	T <: Number && return true
+# 	T <: AbstractString && return true
+# 	T <: Symbol && return true
+# 	T <: AbstractChar && return true
+# 	T <: Missing && return true
+# 	T <: Regex && return true
+# 	if (T <: Pair) || (T <: Tuple) || (T <: NamedTuple)
+# 		return all(_should_collapse, fieldtypes(T))
+# 	end
 
-	# We do not collapse when the eltype is Any
+# 	T <: Returns && return _sho
+# 	# return !Deduplicators._deduplicate_eltype(T)
+
+
+# 	# We do not collapse when the eltype is Any
+# 	return false
+# end
+
+# should_collapse(::Type{T}) where T<:Union{<:AbstractArray,<:AbstractSet,<:AbstractDict} = _should_collapse(eltype(T))
+# should_collapse(::Type{T}) where T = _should_collapse(T)
+
+
+# function _should_collapse(::Type{T}; nested::Bool=false) where T
+# 	T isa Union && return _should_collapse(T.a; nested) && _should_collapse(T.b; nested)
+# 	T <: Spec && return false
+# 	T <: AbstractRange && return true
+# 	if T<:Union{<:AbstractArray, <:AbstractDict, <:AbstractSet}
+# 		return nested ? false : _should_collapse(eltype(T); nested=true)
+# 	end
+
+# 	T <: Number && return true
+# 	T <: AbstractString && return true
+# 	T <: Symbol && return true
+# 	T <: AbstractChar && return true
+# 	T <: Missing && return true
+# 	T <: Regex && return true
+# 	# if (T <: Pair) || (T <: Tuple) || (T <: NamedTuple) || (T<:Returns)
+# 	if T <: Union{<:Pair, <:Tuple, <:NamedTuple, <:Returns, <:ComposedFunction}
+# 		# return all(_should_collapse, fieldtypes(T))
+# 		return all(x->_should_collapse(x; nested), fieldtypes(T))
+# 	end
+
+# 	# T <: Returns && return _should_collapse(only(T.parameters))
+# 	T <: Function && return true
+
+# 	# We do not collapse when the eltype is Any
+# 	return false
+# end
+
+# Unions and fallback
+function _should_collapse(::Type{T}; nested::Bool) where T
+	T isa Union && return _should_collapse(T.a; nested) && _should_collapse(T.b; nested)
 	return false
 end
 
+_should_collapse(::Type{Spec}; nested) = false
+
+_should_collapse(::Type{AbstractRange}; nested) = true
+function _should_collapse(::Type{T}; nested) where T<:Union{<:AbstractArray, <:AbstractDict, <:AbstractSet}
+	nested ? false : _should_collapse(eltype(T); nested=true)
+end
+
+_should_collapse(::Type{T}; nested) where T<:Union{<:Number,String,Symbol,Char,DataType,Colon,Nothing,Missing,VersionNumber,Regex} = true
+_should_collapse(::Type{<:Function}; nested) = true
+
+_should_collapse(::Type{T}; nested) where T<:Union{<:Pair, <:Tuple, <:NamedTuple, <:Returns, <:ComposedFunction} =
+	all(x->_should_collapse(x; nested), fieldtypes(T))
+
+@static if VERSION >= v"1.12.0"
+	_should_collapse(::Type{Base.Fix{N,F,T}}; nested) where {N,F,T} =
+		_should_collapse(F; nested) && _should_collapse(T; nested)
+else
+	_should_collapse(::Type{Base.Fix1{F,T}}; nested) where {F,T} =
+		_should_collapse(F; nested) && _should_collapse(T; nested)
+	_should_collapse(::Type{Base.Fix2{F,T}}; nested) where {F,T} =
+		_should_collapse(F; nested) && _should_collapse(T; nested)
+end
+
+_should_collapse(::Type{DataFrame}) = false
+
+
+should_collapse(::Type{T}) where T = _should_collapse(T; nested=false)
 
 
 function extend_print_node!(pn::PrintNode, spec::Spec)
@@ -297,13 +378,21 @@ function extend_print_node_expanded!(f, pn::PrintNode, a::T; unwrap=identity) wh
 	max_n = 20
 	extend_title!(pn, styled"{magenta:$(_nameof(T))}")
 
-	context2 = descend(pn.context)
-	for (i,x) in enumerate(unwrap(a))
-		i > max_n && break
-		val,prefix = f(x)
-		push!(pn.children, build_print_node(context2, val; prefix))
+	deduplicator = default_deduplicator() # TODO: Use from scheduler somehow?
+	h = Deduplicators.lookup_hash(deduplicator, a)
+	h !== nothing && extend_title!(pn, HashOridinal(pn.context,h))
+
+	if h === nothing || !add_hash!(pn.context, h)
+		# First time we see this item
+		context2 = descend(pn.context)
+		for (i,x) in enumerate(unwrap(a))
+			i > max_n && break
+			val,prefix = f(x)
+			push!(pn.children, build_print_node(context2, val; prefix))
+		end
+		length(a) > max_n && push!(pn.children, build_print_node(context2, PrintRaw(styled"{bright_black:...}")))
 	end
-	length(a) > max_n && push!(pn.children, build_print_node(context2, PrintRaw(styled"{bright_black:...}")))
+
 	pn
 end
 extend_print_node_expanded!(pn, x) = extend_print_node_expanded!(x->(x,""), pn, x)
@@ -313,7 +402,7 @@ extend_print_node_expanded!(pn, x::AbstractDict{<:Union{String,Symbol,Char,Numbe
 
 
 function extend_print_node!(pn::PrintNode, x::T) where T<:Union{<:Tuple,<:NamedTuple}
-	if _should_collapse(T)
+	if should_collapse(T)
 		extend_print_node_collapsed!(pn, x)
 	else
 		extend_print_node_expanded!(pn, x)
@@ -322,7 +411,7 @@ end
 
 
 function extend_print_node!(pn::PrintNode, x::T) where T<:Union{<:AbstractArray,<:AbstractSet,<:AbstractDict}
-	if _should_collapse(eltype(T))
+	if should_collapse(T)
 		extend_print_node_collapsed!(pn, x)
 	else
 		extend_print_node_expanded!(pn, x)
@@ -350,7 +439,85 @@ end
 # This is need to not dispatch to the AbstractArray case
 extend_print_node!(pn::PrintNode, r::AbstractRange) = extend_title!(pn, LimitedString(item_str(r)))
 
+
+# Returns, Fix, ComposedFunction - are these similar enough to share code?
+function extend_print_node!(pn::PrintNode, x::Returns{T}) where T
+	if should_collapse(T)
+		extend_title!(pn, LimitedString(item_str(x)))
+	else
+		extend_title!(pn, styled"{cyan:Returns}")
+		context2 = descend(pn.context)
+		push!(pn.children, build_print_node(context2, x.value))
+	end
+	pn
+end
+
+@static if VERSION >= v"1.12.0"
+	function extend_print_node!(pn::PrintNode, x::Base.Fix{N,F,T}) where {N,F,T}
+		if should_collapse(F) && should_collapse(T)
+			extend_title!(pn, LimitedString(item_str(x)))
+		else
+			extend_title!(pn, styled"{cyan:$(_nameof(Base.Fix{N}))}")
+			context2 = descend(pn.context)
+			push!(pn.children, build_print_node(context2, x.f))
+			push!(pn.children, build_print_node(context2, x.x))
+		end
+		pn
+	end
+end
+
+function extend_print_node!(pn::PrintNode, x::ComposedFunction{T1,T2}) where {T1,T2}
+	if should_collapse(T1)
+		if should_collapse(T2)
+			extend_title!(pn, LimitedString(item_str(x)))
+		else
+			extend_title!(pn, LimitedString(item_str(x.outer)))
+			extend_title!(pn, "∘")
+			extend_print_node!(pn, x.inner)
+		end
+	else
+		extend_title!(pn, "ComposedFunction")
+		context2 = descend(pn.context)
+		push!(pn.children, build_print_node(context2, x.outer))
+		push!(pn.children, build_print_node(context2, x.inner))
+	end
+	pn
+end
+
+
+function extend_print_node!(pn::PrintNode, x::DataFrame)
+	max_n = 20
+
+	extend_title!(pn, styled"{magenta:DataFrame}")
+
+	deduplicator = default_deduplicator() # TODO: Use from scheduler somehow?
+	h = Deduplicators.lookup_hash(deduplicator, x)
+	h !== nothing && extend_title!(pn, HashOridinal(pn.context,h))
+
+	if h === nothing || !add_hash!(pn.context, h)
+		context2 = descend(pn.context)
+		for (i,(k,v)) in enumerate(pairs(eachcol(x)))
+			if i > max_n
+				push!(pn.children, build_print_node(context2, PrintRaw(styled"{bright_black:...}")))
+				break
+			end
+			push!(pn.children, build_print_node(context2, v; prefix=styled"{blue:$k:}"))
+		end
+	end
+
+	pn
+end
+
+
+
 extend_print_node!(pn::PrintNode, x) = extend_title!(pn, LimitedString(item_str(x)))
+# function extend_print_node!(pn::PrintNode, x::T) where T
+# 	# if Deduplicators.deconstruct_type(T)
+# 	# 	extend_title!(pn, "aha")
+# 	# else
+# 		extend_title!(pn, LimitedString(item_str(x)))
+# 	# end
+# end
 
 
 
