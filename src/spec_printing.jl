@@ -24,23 +24,46 @@ descend(pc::PrintContext) = PrintContext(pc.hashes, pc.hash_ordinals, pc.depth+1
 
 
 
+_materialize_string(x::AbstractString) = x
+
+
 struct HashOridinal
 	context::PrintContext
 	h::Deduplicators.Hash
 end
 
-Base.length(ho::HashOridinal) = 3 # TODO: Remove this function after refactoring is complete
-function Base.show(io::IO, ho::HashOridinal)
+# # Deprecated
+# Base.length(ho::HashOridinal) = 3 # TODO: Remove this function after refactoring is complete
+
+# # Deprecated
+# function Base.show(io::IO, ho::HashOridinal)
+# 	if ho.context.hashes[ho.h] > 1
+# 		ordinal = get!(ho.context.hash_ordinals, ho.h, length(ho.context.hash_ordinals)+1)
+# 		print(io, styled"{blue:#$ordinal}")
+# 	end
+# end
+
+function _materialize_string(ho::HashOridinal)
 	if ho.context.hashes[ho.h] > 1
 		ordinal = get!(ho.context.hash_ordinals, ho.h, length(ho.context.hash_ordinals)+1)
-		print(io, styled"{blue:#$ordinal}")
+		styled"{blue:#$ordinal}"
+	else
+		nothing
 	end
 end
 
 
 
+struct LimitedString{A,K}
+	args::A
+	kwargs::K
+	LimitedString(args...; kwargs...) = new{typeof(args),typeof(kwargs)}(args, kwargs)
+end
+_materialize_string(ls::LimitedString; max_n::Int) =
+	limited_string(max_n, ls.args...; ls.kwargs...)
 
-const PrintTitleElement = Union{String, AnnotatedString, HashOridinal}
+
+const PrintTitleElement = Union{String, AnnotatedString, HashOridinal, LimitedString}
 
 struct PrintTitle
 	items::Vector{PrintTitleElement}
@@ -54,18 +77,18 @@ function Base.length(pt::PrintTitle)
 	if isempty(pt)
 		0
 	else
-		sum(length, pt.items) + length(pt.items) - 1 # space between items
+		sum(length, pt.items) + length(pt.items) - 1 # including space between items
 	end
 end
 
-function Base.show(io::IO, pt::PrintTitle)
-	first = true
-	for item in pt.items
-		first || print(io, ' ')
-		print(io, item)
-		first = false
-	end
-end
+# function Base.show(io::IO, pt::PrintTitle)
+# 	first = true
+# 	for item in pt.items
+# 		first || print(io, ' ')
+# 		print(io, item)
+# 		first = false
+# 	end
+# end
 
 
 
@@ -80,7 +103,55 @@ PrintNode(context, title::PrintTitle) = PrintNode(context, title, PrintNode[])
 PrintNode(context, title) = PrintNode(context, PrintTitle(title))
 PrintNode(context) = PrintNode(context, PrintTitle())
 
-Base.show(io::IO, pn::PrintNode) = show(io, pn.title)
+# Base.show(io::IO, pn::PrintNode) = show(io, pn.title)
+
+function Base.show(io::IO, pn::PrintNode)
+	# chars_remaining(pn::PrintNode) = pn.context.line_length - pn.context.depth*3 - length(pn.title) - !isempty(pn.title)
+	# chars_remaining = pn.context.line_length - pn.context.depth*3
+
+	# # layout items in title, pass 1
+	# items = [item isa HashOridinal ? _materialize_string(item) : item for item in pn.title.items]
+
+	# n_limited = 0
+	# for item in items
+	# 	if item isa AbstractString
+	# 		chars_remaining -= length(item)
+	# 	elseif item isa LimitedString
+	# 		n_limited += 1
+	# 	end
+	# end
+
+	chars_remaining = pn.context.line_length - pn.context.depth*3
+	n_limited = 0
+	items = PrintTitleElement[]
+	for item in pn.title.items
+		if item isa HashOridinal
+			item = _materialize_string(item)
+		end
+		if item isa AbstractString
+			chars_remaining -= length(item)
+		elseif item isa LimitedString
+			n_limited += 1
+		end
+		item !== nothing && push!(items, item)
+	end
+
+
+	# print
+	first = true
+	for item in items
+		if item isa LimitedString
+			max_n = div(chars_remaining, n_limited, RoundUp)
+			item = _materialize_string(item; max_n)
+			n_limited -= 1
+			chars_remaining -= length(item)
+		end
+
+		first || print(io, ' ')
+		print(io, item)
+		first = false
+	end
+end
 
 AbstractTrees.children(pn::PrintNode) = pn.children
 
@@ -114,7 +185,7 @@ end
 # end
 
 
-chars_remaining(pn::PrintNode) = pn.context.line_length - pn.context.depth*3 - length(pn.title) - !isempty(pn.title)
+# chars_remaining(pn::PrintNode) = pn.context.line_length - pn.context.depth*3 - length(pn.title) - !isempty(pn.title)
 
 
 function _limited_string(f, max_n, items; prefix, sep, suffix)
@@ -256,7 +327,7 @@ end
 
 
 
-function extend_print_node!(pn::PrintNode, spec::Spec; suffix_space=0)
+function extend_print_node!(pn::PrintNode, spec::Spec)
 	# Special handling of `get_cached`, to make things more compact
 	suffix = ""
 	if spec.f == get_cached
@@ -304,10 +375,11 @@ function extend_print_node!(pn::PrintNode, spec::Spec; suffix_space=0)
 end
 
 
-function extend_print_node_collapsed!(pn::PrintNode, a::T; suffix_space=0) where T
-	extend_title!(pn, limited_string(chars_remaining(pn)-suffix_space, a))
-	pn
-end
+# function extend_print_node_collapsed!(pn::PrintNode, a::T; suffix_space=0) where T
+# 	extend_title!(pn, limited_string(chars_remaining(pn)-suffix_space, a))
+# 	pn
+# end
+extend_print_node_collapsed!(pn::PrintNode, a::T) where T = extend_title!(pn, LimitedString(a))
 
 function extend_print_node_expanded!(f, pn::PrintNode, a::T; unwrap=identity) where T
 	max_n = 20
@@ -328,30 +400,32 @@ extend_print_node_expanded!(pn, x::AbstractDict{<:Union{String,Symbol,Char,Numbe
 	extend_print_node_expanded!(p->(p[2],dict_key_str(p[1]) * " =>"), pn, x)
 
 
-function extend_print_node!(pn::PrintNode, x::T; suffix_space=0) where T<:Union{<:Tuple,<:NamedTuple}
+function extend_print_node!(pn::PrintNode, x::T) where T<:Union{<:Tuple,<:NamedTuple}
 	if _should_collapse(T)
-		extend_print_node_collapsed!(pn, x; suffix_space)
+		extend_print_node_collapsed!(pn, x)
 	else
 		extend_print_node_expanded!(pn, x)
 	end
 end
 
 
-function extend_print_node!(pn::PrintNode, x::T; suffix_space=0) where T<:Union{<:AbstractArray,<:AbstractSet,<:AbstractDict}
+function extend_print_node!(pn::PrintNode, x::T) where T<:Union{<:AbstractArray,<:AbstractSet,<:AbstractDict}
 	if _should_collapse(eltype(T))
-		extend_print_node_collapsed!(pn, x; suffix_space)
+		extend_print_node_collapsed!(pn, x)
 	else
 		extend_print_node_expanded!(pn, x)
 	end
 end
 
 
-function extend_print_node!(pn::PrintNode, (k,v)::Pair{<:Union{String,Symbol,Char,Number,DataType}}; suffix_space=0)
-	extend_title!(pn, item_str(k)*" =>")
+function extend_print_node!(pn::PrintNode, (k,v)::Pair{<:Union{String,Symbol,Char,Number,DataType}})
+	# extend_title!(pn, item_str(k)*" =>")
+	extend_title!(pn, item_str(k))
+	extend_title!(pn, "=>")
 	extend_print_node!(pn, v)
 end
 
-function extend_print_node!(pn::PrintNode, (k,v)::T; suffix_space=0) where T<:Pair
+function extend_print_node!(pn::PrintNode, (k,v)::T) where T<:Pair
 	extend_title!(pn, styled"{magenta:$(_nameof(T))}")
 	context2 = descend(pn.context)
 	push!(pn.children, build_print_node(context2, k))
@@ -362,10 +436,12 @@ end
 
 
 
-function extend_print_node!(pn::PrintNode, r::AbstractRange; suffix_space=0) # This is need to not dispatch to the AbstractArray case
-	extend_title!(pn, limited_string(chars_remaining(pn)-suffix_space, item_str(r)))
-	pn
-end
+# function extend_print_node!(pn::PrintNode, r::AbstractRange; suffix_space=0) # This is need to not dispatch to the AbstractArray case
+# 	extend_title!(pn, limited_string(chars_remaining(pn)-suffix_space, item_str(r)))
+# 	pn
+# end
+# This is need to not dispatch to the AbstractArray case
+extend_print_node!(pn::PrintNode, r::AbstractRange) = extend_title!(pn, LimitedString(item_str(r)))
 
 
 
@@ -385,10 +461,11 @@ end
 # end
 
 
-function extend_print_node!(pn::PrintNode, x; suffix_space=0)
-	extend_title!(pn, limited_string(chars_remaining(pn)-suffix_space, item_str(x)))
-	pn
-end
+# function extend_print_node!(pn::PrintNode, x; suffix_space=0)
+# 	extend_title!(pn, limited_string(chars_remaining(pn)-suffix_space, item_str(x)))
+# 	pn
+# end
+extend_print_node!(pn::PrintNode, x) = extend_title!(pn, LimitedString(item_str(x)))
 
 
 
