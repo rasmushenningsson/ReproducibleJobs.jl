@@ -231,68 +231,11 @@ end
 item_str(ts::TimestampedFilePath) = styled"$(ts.path){bright_black:@$(Dates.unix2datetime(ts.timestamp))}"
 
 
-
 styled_function_name(f) = styled"{green:$f}"
 styled_function_name(p::AbstractPreprocess) = styled_function_name(p.f) * styled" {bright_black:($(nameof(typeof(p))))}"
 styled_function_name(p::Preprocess{false}) = styled_function_name(p.f) * styled" {bright_black:(Preprocess (late))}"
 
 
-
-# function _should_collapse(::Type{T}) where T
-# 	T isa Union && return _should_collapse(T.a) && _should_collapse(T.b)
-# 	T <: Spec && return false
-# 	T <: AbstractRange && return true
-# 	T <: AbstractArray && return false
-# 	T <: AbstractDict && return false
-# 	T <: AbstractSet && return false
-# 	T <: Number && return true
-# 	T <: AbstractString && return true
-# 	T <: Symbol && return true
-# 	T <: AbstractChar && return true
-# 	T <: Missing && return true
-# 	T <: Regex && return true
-# 	if (T <: Pair) || (T <: Tuple) || (T <: NamedTuple)
-# 		return all(_should_collapse, fieldtypes(T))
-# 	end
-
-# 	T <: Returns && return _sho
-# 	# return !Deduplicators._deduplicate_eltype(T)
-
-
-# 	# We do not collapse when the eltype is Any
-# 	return false
-# end
-
-# should_collapse(::Type{T}) where T<:Union{<:AbstractArray,<:AbstractSet,<:AbstractDict} = _should_collapse(eltype(T))
-# should_collapse(::Type{T}) where T = _should_collapse(T)
-
-
-# function _should_collapse(::Type{T}; nested::Bool=false) where T
-# 	T isa Union && return _should_collapse(T.a; nested) && _should_collapse(T.b; nested)
-# 	T <: Spec && return false
-# 	T <: AbstractRange && return true
-# 	if T<:Union{<:AbstractArray, <:AbstractDict, <:AbstractSet}
-# 		return nested ? false : _should_collapse(eltype(T); nested=true)
-# 	end
-
-# 	T <: Number && return true
-# 	T <: AbstractString && return true
-# 	T <: Symbol && return true
-# 	T <: AbstractChar && return true
-# 	T <: Missing && return true
-# 	T <: Regex && return true
-# 	# if (T <: Pair) || (T <: Tuple) || (T <: NamedTuple) || (T<:Returns)
-# 	if T <: Union{<:Pair, <:Tuple, <:NamedTuple, <:Returns, <:ComposedFunction}
-# 		# return all(_should_collapse, fieldtypes(T))
-# 		return all(x->_should_collapse(x; nested), fieldtypes(T))
-# 	end
-
-# 	# T <: Returns && return _should_collapse(only(T.parameters))
-# 	T <: Function && return true
-
-# 	# We do not collapse when the eltype is Any
-# 	return false
-# end
 
 # Unions and fallback
 function _should_collapse(::Type{T}; nested::Bool) where T
@@ -509,15 +452,7 @@ function extend_print_node!(pn::PrintNode, x::DataFrame)
 end
 
 
-
 extend_print_node!(pn::PrintNode, x) = extend_title!(pn, LimitedString(item_str(x)))
-# function extend_print_node!(pn::PrintNode, x::T) where T
-# 	# if Deduplicators.deconstruct_type(T)
-# 	# 	extend_title!(pn, "aha")
-# 	# else
-# 		extend_title!(pn, LimitedString(item_str(x)))
-# 	# end
-# end
 
 
 
