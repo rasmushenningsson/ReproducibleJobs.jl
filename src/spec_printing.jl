@@ -148,6 +148,11 @@ end
 
 nt_key_str(k) = styled"{blue:$k}"
 dict_key_str(k) = styled"{blue:$k}"
+array_key_str(::Any) = "" # Used for Vectors
+function array_key_str(ci::CartesianIndex) # Used for Arrays of dim >= 2
+	str = join(Tuple(ci),',')
+	styled"{blue:$str:}"
+end
 
 nt_item_str((k,v)::Pair) = nt_key_str(k) * "=" * item_str(v)
 dict_item_str((k,v)::Pair) = dict_key_str(k) * "=>" * item_str(v)
@@ -336,13 +341,14 @@ function extend_print_node_expanded!(f, pn::PrintNode, a::T; unwrap=identity) wh
 
 	pn
 end
-extend_print_node_expanded!(pn, x) = extend_print_node_expanded!(x->(x,""), pn, x)
+extend_print_node_expanded!(pn, x) = extend_print_node_expanded!(y->(y,""), pn, x)
+extend_print_node_expanded!(pn, x::AbstractArray) = extend_print_node_expanded!(p->(p[2],array_key_str(p[1])), pn, x; unwrap=pairs)
 extend_print_node_expanded!(pn, x::NamedTuple) = extend_print_node_expanded!(p->(p[2],nt_key_str(p[1])*" ="), pn, x; unwrap=pairs)
 extend_print_node_expanded!(pn, x::AbstractDict{<:Union{String,Symbol,Char,Number,DataType}}) =
 	extend_print_node_expanded!(p->(p[2],dict_key_str(p[1]) * " =>"), pn, x)
 
 
-function extend_print_node!(pn::PrintNode, x::T) where T<:Union{<:Tuple,<:NamedTuple}
+function extend_print_node!(pn::PrintNode, x::T) where T<:Union{<:Tuple,<:NamedTuple,<:AbstractArray,<:AbstractSet,<:AbstractDict}
 	if should_collapse(T)
 		extend_print_node_collapsed!(pn, x)
 	else
@@ -350,14 +356,6 @@ function extend_print_node!(pn::PrintNode, x::T) where T<:Union{<:Tuple,<:NamedT
 	end
 end
 
-
-function extend_print_node!(pn::PrintNode, x::T) where T<:Union{<:AbstractArray,<:AbstractSet,<:AbstractDict}
-	if should_collapse(T)
-		extend_print_node_collapsed!(pn, x)
-	else
-		extend_print_node_expanded!(pn, x)
-	end
-end
 
 
 function extend_print_node!(pn::PrintNode, (k,v)::Pair{<:Union{String,Symbol,Char,Number,DataType}})
