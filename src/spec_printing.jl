@@ -68,7 +68,8 @@ PrintNode(context, title) = PrintNode(context, PrintTitle(title))
 PrintNode(context) = PrintNode(context, PrintTitle())
 
 function Base.show(io::IO, pn::PrintNode)
-	chars_remaining = pn.context.line_length - pn.context.depth*3
+	# gather items and figure out remaining space
+	n_chars_remaining = pn.context.line_length - pn.context.depth*3
 	n_limited = 0
 	items = PrintTitleElement[]
 	for item in pn.title.items
@@ -76,22 +77,22 @@ function Base.show(io::IO, pn::PrintNode)
 			item = _materialize_string(item)
 		end
 		if item isa AbstractString
-			chars_remaining -= length(item)
+			n_chars_remaining -= length(item)
 		elseif item isa LimitedString
 			n_limited += 1
 		end
 		item !== nothing && push!(items, item)
 	end
-
+	n_chars_remaining -= length(items)-1 # adjust for spaces between items
 
 	# print
 	first = true
 	for item in items
 		if item isa LimitedString
-			max_n = div(chars_remaining, n_limited, RoundUp)
+			max_n = div(n_chars_remaining, n_limited, RoundUp)
 			item = _materialize_string(item; max_n)
 			n_limited -= 1
-			chars_remaining -= length(item)
+			n_chars_remaining -= length(item)
 		end
 
 		first || print(io, ' ')
