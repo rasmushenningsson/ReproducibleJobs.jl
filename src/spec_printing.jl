@@ -41,13 +41,10 @@ function _materialize_string(ho::HashOridinal)
 end
 
 
-struct LimitedString{A,K}
-	args::A
-	kwargs::K
-	LimitedString(args...; kwargs...) = new{typeof(args),typeof(kwargs)}(args, kwargs)
+struct LimitedString
+	x::Any
 end
-_materialize_string(ls::LimitedString; max_n::Int) =
-	limited_string(max_n, ls.args...; ls.kwargs...)
+_materialize_string(ls::LimitedString; max_n::Int) = limited_string(max_n, ls.x)
 
 
 const PrintTitleElement = Union{String, AnnotatedString, HashOridinal, LimitedString}
@@ -156,22 +153,22 @@ dict_key_str(k) = styled"{blue:$k}"
 nt_item_str((k,v)::Pair) = nt_key_str(k) * "=" * item_str(v)
 dict_item_str((k,v)::Pair) = dict_key_str(k) * "=>" * item_str(v)
 
-limited_string(max_n, v::AbstractVector; kwargs...) =
-	_limited_string(item_str, max_n, v; prefix="[", sep=", ", suffix="]", kwargs...)
+limited_string(max_n, v::AbstractVector) =
+	_limited_string(item_str, max_n, v; prefix="[", sep=", ", suffix="]")
 
-limited_string(max_n, s::T; kwargs...) where T<:AbstractSet =
-	_limited_string(item_str, max_n, s; prefix=styled"{magenta:$(_nameof(T))}([", sep=", ", suffix="])", kwargs...)
+limited_string(max_n, s::T) where T<:AbstractSet =
+	_limited_string(item_str, max_n, s; prefix=styled"{magenta:$(_nameof(T))}([", sep=", ", suffix="])")
 
-limited_string(max_n, d::T; kwargs...) where T<:AbstractDict =
-	_limited_string(dict_item_str, max_n, d; prefix=styled"{magenta:$(_nameof(T))}(", sep=", ", suffix=")", kwargs...)
+limited_string(max_n, d::T) where T<:AbstractDict =
+	_limited_string(dict_item_str, max_n, d; prefix=styled"{magenta:$(_nameof(T))}(", sep=", ", suffix=")")
 
-function limited_string(max_n, tup::Tuple; kwargs...)
+function limited_string(max_n, tup::Tuple)
 	suffix = length(tup) == 1 ? ",)" : ")"
-	_limited_string(item_str, max_n, tup; prefix="(", sep=", ", suffix, kwargs...)
+	_limited_string(item_str, max_n, tup; prefix="(", sep=", ", suffix)
 end
 
-limited_string(max_n, nt::NamedTuple; kwargs...) =
-	_limited_string(nt_item_str, max_n, pairs(nt); prefix="(; ", sep=", ", suffix=")", kwargs...)
+limited_string(max_n, nt::NamedTuple) =
+	_limited_string(nt_item_str, max_n, pairs(nt); prefix="(; ", sep=", ", suffix=")")
 
 
 function limited_string(max_n, s::AbstractString)
