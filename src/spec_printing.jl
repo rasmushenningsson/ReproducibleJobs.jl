@@ -31,18 +31,6 @@ struct HashOridinal
 	context::PrintContext
 	h::Deduplicators.Hash
 end
-
-# # Deprecated
-# Base.length(ho::HashOridinal) = 3 # TODO: Remove this function after refactoring is complete
-
-# # Deprecated
-# function Base.show(io::IO, ho::HashOridinal)
-# 	if ho.context.hashes[ho.h] > 1
-# 		ordinal = get!(ho.context.hash_ordinals, ho.h, length(ho.context.hash_ordinals)+1)
-# 		print(io, styled"{blue:#$ordinal}")
-# 	end
-# end
-
 function _materialize_string(ho::HashOridinal)
 	if ho.context.hashes[ho.h] > 1
 		ordinal = get!(ho.context.hash_ordinals, ho.h, length(ho.context.hash_ordinals)+1)
@@ -51,7 +39,6 @@ function _materialize_string(ho::HashOridinal)
 		nothing
 	end
 end
-
 
 
 struct LimitedString{A,K}
@@ -71,56 +58,19 @@ end
 PrintTitle() = PrintTitle([])
 PrintTitle(x::PrintTitleElement) = PrintTitle(PrintTitleElement[x])
 
-Base.isempty(pt::PrintTitle) = isempty(pt.items)
-
-function Base.length(pt::PrintTitle)
-	if isempty(pt)
-		0
-	else
-		sum(length, pt.items) + length(pt.items) - 1 # including space between items
-	end
-end
-
-# function Base.show(io::IO, pt::PrintTitle)
-# 	first = true
-# 	for item in pt.items
-# 		first || print(io, ' ')
-# 		print(io, item)
-# 		first = false
-# 	end
-# end
 
 
 
 mutable struct PrintNode
 	context::PrintContext
-	# title::AnnotatedString
 	title::PrintTitle
-	# h::Union{Deduplicators.Hash, Nothing}
 	children::Vector{PrintNode}
 end
 PrintNode(context, title::PrintTitle) = PrintNode(context, title, PrintNode[])
 PrintNode(context, title) = PrintNode(context, PrintTitle(title))
 PrintNode(context) = PrintNode(context, PrintTitle())
 
-# Base.show(io::IO, pn::PrintNode) = show(io, pn.title)
-
 function Base.show(io::IO, pn::PrintNode)
-	# chars_remaining(pn::PrintNode) = pn.context.line_length - pn.context.depth*3 - length(pn.title) - !isempty(pn.title)
-	# chars_remaining = pn.context.line_length - pn.context.depth*3
-
-	# # layout items in title, pass 1
-	# items = [item isa HashOridinal ? _materialize_string(item) : item for item in pn.title.items]
-
-	# n_limited = 0
-	# for item in items
-	# 	if item isa AbstractString
-	# 		chars_remaining -= length(item)
-	# 	elseif item isa LimitedString
-	# 		n_limited += 1
-	# 	end
-	# end
-
 	chars_remaining = pn.context.line_length - pn.context.depth*3
 	n_limited = 0
 	items = PrintTitleElement[]
@@ -155,38 +105,12 @@ end
 
 AbstractTrees.children(pn::PrintNode) = pn.children
 
-# function AbstractTrees.printnode(io::IO, pn::PrintNode) # Maybe rely on nodevalue or just show instead of printnode?
-# 	print(io, pn.title)
-
-# 	# if pn.h !== nothing && pn.context.hashes[pn.h] > 1
-# 	# 	ordinal = get!(pn.context.hash_ordinals, pn.h, length(pn.context.hash_ordinals)+1)
-# 	# 	print(io, styled" {blue:#$ordinal}")
-# 	# end
-
-# 	# ordinal = get(pn.context.duplicates, pn.h, 0)
-# 	# ordinal > 0 && print(io, styled" {blue:#$ordinal}")
-# end
-
-
-
 
 function extend_title!(pn::PrintNode, new)
 	@assert isempty(pn.children) "Cannot change title after node has children"
-	# pn.title = isempty(pn.title) ? convert(AnnotatedString,new) : pn.title*" "*new
 	push!(pn.title.items, new)
 	pn
 end
-
-# function set_hash!(pn::PrintNode, h)
-# 	@assert isempty(pn.children) "Cannot set hash after node has children"
-# 	@assert pn.h===nothing "Hash already set"
-# 	pn.h = h
-# 	pn
-# end
-
-
-# chars_remaining(pn::PrintNode) = pn.context.line_length - pn.context.depth*3 - length(pn.title) - !isempty(pn.title)
-
 
 function _limited_string(f, max_n, items; prefix, sep, suffix)
 	parts = Union{String,AnnotatedString}[prefix]
@@ -355,13 +279,8 @@ function extend_print_node!(pn::PrintNode, spec::Spec)
 
 	extend_title!(pn, HashOridinal(pn.context, h))
 
-	if add_hash!(pn.context, h)
-		# Seen before
-		# get!(pn.context.duplicates, h, length(pn.context.duplicates)+1)
-	else
-		# First time
-		# push!(pn.context.hashes, h)
-
+	if !add_hash!(pn.context, h)
+		# First time we see this item
 		context2 = descend(pn.context)
 		for a in spec.sa.args
 			push!(pn.children, build_print_node(context2, a))
@@ -375,10 +294,6 @@ function extend_print_node!(pn::PrintNode, spec::Spec)
 end
 
 
-# function extend_print_node_collapsed!(pn::PrintNode, a::T; suffix_space=0) where T
-# 	extend_title!(pn, limited_string(chars_remaining(pn)-suffix_space, a))
-# 	pn
-# end
 extend_print_node_collapsed!(pn::PrintNode, a::T) where T = extend_title!(pn, LimitedString(a))
 
 function extend_print_node_expanded!(f, pn::PrintNode, a::T; unwrap=identity) where T
@@ -435,36 +350,9 @@ end
 
 
 
-
-# function extend_print_node!(pn::PrintNode, r::AbstractRange; suffix_space=0) # This is need to not dispatch to the AbstractArray case
-# 	extend_title!(pn, limited_string(chars_remaining(pn)-suffix_space, item_str(r)))
-# 	pn
-# end
 # This is need to not dispatch to the AbstractArray case
 extend_print_node!(pn::PrintNode, r::AbstractRange) = extend_title!(pn, LimitedString(item_str(r)))
 
-
-
-# function extend_print_node!(pn::PrintNode, ro::ReadOnly{T}; suffix_space=0) where T
-# 	set_hash!(pn, ro.h)
-# 	if ro.h in pn.context.hashes
-# 		# Seen before
-# 		get!(pn.context.duplicates, ro.h, length(pn.context.duplicates)+1)
-# 		extend_title!(pn, styled"{magenta:$(_nameof(T))}")
-# 	else
-# 		# First time
-# 		push!(pn.context.hashes, ro.h)
-# 		# extend_title!(pn, limited_string(chars_remaining(pn)-4, item_str(ro.value))) # make some space for ordinal at end
-# 		extend_print_node!(pn, ro.value; suffix_space=suffix_space+5)
-# 	end
-# 	pn
-# end
-
-
-# function extend_print_node!(pn::PrintNode, x; suffix_space=0)
-# 	extend_title!(pn, limited_string(chars_remaining(pn)-suffix_space, item_str(x)))
-# 	pn
-# end
 extend_print_node!(pn::PrintNode, x) = extend_title!(pn, LimitedString(item_str(x)))
 
 
