@@ -115,8 +115,6 @@ function _limited_string(f, max_n, items; prefix, sep, suffix)
 	n_remaining = max_n - length(prefix) - length(suffix)
 	n_remaining = max(n_remaining, 10) # We need to print something...
 
-	sep_len = length(sep)
-
 	# Convert enough items to strings
 	n_items = length(items)
 	for (i,x) in enumerate(items)
