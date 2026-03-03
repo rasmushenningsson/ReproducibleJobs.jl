@@ -55,6 +55,8 @@ dict_item_str((k,v)::Pair) = dict_key_str(k) * "=>" * item_str(v)
 
 
 function _print_limited_string(f, io, max_n, items; prefix, sep, suffix)
+	sep isa Function || (sep = Returns(sep))
+
 	n_printed = 0
 	print(io, prefix)
 	n_printed += length(prefix)
@@ -67,7 +69,7 @@ function _print_limited_string(f, io, max_n, items; prefix, sep, suffix)
 	curr::Union{String,AnnotatedString} = ""
 	for (i,x) in enumerate(items)
 		curr *= f(x)
-		i != n_items && (curr *= sep)
+		i != n_items && (curr *= sep(i))
 
 		len = length(curr)
 		if len < n_remaining-3
@@ -127,10 +129,19 @@ function print_limited_string(io, max_n, s::AbstractString)
 end
 
 
-function print_limited_string(io, max_n, a::AbstractArray) # For matrices and higher-dimensional tensors
-	# TODO: Improve how type info is written
-	s = repr(a; context=(:compact=>true, :short=>true))
-	print_limited_string(io, max_n, s)
+function _permuted_array_sep(p::T, i) where T<:Tuple
+	n = length(p)
+	for (k,x) in enumerate(reverse(p))
+		mod(i, x) == 0 && return ';'^(n-k+1+(k!=n)) * ' ' # complicated rules for how many ; to use to separate between dimensions
+	end
+	" "
+end
+_permuted_array_sep(sz) = i->_permuted_array_sep(cumprod(sz), i)
+
+function print_limited_string(io, max_n, a::AbstractArray{T,N}) where {T,N} # For matrices and higher-dimensional tensors
+	pa = PermutedDimsArray(a, (2,1,(3:N)...)) # Print as row, column, trailing
+	sz = size(pa)
+	_print_limited_string(item_str, io, max_n, pa; prefix="[", sep=_permuted_array_sep(sz), suffix="]")
 end
 
 
