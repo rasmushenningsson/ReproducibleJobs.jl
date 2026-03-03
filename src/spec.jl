@@ -1,9 +1,12 @@
 mutable struct SpecArgs # TODO: Add template parameters for args/kwargs? Or find a another way to handle types better?
 	f::Any
-	args::Union{ROVec,ROBitVec} # NB: BitVectors are possible due to canonicalization of args
-	kwargs::ROVec
+	# args::Union{ROVec,ROBitVec} # NB: BitVectors are possible due to canonicalization of args
+	# kwargs::ROVec
+	args::Tuple
+	kwargs::NamedTuple
 	function SpecArgs(f, args, kwargs)
-		@assert issorted(kwargs; by=first)
+		# @assert issorted(kwargs; by=first)
+		@assert issorted(keys(kwargs))
 		new(f, args, kwargs)
 	end
 end
@@ -16,7 +19,7 @@ Base.isequal(a::SpecArgs, b::SpecArgs) = isequal(a.f, b.f) && isequal(a.args, b.
 Deduplicators.deduplicate_type(::Type{SpecArgs}) = true
 Deduplicators.deduplication_pointer(sa::SpecArgs) = pointer_from_objref(sa)
 function Deduplicators.deduplicate_children!(d, sa::SpecArgs; kwargs...)
-	f = sa.f # TODO: Should this be processed somehow?
+	f = sa.f # TODO: Should this be processed somehow? Probably not.
 	a = deduplicate!(d, sa.args; kwargs...)
 	kw = deduplicate!(d, sa.kwargs; kwargs...)
 	if f === sa.f && a === sa.args && kw == sa.kwargs
@@ -26,14 +29,40 @@ function Deduplicators.deduplicate_children!(d, sa::SpecArgs; kwargs...)
 	end
 end
 function Deduplicators.deduplication_hash(d, sa::SpecArgs)
+	# f = sa.f
+	# a = Deduplicators.lookup_hash(d, parent(sa.args))
+	# @assert a !== nothing # Deduplication of args will be done before this, so we can assume it is !== nothing
+	# kw = Deduplicators.lookup_hash(d, parent(sa.kwargs))
+	# @assert kw !== nothing # Deduplication of kwargs will be done before this, so we can assume it is !== nothing
+	# Deduplicators.compute_hash(d, (Deduplicators.TypeTag(:SpecArgs), f, a, kw))
+
+	# TODO: Could we make this more efficient? (Is it a problem? Probably not.)
 	f = sa.f
-	a = Deduplicators.lookup_hash(d, parent(sa.args))
-	@assert a !== nothing # Deduplication of args will be done before this, so we can assume it is !== nothing
-	kw = Deduplicators.lookup_hash(d, parent(sa.kwargs))
-	@assert kw !== nothing # Deduplication of kwargs will be done before this, so we can assume it is !== nothing
+	a = Deduplicators.deduplication_hash(d, sa.args)
+	kw = Deduplicators.deduplication_hash(d, sa.kwargs)
 	Deduplicators.compute_hash(d, (Deduplicators.TypeTag(:SpecArgs), f, a, kw))
 end
 Deduplicators.deduplication_copy(sa::SpecArgs) = sa
+
+
+
+function Deduplicators.cache_save(io, name, spec::SpecArgs)
+	# Save as a group
+	g = JLD2.Group(io, name)
+	g["type"] = "SpecArgs"
+	g["f"] = spec.f # Is this the best I can do?
+	Deduplicators.cache_save(g, "args", spec.args)
+	Deduplicators.cache_save(g, "kwargs", spec.kwargs)
+	nothing
+end
+function Deduplicators.cache_load(cache::Cache, ::Val{:SpecArgs}, g)
+	f = g["f"]
+	args = Deduplicators.cache_load(cache, g, "args")
+	kwargs = Deduplicators.cache_load(cache, g, "kwargs")
+	sa = SpecArgs(f, args, kwargs)
+	deduplicate!(cache.deduplicator, sa; transfer_ownership=true)
+end
+
 
 
 
@@ -45,24 +74,28 @@ Deduplicators.deduplication_copy(sa::SpecArgs) = sa
 
 
 
-function _get_kwarg_index(kwargs::ROVec{T}, name::Symbol) where T
-	r = searchsorted(kwargs, name=>nothing; by=first)
-	isempty(r) && return nothing
-	only(r)
-end
+# function _get_kwarg_index(kwargs::ROVec{T}, name::Symbol) where T
+# 	r = searchsorted(kwargs, name=>nothing; by=first)
+# 	isempty(r) && return nothing
+# 	only(r)
+# end
 
-function _get_kwarg(f, kwargs::ROVec{T}, name::Symbol) where T
-	i = _get_kwarg_index(kwargs, name)
-	i === nothing ? f() : last(kwargs[i])
-end
-_get_kwarg(kwargs::ROVec{T}, name::Symbol, default) where T =
-	_get_kwarg(Returns(default), kwargs, name)
-_get_kwarg(kwargs::ROVec{T}, name::Symbol) where T =
-	_get_kwarg(()->throw(KeyError(name)), kwargs, name)
+# function _get_kwarg(f, kwargs::ROVec{T}, name::Symbol) where T
+# 	i = _get_kwarg_index(kwargs, name)
+# 	i === nothing ? f() : last(kwargs[i])
+# end
+# _get_kwarg(kwargs::ROVec{T}, name::Symbol, default) where T =
+# 	_get_kwarg(Returns(default), kwargs, name)
+# _get_kwarg(kwargs::ROVec{T}, name::Symbol) where T =
+# 	_get_kwarg(()->throw(KeyError(name)), kwargs, name)
 
 
-_get_kwarg(sa::SpecArgs, args...) = _get_kwarg(sa.kwargs, args...)
-_get_kwarg(f, sa::SpecArgs) = _get_kwarg(f, sa.kwargs)
+# _get_kwarg(sa::SpecArgs, args...) = _get_kwarg(sa.kwargs, args...)
+# _get_kwarg(f, sa::SpecArgs) = _get_kwarg(f, sa.kwargs)
+
+_get_kwarg(sa::SpecArgs, key::Symbol, default) = get(sa.kwargs, key, default)
+_get_kwarg(f, sa::SpecArgs, key::Symbol) = get(f, sa.kwargs, key)
+_get_kwarg(sa::SpecArgs, key::Symbol) = getindex(sa.kwargs, key)
 
 
 abstract type AbstractSpecOp end
@@ -75,6 +108,12 @@ struct Forward <: AbstractSpecOp end # Is this a good name?
 Deduplicators.deduplicate_type(::Type{<:AbstractSpecOp}) = false
 Deduplicators.deconstruct_weak_rec(x::T) where T<:AbstractSpecOp = x
 Deduplicators.reconstruct_weak_rec(x::T) where T<:AbstractSpecOp = x
+
+function Deduplicators.cache_save(io, name, x::AbstractSpecOp)
+	io[name] = x
+	nothing
+end
+
 
 
 # Are these still needed?
@@ -105,7 +144,8 @@ Base.Broadcast.broadcastable(sa::SpecArgs) = Ref(sa) # treat as scalar for broad
 # Usually accessed through getproperty
 get_function(spec::Spec) = spec.sa.f
 get_args(spec::Spec) = spec.sa.args
-get_kwargs(spec::Spec) = KwargVector(spec.sa.kwargs)
+get_kwargs(spec::Spec) = spec.sa.kwargs
+# get_kwargs(spec::Spec) = KwargVector(spec.sa.kwargs)
 
 
 function Base.getproperty(spec::Spec, s::Symbol)
@@ -140,24 +180,19 @@ Deduplicators.reconstruct(::Type{Spec}, (sa,op)::Tuple{SpecArgs,<:Any}) = Spec(s
 # manage(spec::Spec) = spec # Already managed
 
 function create_spec(f, args...; deduplicator=default_deduplicator(), kwargs...)
-	# a = deduplicate!(deduplicator, collect(args))
-	# kw = deduplicate!(deduplicator, collect(kwargs))
-	a = deduplicate!(deduplicator, isempty(args) ? [] : collect(args)) # Use Any as eltype if no args
+	# a = deduplicate!(deduplicator, isempty(args) ? [] : collect(args)) # Use Any as eltype if no args
 
-	# kw = deduplicate!(deduplicator, isempty(kwargs) ? [] : collect(kwargs)) # Use Any as eltype if no kwargs
-	kw = isempty(kwargs) ? [] : sort!(collect(kwargs); by=first) # Use Any as eltype if no kwargs
-	kw = deduplicate!(deduplicator, kw)
-	sa = deduplicate!(deduplicator, SpecArgs(f, a, kw))
+	# kw = isempty(kwargs) ? [] : sort!(collect(kwargs); by=first) # Use Any as eltype if no kwargs
+	# kw = deduplicate!(deduplicator, kw)
+	# sa = deduplicate!(deduplicator, SpecArgs(f, a, kw))
+	# spec = Spec(sa)
+
+	kw = values(kwargs)
+	kw = NamedTuple{TupleTools.sort(keys(kw))}(kw)
+
+	sa = deduplicate!(deduplicator, SpecArgs(f, args, kw))
 	spec = Spec(sa)
 
-	# sa = SpecArgs(f, ReadOnlyArray(collect(Any, args)), ReadOnlyArray(collect(Pair{Symbol,Any}, kwargs)))
-	# spec = Spec(sa)
-	# deduplicate!(deduplicator, spec)
-
-	# p = deduplicate_leaves(deduplicator)∘copy_arg
-	# sa = create_spec_args(p, f, args, kwargs)
-	# sa = deduplicator(sa)
-	# Spec(sa)
 end
 
 
@@ -194,11 +229,11 @@ function _visit_dependencies(f, d::Dict{K,V}) where {K,V}
 end
 
 function _visit_dependencies(f, nt::T) where T<:NamedTuple
-	foreach(x->visit_dependencies(f,x), nt)
+	foreach(x->_visit_dependencies(f,x), nt)
 end
 
 function _visit_dependencies(f, df::DataFrame)
-	foreach(col->visit_dependencies(f,col), eachcol(df)) # This handles the somewhat strange case of putting Specs as elements of DataFrame column vectors
+	foreach(col->_visit_dependencies(f,col), eachcol(df)) # This handles the somewhat strange case of putting Specs as elements of DataFrame column vectors
 end
 
 function _visit_dependencies(f, x::T) where T
@@ -211,6 +246,8 @@ function _visit_dependencies(f, x::T) where T
 		x
 	end
 end
+
+
 
 
 # Can/should we implement replace_dependencies in a more general fashion? (So that custom, non-destructable, user types do not need to add methods.)

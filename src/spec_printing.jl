@@ -341,7 +341,7 @@ function extend_print_node!(pn::PrintNode, spec::Spec)
 		for a in spec.sa.args
 			push!(pn.children, build_print_node(context2, a))
 		end
-		for (k,v) in spec.sa.kwargs
+		for (k,v) in pairs(spec.sa.kwargs)
 			startswith(string(k), "__") && continue
 			push!(pn.children, build_print_node(context2, v; prefix=styled"{blue:$k:}"))
 		end
