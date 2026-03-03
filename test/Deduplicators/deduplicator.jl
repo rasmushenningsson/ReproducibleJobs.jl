@@ -868,13 +868,13 @@ function run_deduplicator_tests()
 			@test @inferred(deduplicate!(d, x2)) === x2
 		end
 		@testset "$x" for x in (Int[;;], Int[;;;], zeros(Int,3,0), zeros(Int,0,3), zeros(Int,0,3,0))
-			x2 = deduplicate!(d, x)
+			x2 = @inferred deduplicate!(d, x)
 			@test x2 == x
 			@test x2 isa ROArray{eltype(x), ndims(x)}
 			@test parent(x2) !== x
 
-			@test deduplicate!(d, x) === x2
-			@test deduplicate!(d, x2) === x2
+			@test @inferred deduplicate!(d, x) === x2
+			@test @inferred deduplicate!(d, x2) === x2
 		end
 		let x = Union{Int,Nothing}[]
 			x2 = deduplicate!(d, x)
@@ -884,6 +884,17 @@ function run_deduplicator_tests()
 
 			@test deduplicate!(d, x) === x2
 			@test deduplicate!(d, x2) === x2
+		end
+
+		@testset "Dict{$K,$V}" for (K,V) in ((Int,Int),(Int,String))
+			x = Dict{K,V}()
+			x2 = @inferred deduplicate!(d, x)
+			@test x2 == x
+			@test x2 !== x
+			@test x2 isa Dict{K,V}
+
+			@test @inferred deduplicate!(d, x) === x2
+			@test @inferred deduplicate!(d, x2) === x2
 		end
 	end
 end
