@@ -1215,7 +1215,7 @@ function run_cache_storage_tests()
 	end
 
 	@testset "Empty" begin
-		@testset "$T" for T in (Int, String)
+		@testset "$T" for T in (Int, String, Regex)
 			x = T[]
 			cache = Cache(CacheKey, Deduplicator(); dir)
 			key = new_key(cache)
@@ -1236,8 +1236,9 @@ function run_cache_storage_tests()
 				@test custom == []
 			end
 		end
-		@testset "$T" for T in (Regex,)
-			x = T[]
+
+		@testset "SparseMatrixCSC" begin
+			x = sparse(Int[], Int[], Float64[], 5, 3)
 			cache = Cache(CacheKey, Deduplicator(); dir)
 			key = new_key(cache)
 			x2 = cache_get!(Returns(x), cache, key; use_disk=true)
@@ -1246,40 +1247,30 @@ function run_cache_storage_tests()
 			empty!(cache.mem) # force loading from disk
 			x3 = cache_get!(error_fun, cache, key; use_disk=true)
 			@test x3 == x
-			@test x3 isa ROVec{Any} # IS THIS WHAT WE WANT?
+			@test x3 isa SparseMatrixCSC{Float64,Int}
 			@test deduplicate!(cache.deduplicator, x3) === x3
 
 			h5open(key2path(cache, key), "r") do h5
 				root = h5["root"]
-				@test read(root, "type") == "Array"
-				@test read(root, "size") == (; var"1"=0,)
+				@test read(root, "type") == "SparseMatrixCSC"
+				@test read(root, "length") == 5
+				@test read(root, "1") == 5
+				@test read(root, "2") == 3
+				colptr = read(root, "3")
+				@test colptr == x.colptr
+				@test colptr isa Vector{Int}
+				rowval = read(root, "4")
+				@test isempty(rowval)
+				@test rowval isa Vector{Int}
+				nzval = read(root, "5")
+				@test isempty(nzval)
+				@test nzval isa Vector{Float64}
 
 				types, custom = extract_jld2_types(h5)
-				@test _fuzzy_pop!(types, r"(^|\.)Tuple") # Used for non-inlined array size
 				@test types == []
 				@test custom == []
 			end
 		end
-
-		# WIP
-		# @testset "SparseMatrixCSC" begin
-		# 	x = sparse(Int[],Int[],Float64[],5,3)
-		# 	@show typeof(x)
-		# 	cache = Cache(CacheKey, Deduplicator(); dir)
-		# 	key = new_key(cache)
-		# 	x2 = cache_get!(Returns(x), cache, key; use_disk=true)
-		# 	@test x2 == x
-		# 	@test deduplicate!(cache.deduplicator, x2) === x2
-		# 	empty!(cache.mem) # force loading from disk
-		# 	x3 = cache_get!(error_fun, cache, key; use_disk=true)
-		# 	@test x3 == x
-		# 	@test x3 isa SparseMatrixCSC{Float64,Int}
-		# 	@test deduplicate!(cache.deduplicator, x3) === x3
-
-		# 	h5open(key2path(cache, key), "r") do h5
-		# 		# ...
-		# 	end
-		# end
 	end
 end
 

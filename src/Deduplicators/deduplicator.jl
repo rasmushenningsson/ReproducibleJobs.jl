@@ -366,8 +366,10 @@ end
 _fix_pair_eltype(v::Array{<:Pair{K,V}}) where {K,V} = v
 
 
-function deduplication_hash(d, a::Array{T}) where T
-	if _deduplicate_eltype(T)
+function deduplication_hash(d, a::Array{T,N}) where {T,N}
+	if isempty(a)
+		compute_hash(d, (T, size(a))) # The size is needed to distinguish between Vector/Matrix but also between e.g. a 3×0 and a 0×0 matrix.
+	elseif _deduplicate_eltype(T)
 		# # Replace deduplicatable children by their hash
 		# compute_hash(d, (hash_or_value.(Ref(d), a))
 

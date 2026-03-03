@@ -248,7 +248,10 @@ _index_to_string(i::Int) = string(i)
 _index_to_string(I::CartesianIndex) = join(Tuple(I), '_')
 
 function cache_save(io, name, result::Array{T,N}) where {T,N}
-	if !store_eltype_inline(T)
+	if store_eltype_inline(T) || isempty(result)
+		# Rely on JLD2 for inlined eltypes - and to store type info for empty arrays
+		io[name] = result
+	else
 		# Save as a group
 		g = JLD2.Group(io, name)
 		g["type"] = "Array"
@@ -256,8 +259,6 @@ function cache_save(io, name, result::Array{T,N}) where {T,N}
 		for (ind,x) in pairs(result)
 			cache_save(g, _index_to_string(ind), x)
 		end
-	else
-		io[name] = result
 	end
 	nothing
 end

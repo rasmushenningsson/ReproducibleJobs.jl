@@ -854,27 +854,27 @@ function run_deduplicator_tests()
 		end
 	end
 
-	# TODO: We might want to canonicalize empty arrays to Any[] because what else can we get when loading from file?
-	#       But that would be bad for inferring the deduplicate! return type...
 	@testset "Empty" begin
-		d = Deduplicator()
-		let x = Int[]
+		d = Deduplicator() # Keep the same deduplicator for all tests below to ensure that they each empty array gets their own hash
+
+		@testset "$T" for T in (Int, String, Regex)
+			x = T[]
 			x2 = @inferred deduplicate!(d, x)
 			@test x2 == x
-			@test x2 isa ROVec{Int}
+			@test x2 isa ROVec{T}
 			@test parent(x2) !== x
 
 			@test @inferred(deduplicate!(d, x)) === x2
 			@test @inferred(deduplicate!(d, x2)) === x2
 		end
-		let x = String[]
-			x2 = @inferred deduplicate!(d, x)
+		@testset "$x" for x in (Int[;;], Int[;;;], zeros(Int,3,0), zeros(Int,0,3), zeros(Int,0,3,0))
+			x2 = deduplicate!(d, x)
 			@test x2 == x
-			@test x2 isa ROVec{String}
+			@test x2 isa ROArray{eltype(x), ndims(x)}
 			@test parent(x2) !== x
 
-			@test @inferred(deduplicate!(d, x)) === x2
-			@test @inferred(deduplicate!(d, x2)) === x2
+			@test deduplicate!(d, x) === x2
+			@test deduplicate!(d, x2) === x2
 		end
 		let x = Union{Int,Nothing}[]
 			x2 = deduplicate!(d, x)
@@ -885,15 +885,5 @@ function run_deduplicator_tests()
 			@test deduplicate!(d, x) === x2
 			@test deduplicate!(d, x2) === x2
 		end
-		# TODO: Enable
-		# let x = Regex[]
-		# 	x2 = deduplicate!(d, x)
-		# 	@test x2 == x
-		# 	@test x2 isa ROVec{Regex}
-		# 	@test parent(x2) !== x
-
-		# 	@test deduplicate!(d, x) === x2
-		# 	@test deduplicate!(d, x2) === x2
-		# end
 	end
 end
