@@ -25,8 +25,6 @@ function ProcessingException(sa::SpecArgs, causes::AbstractVector)
 	ProcessingException(chosen.inner, chosen.inner_backtrace, vcat(chosen.stack, sa))
 end
 
-manage(e::ProcessingException) = e # Already managed
-
 
 function Base.showerror(io::IO, e::ProcessingException{T}) where T
 	println(io, "ProcessingException ")
