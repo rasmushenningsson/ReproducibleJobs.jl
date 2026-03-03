@@ -41,10 +41,106 @@ function _materialize_string(ho::HashOridinal)
 end
 
 
+
+nt_key_str(k) = styled"{blue:$k}"
+dict_key_str(k) = styled"{blue:$k}"
+array_key_str(::Any) = "" # Used for Vectors
+function array_key_str(ci::CartesianIndex) # Used for Arrays of dim >= 2
+	str = join(Tuple(ci),',')
+	styled"{blue:$str:}"
+end
+
+nt_item_str((k,v)::Pair) = nt_key_str(k) * "=" * item_str(v)
+dict_item_str((k,v)::Pair) = dict_key_str(k) * "=>" * item_str(v)
+
+
+function _print_limited_string(f, io, max_n, items; prefix, sep, suffix)
+	n_printed = 0
+	print(io, prefix)
+	n_printed += length(prefix)
+
+	n_remaining = max_n - length(prefix) - length(suffix)
+	n_remaining = max(n_remaining, 10) # Print at least 10 chars of content
+
+	n_items = length(items)
+
+	curr::Union{String,AnnotatedString} = ""
+	for (i,x) in enumerate(items)
+		curr *= f(x)
+		i != n_items && (curr *= sep)
+
+		len = length(curr)
+		if len < n_remaining-3
+			# We are sure to fit the current string, so we can print it immediately
+			print(io, curr)
+			curr = ""
+			n_printed += len
+			n_remaining -= len
+		elseif len > n_remaining
+			break # No need to continue, the remainder will not fit
+		end
+		# Continue extending curr because we are not sure what will fit and whether to add ellipsis or not
+	end
+
+	if !isempty(curr)
+		len = length(curr)
+		if len > n_remaining # Cut string and add ellipsis if it doesn't fit
+			curr = first(curr, n_remaining-3) * "..."
+			len = length(curr)
+		end
+		print(io, curr)
+		n_printed += len
+	end
+
+
+	print(io, suffix)
+	n_printed += length(suffix)
+
+	n_printed
+end
+
+
+print_limited_string(io, max_n, v::AbstractVector) =
+	_print_limited_string(item_str, io, max_n, v; prefix="[", sep=", ", suffix="]")
+
+print_limited_string(io, max_n, s::T) where T<:AbstractSet =
+	_print_limited_string(item_str, io, max_n, s; prefix=styled"{magenta:$(_nameof(T))}([", sep=", ", suffix="])")
+
+print_limited_string(io, max_n, d::T) where T<:AbstractDict =
+	_print_limited_string(dict_item_str, io, max_n, d; prefix=styled"{magenta:$(_nameof(T))}(", sep=", ", suffix=")")
+
+function print_limited_string(io, max_n, tup::Tuple)
+	suffix = length(tup) == 1 ? ",)" : ")"
+	_print_limited_string(item_str, io, max_n, tup; prefix="(", sep=", ", suffix)
+end
+
+print_limited_string(io, max_n, nt::NamedTuple) =
+	_print_limited_string(nt_item_str, io, max_n, pairs(nt); prefix="(; ", sep=", ", suffix=")")
+
+
+function print_limited_string(io, max_n, s::AbstractString)
+	if length(s) > max_n
+		s = first(s, max(3, max_n-3)) * "..."
+	end
+	print(io, s)
+	length(s)
+end
+
+
+function print_limited_string(io, max_n, a::AbstractArray) # For matrices and higher-dimensional tensors
+	# TODO: Improve how type info is written
+	s = repr(a; context=(:compact=>true, :short=>true))
+	print_limited_string(io, max_n, s)
+end
+
+
+
 struct LimitedString
 	x::Any
 end
-_materialize_string(ls::LimitedString; max_n::Int) = limited_string(max_n, ls.x)
+function print_limited_string(io, max_n, ls::LimitedString)
+	print_limited_string(io, max_n, ls.x)
+end
 
 
 const PrintTitleElement = Union{String, AnnotatedString, HashOridinal, LimitedString}
@@ -88,15 +184,17 @@ function Base.show(io::IO, pn::PrintNode)
 	# print
 	first = true
 	for item in items
+		first || print(io, ' ')
+
 		if item isa LimitedString
 			max_n = div(n_chars_remaining, n_limited, RoundUp)
-			item = _materialize_string(item; max_n)
+			len = print_limited_string(io, max_n, item)
 			n_limited -= 1
-			n_chars_remaining -= length(item)
+			n_chars_remaining -= len
+		else
+			print(io, item)
 		end
 
-		first || print(io, ' ')
-		print(io, item)
 		first = false
 	end
 end
@@ -108,83 +206,6 @@ function extend_title!(pn::PrintNode, new)
 	@assert isempty(pn.children) "Cannot change title after node has children"
 	push!(pn.title.items, new)
 	pn
-end
-
-function _limited_string(f, max_n, items; prefix, sep, suffix)
-	parts = Union{String,AnnotatedString}[prefix]
-	n_remaining = max_n - length(prefix) - length(suffix)
-	n_remaining = max(n_remaining, 10) # We need to print something...
-
-	# Convert enough items to strings
-	n_items = length(items)
-	for (i,x) in enumerate(items)
-		s = f(x) * (i != n_items ? sep : "") # Skip separator for the last item
-		push!(parts, s)
-		n_remaining -= length(s)
-		n_remaining<=0 && break
-	end
-
-	if n_remaining>=0 && length(parts) == length(items)+1 # +1 due to the prefix string in parts
-		# The whole string fits!
-		push!(parts, suffix)
-	else
-		# We need to cut something off
-		n_remaining -= 3 # we need space for ellipsis
-
-		while n_remaining<0
-			s = pop!(parts)
-			n_remaining += length(s)
-			if n_remaining > 0
-				push!(parts, AnnotatedString(first(s,n_remaining)))
-				n_remaining = 0
-			end
-			n_remaining == 0 && break
-		end
-
-		push!(parts, "...", suffix)
-	end
-	join(parts)
-end
-
-nt_key_str(k) = styled"{blue:$k}"
-dict_key_str(k) = styled"{blue:$k}"
-array_key_str(::Any) = "" # Used for Vectors
-function array_key_str(ci::CartesianIndex) # Used for Arrays of dim >= 2
-	str = join(Tuple(ci),',')
-	styled"{blue:$str:}"
-end
-
-nt_item_str((k,v)::Pair) = nt_key_str(k) * "=" * item_str(v)
-dict_item_str((k,v)::Pair) = dict_key_str(k) * "=>" * item_str(v)
-
-limited_string(max_n, v::AbstractVector) =
-	_limited_string(item_str, max_n, v; prefix="[", sep=", ", suffix="]")
-
-limited_string(max_n, s::T) where T<:AbstractSet =
-	_limited_string(item_str, max_n, s; prefix=styled"{magenta:$(_nameof(T))}([", sep=", ", suffix="])")
-
-limited_string(max_n, d::T) where T<:AbstractDict =
-	_limited_string(dict_item_str, max_n, d; prefix=styled"{magenta:$(_nameof(T))}(", sep=", ", suffix=")")
-
-function limited_string(max_n, tup::Tuple)
-	suffix = length(tup) == 1 ? ",)" : ")"
-	_limited_string(item_str, max_n, tup; prefix="(", sep=", ", suffix)
-end
-
-limited_string(max_n, nt::NamedTuple) =
-	_limited_string(nt_item_str, max_n, pairs(nt); prefix="(; ", sep=", ", suffix=")")
-
-
-function limited_string(max_n, s::AbstractString)
-	length(s) <= max_n && return s
-	first(s, max(3, max_n-3)) * "..."
-end
-
-
-function limited_string(max_n, a::AbstractArray) # For matrices and higher-dimensional tensors
-	# TODO: Improve how type info is written
-	s = repr(a; context=(:compact=>true, :short=>true))
-	limited_string(max_n, s)
 end
 
 
