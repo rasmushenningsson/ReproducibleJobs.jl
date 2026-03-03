@@ -150,7 +150,14 @@ function compute(sa::SpecArgs, upstream::IdDict{Spec,Any})
 		sa_replaced = replace_dependencies(upstream, sa)
 		args = sa_replaced.args
 		kwargs = sa_replaced.kwargs
-		kwargs = (k=>v for (k,v) in sa.kwargs if !startswith(string(k),"__")) # TODO: Find a better way to get rid of __ kwargs?
+
+		# TODO: We can rewrite this more nicely now that kwargs is a NamedTuple
+		# kwargs = (k=>v for (k,v) in sa.kwargs if !startswith(string(k),"__")) # TODO: Find a better way to get rid of __ kwargs?
+		# kwargs = (k=>v for (k,v) in pairs(sa.kwargs) if !startswith(string(k),"__")) # TODO: Find a better way to get rid of __ kwargs?
+
+		# NamedTuple version
+		kwargs = NamedTuple{filter(k->!startswith(string(k),"__"), keys(kwargs))}(kwargs)
+
 
 		res = f(args...; kwargs...)
 		@assert res !== nothing "Computation of $f returned nothing"
@@ -312,7 +319,7 @@ function process_once!(scheduler::Scheduler, sa::SpecArgs, op::T; parent_f) wher
 			# The remaining args specify subresults of `CompoundResult`s
 			# sub = length(sa.args)==1 ? nothing : collect(String, @view(sa.args[2:end]))
 			sub = length(sa.args)==1 ? nothing : only(@view(sa.args[2:end])) # we only support one level atm
-			return_keys = _get_kwarg(sa.kwargs, :return_keys, false)
+			return_keys = _get_kwarg(sa, :return_keys, false)
 
 			# TODO: Cleanup and simplify code
 			if sub !== nothing || return_keys
