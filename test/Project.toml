@@ -2,6 +2,7 @@
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 H5Zzstd = "f6f2d980-1ec6-471c-a70d-0270e22f1103"
 HDF5 = "f67ccb44-e63f-5c2f-98bd-6dc0ccc4ba2f"
+JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
 ReadOnlyArrays = "988b38a3-91fc-5605-94a2-ee2116b3bd83"
 ReproducibleJobs = "aecc171b-6fa4-4f58-b49a-a8d1f07f0278"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
