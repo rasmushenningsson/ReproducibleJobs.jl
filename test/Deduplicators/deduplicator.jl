@@ -857,7 +857,7 @@ function run_deduplicator_tests()
 	@testset "Empty" begin
 		d = Deduplicator() # Keep the same deduplicator for all tests below to ensure that they each empty array gets their own hash
 
-		@testset "$T" for T in (Int, String, Regex)
+		@testset "$T" for T in (Int, String, Regex, ROVec{Int}, ROVec{Float64})
 			x = T[]
 			x2 = @inferred deduplicate!(d, x)
 			@test x2 == x
