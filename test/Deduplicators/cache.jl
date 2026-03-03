@@ -1236,6 +1236,50 @@ function run_cache_storage_tests()
 				@test custom == []
 			end
 		end
+		@testset "$T" for T in (Regex,)
+			x = T[]
+			cache = Cache(CacheKey, Deduplicator(); dir)
+			key = new_key(cache)
+			x2 = cache_get!(Returns(x), cache, key; use_disk=true)
+			@test x2 == x
+			@test deduplicate!(cache.deduplicator, x2) === x2
+			empty!(cache.mem) # force loading from disk
+			x3 = cache_get!(error_fun, cache, key; use_disk=true)
+			@test x3 == x
+			@test x3 isa ROVec{Any} # IS THIS WHAT WE WANT?
+			@test deduplicate!(cache.deduplicator, x3) === x3
+
+			h5open(key2path(cache, key), "r") do h5
+				root = h5["root"]
+				@test read(root, "type") == "Array"
+				@test read(root, "size") == (; var"1"=0,)
+
+				types, custom = extract_jld2_types(h5)
+				@test _fuzzy_pop!(types, r"(^|\.)Tuple") # Used for non-inlined array size
+				@test types == []
+				@test custom == []
+			end
+		end
+
+		# WIP
+		# @testset "SparseMatrixCSC" begin
+		# 	x = sparse(Int[],Int[],Float64[],5,3)
+		# 	@show typeof(x)
+		# 	cache = Cache(CacheKey, Deduplicator(); dir)
+		# 	key = new_key(cache)
+		# 	x2 = cache_get!(Returns(x), cache, key; use_disk=true)
+		# 	@test x2 == x
+		# 	@test deduplicate!(cache.deduplicator, x2) === x2
+		# 	empty!(cache.mem) # force loading from disk
+		# 	x3 = cache_get!(error_fun, cache, key; use_disk=true)
+		# 	@test x3 == x
+		# 	@test x3 isa SparseMatrixCSC{Float64,Int}
+		# 	@test deduplicate!(cache.deduplicator, x3) === x3
+
+		# 	h5open(key2path(cache, key), "r") do h5
+		# 		# ...
+		# 	end
+		# end
 	end
 end
 

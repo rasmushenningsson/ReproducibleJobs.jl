@@ -867,6 +867,15 @@ function run_deduplicator_tests()
 			@test @inferred(deduplicate!(d, x)) === x2
 			@test @inferred(deduplicate!(d, x2)) === x2
 		end
+		let x = String[]
+			x2 = @inferred deduplicate!(d, x)
+			@test x2 == x
+			@test x2 isa ROVec{String}
+			@test parent(x2) !== x
+
+			@test @inferred(deduplicate!(d, x)) === x2
+			@test @inferred(deduplicate!(d, x2)) === x2
+		end
 		let x = Union{Int,Nothing}[]
 			x2 = deduplicate!(d, x)
 			@test x2 == x
@@ -876,5 +885,15 @@ function run_deduplicator_tests()
 			@test deduplicate!(d, x) === x2
 			@test deduplicate!(d, x2) === x2
 		end
+		# TODO: Enable
+		# let x = Regex[]
+		# 	x2 = deduplicate!(d, x)
+		# 	@test x2 == x
+		# 	@test x2 isa ROVec{Regex}
+		# 	@test parent(x2) !== x
+
+		# 	@test deduplicate!(d, x) === x2
+		# 	@test deduplicate!(d, x2) === x2
+		# end
 	end
 end
