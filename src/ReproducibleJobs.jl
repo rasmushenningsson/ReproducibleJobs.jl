@@ -52,7 +52,7 @@ end
 
 include("Deduplicators/Deduplicators.jl")
 using .Deduplicators
-using .Deduplicators: ROArray, ROVec, ROMat
+using .Deduplicators: ROArray, ROVec, ROMat, ROBitVec
 
 
 # TODO: Revise this approach
