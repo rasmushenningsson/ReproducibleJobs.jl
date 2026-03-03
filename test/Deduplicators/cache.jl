@@ -1215,7 +1215,7 @@ function run_cache_storage_tests()
 	end
 
 	@testset "Empty" begin
-		@testset "$T" for T in (Int, String, Regex)
+		@testset "$T" for T in (Int, String, Regex, ROVec{Int}, ROVec{Float64})
 			x = T[]
 			cache = Cache(CacheKey, Deduplicator(); dir)
 			key = new_key(cache)
