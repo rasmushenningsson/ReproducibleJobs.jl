@@ -367,7 +367,8 @@ end
 # Calls deduplicate (for pointer-backed values)
 function _load_file(cache::Cache{K}, key::K, fp) where K
 	jldopen(fp, "r") do io
-		# TODO: Check that key matches?
+		original_key = cache_load(cache, io, "key")
+		@assert key == original_key
 		cache_load(cache, io, "root")
 	end
 end
@@ -375,7 +376,8 @@ end
 # Experimental CompoundResult support.
 function _load_compound_result_structure(cache::Cache{K}, key::K, fp) where K
 	jldopen(fp, "r") do io
-		# TODO: Check that key matches?
+		original_key = cache_load(cache, io, "key")
+		@assert key == original_key
 		cache_load_compound_result_structure(io["root"])
 	end
 end
@@ -390,6 +392,7 @@ end
 function _save_file(cache::Cache{K}, key::K, fp, result) where K
 	isdir(cache.dir) || mkdir(cache.dir)
 	jldopen(fp, "w"; compress=ZstdFilter()) do io # should we set compression level?
+		cache_save(io, "key", key)
 		cache_save(io, "root", result)
 	end
 end

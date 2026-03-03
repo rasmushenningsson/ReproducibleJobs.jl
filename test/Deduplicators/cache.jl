@@ -8,6 +8,7 @@ using SparseArrays
 using DataFrames
 using HDF5 # For raw reading of .jld2 files for testing purposes
 using H5Zzstd # For raw reading of .jld2 files for testing purposes
+using JLD2
 
 
 _reconstructed_type(::DeconstructedWeak{R}) where R = R
@@ -25,6 +26,18 @@ function Deduplicators.deduplication_hash(d, key::CacheKey)
 	Deduplicators.compute_hash(d, (Deduplicators.TypeTag(:CacheKey), key.f))
 end
 Deduplicators.deduplication_copy(key::CacheKey) = CacheKey(key.f)
+
+function Deduplicators.cache_save(io, name, result::CacheKey)
+	# Save as a group
+	g = JLD2.Group(io, name)
+	g["type"] = "CacheKey"
+	g["value"] = result.f
+	nothing
+end
+function Deduplicators.cache_load(cache::Cache, ::Val{:CacheKey}, g)
+	deduplicate!(cache.deduplicator, CacheKey(g["value"]); transfer_ownership=true)
+end
+
 
 
 

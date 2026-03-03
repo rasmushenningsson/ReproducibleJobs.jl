@@ -1,7 +1,7 @@
-mutable struct SpecArgs # Add template parameters for args/kwargs?
+mutable struct SpecArgs # TODO: Add template parameters for args/kwargs? Or find a another way to handle types better?
 	f::Any
-	args::ROVec # ROVec{Any}
-	kwargs::ROVec # ROVec{Pair{Symbol,Any}}
+	args::Union{ROVec,ROBitVec} # NB: BitVectors are possible due to canonicalization of args
+	kwargs::ROVec
 	function SpecArgs(f, args, kwargs)
 		@assert issorted(kwargs; by=first)
 		new(f, args, kwargs)
