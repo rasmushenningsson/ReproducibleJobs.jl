@@ -9,6 +9,10 @@ include("cache.jl")
 
 @testset "Deduplicators.jl" begin
 	run_hash_tests()
-	run_deduplicator_tests()
-	run_cache_tests()
+	@testset "Deduplicator" begin
+		run_deduplicator_tests()
+	end
+	@testset "Cache" begin
+		run_cache_tests()
+	end
 end
