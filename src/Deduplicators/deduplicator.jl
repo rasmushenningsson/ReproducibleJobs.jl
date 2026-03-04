@@ -95,6 +95,8 @@ function lookup_hash(d::Deduplicator, x::T) where T
 	p === nothing && return nothing
 	tup = get(d.pointer2obj, p, nothing)
 
+	@assert tup !== nothing # Since `x` is alive, the pointer must refer to `x` and the weakref must refer to `x`. So it cannot be nothing.
+
 	# value = tup[1].value
 	# value === nothing && return nothing # I don't think this can happen, because all children are deduplicated before we lookup their hashes, so we know that `x` is in the deduplicator and thus the weakref must refer to `x` since it is still alive.
 	# return tup[2]
