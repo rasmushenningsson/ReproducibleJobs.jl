@@ -369,7 +369,7 @@ end
 function _load_file(cache::Cache{K}, key::K, fp) where K
 	jldopen(fp, "r") do io
 		original_key = cache_load(cache, io, "key")
-		@assert key == original_key
+		@assert isequal(key, original_key) # Maybe just warn instead? At least until we have a better way to compare.
 		cache_load(cache, io, "root")
 	end
 end
@@ -378,7 +378,7 @@ end
 function _load_compound_result_structure(cache::Cache{K}, key::K, fp) where K
 	jldopen(fp, "r") do io
 		original_key = cache_load(cache, io, "key")
-		@assert key == original_key
+		@assert isequal(key, original_key) # Maybe just warn instead? At least until we have a better way to compare.
 		cache_load_compound_result_structure(io["root"])
 	end
 end
