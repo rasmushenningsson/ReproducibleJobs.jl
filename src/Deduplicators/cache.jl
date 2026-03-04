@@ -368,7 +368,7 @@ end
 # Calls deduplicate (for pointer-backed values)
 function _load_file(cache::Cache{K}, key::K, fp) where K
 	jldopen(fp, "r") do io
-		original_key = cache_load(cache, io, "key")
+		original_key = cache_load(cache, io, "key") # TODO: This should not deduplicate, because that could hide bugs. And we throw away `original_key` immediately anyway, so there is no reason to deduplicate.
 		@assert isequal(key, original_key) # Maybe just warn instead? At least until we have a better way to compare.
 		cache_load(cache, io, "root")
 	end
@@ -377,7 +377,7 @@ end
 # Experimental CompoundResult support.
 function _load_compound_result_structure(cache::Cache{K}, key::K, fp) where K
 	jldopen(fp, "r") do io
-		original_key = cache_load(cache, io, "key")
+		original_key = cache_load(cache, io, "key") # TODO: This should not deduplicate, because that could hide bugs. And we throw away `original_key` immediately anyway, so there is no reason to deduplicate.
 		@assert isequal(key, original_key) # Maybe just warn instead? At least until we have a better way to compare.
 		cache_load_compound_result_structure(io["root"])
 	end
