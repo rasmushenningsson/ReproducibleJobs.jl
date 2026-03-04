@@ -433,26 +433,28 @@ function run_deduplicator_tests()
 	@testset "Array Canonicalization" begin
 		d = Deduplicator()
 
-		@testset "Canonicalize: $(eltype(x))" for x in (Union{Nothing,Int}[1,5,2],
-		                                                Real[3,3,1],
-		                                                ReadOnlyArray(Union{Nothing,Int}[10,5,2]),
-		                                                ReadOnlyArray(Real[3,3,7]),
-		                                               )
-			E = eltype(x)
-			x2 = @inferred ROVec{<:E} deduplicate!(d, x)
+		@testset "Canonicalize: $(eltype(x))=>$E" for (E,x) in ((Int, Union{Nothing,Int}[1,5,2]),
+		                                                       (Int, Real[3,3,1]),
+		                                                       (Int, ReadOnlyArray(Union{Nothing,Int}[10,5,2])),
+		                                                       (Int, ReadOnlyArray(Real[3,3,7])),
+		                                                       (Bool, Union{Nothing,Bool}[false, false, true, false]),
+		                                                       (Bool, Real[false, false, true, false]),
+		                                                      )
+			x2 = @inferred ROVec{E} deduplicate!(d, x)
 			@test x2 == x
 			@test x2 !== x
-			@test x2 isa ROVec{Int}
+			@test x2 isa ROVec{E}
 
-			@test @inferred(ROVec{<:E}, deduplicate!(d, x)) === x2
-			@test @inferred(ROVec{<:E}, deduplicate!(d, x2)) === x2
+			@test @inferred(ROVec{E}, deduplicate!(d, x)) === x2
+			@test @inferred(ROVec{E}, deduplicate!(d, x2)) === x2
 		end
 
 		@testset "Keep: $(eltype(x))" for x in ([1,5,nothing,2],
 		                                        Real[0.4,3,1],
 		                                        ReadOnlyArray([10,5,nothing,2]),
 		                                        ReadOnlyArray(Real[0.4,3,7]),
-		                       )
+		                                        [true, false, true, true],
+		                                       )
 			E = eltype(x)
 			x2 = @inferred ROVec{E} deduplicate!(d, x)
 			@test x2 == x
@@ -464,32 +466,6 @@ function run_deduplicator_tests()
 			@test @inferred(ROVec{E}, deduplicate!(d, x2)) === x2
 		end
 	end
-
-	@testset "Array Canonicalization to BitArray" begin
-		d = Deduplicator()
-		let x = [true, false, true, true]
-			@test x isa Vector{Bool}
-			x2 = @inferred deduplicate!(d, x)
-			@test x2 == x
-			@test x2 isa ReadOnlyVector{Bool, BitVector}
-			@test parent(x2) !== x
-
-			@test @inferred(deduplicate!(d, x)) === x2
-			@test @inferred(deduplicate!(d, x2)) === x2
-		end
-		let x = Union{Nothing,Bool}[false, false, true, false]
-			@test x isa Vector{Union{Nothing,Bool}}
-			x2 = deduplicate!(d, x)
-			@test x2 == x
-			@test x2 isa ReadOnlyVector{Bool, BitVector}
-			@test parent(x2) !== x
-
-			@test deduplicate!(d, x) === x2
-			@test @inferred(deduplicate!(d, x2)) === x2
-		end
-	end
-
-
 
 	@testset "Dict" begin
 		d = Deduplicator()
@@ -784,8 +760,6 @@ function run_deduplicator_tests()
 	end
 
 	@testset "Hash uniqueness" begin
-		# d = Deduplicator()
-
 		hashed = Dict{Hash,Any}()
 		items = ([5,2], [5;2;;], [5 2], [5;;;2], [5.0,2.0], Int8[5,2], (5,2), 5=>2,
 		         (; a=5, b=2), (; a=2, b=5), Set((5,2)), Dict(:a=>5, :b=>2), Dict(:a=>2, :b=>5),
@@ -799,7 +773,9 @@ function run_deduplicator_tests()
 		         [:], [isequal], [in], [!], [!=],
 		         Returns([5,2]), in([5,2]), !in([5,2]),
 		         <([5,2]), >([5,2]),
-		         BitVector((true,false)), [true false], [true;;;false], (true,false),
+		         [true,false], [true false], [true;;;false],
+		         BitVector((true,false)), identity.([true false]), identity.([true;;;false]), # identity.() converts to BitArray here
+		         (true,false),
 		         [], (), (;),
 		        )
 		@testset "$(item isa DataFrame ? "DataFrame" : item)" for item in items
@@ -884,6 +860,15 @@ function run_deduplicator_tests()
 
 			@test deduplicate!(d, x) === x2
 			@test deduplicate!(d, x2) === x2
+		end
+		@testset "$x" for x in (falses(0), falses(0,0), falses(0,0,0), falses(3,0), falses(0,3), falses(0,3,0), falses(0,0))
+			x2 = @inferred deduplicate!(d, x)
+			@test x2 == x
+			@test x2 isa ROBitArray{ndims(x)}
+			@test parent(x2) !== x
+
+			@test @inferred deduplicate!(d, x) === x2
+			@test @inferred deduplicate!(d, x2) === x2
 		end
 
 		@testset "Dict{$K,$V}" for (K,V) in ((Int,Int),(Int,String))
