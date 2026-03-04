@@ -19,7 +19,7 @@ function Deduplicators.deduplicate_children!(d, sa::SpecArgs; kwargs...)
 	f = sa.f # TODO: Should this be processed somehow? Probably not.
 	a = deduplicate!(d, sa.args; kwargs...)
 	kw = deduplicate!(d, sa.kwargs; kwargs...)
-	if f === sa.f && a === sa.args && kw == sa.kwargs
+	if f === sa.f && a === sa.args && kw === sa.kwargs
 		sa # Not changed
 	else
 		SpecArgs(f, a, kw)
@@ -70,6 +70,7 @@ Deduplicators.deconstruct_weak_rec(x::T) where T<:AbstractSpecOp = x
 Deduplicators.reconstruct_weak_rec(x::T) where T<:AbstractSpecOp = x
 
 function Deduplicators.cache_save(io, name, x::AbstractSpecOp)
+	# TODO: Do not save the structs as is, use either custom cache_save or custom_wrap.
 	io[name] = x
 	nothing
 end

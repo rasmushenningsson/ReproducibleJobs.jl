@@ -4,6 +4,17 @@ struct TimestampedFilePath
 end
 TimestampedFilePath(path) = (@assert isfile(path); TimestampedFilePath(path, mtime(path)))
 
+Deduplicators.deduplicate_type(::Type{TimestampedFilePath}) = false
+Deduplicators.deconstruct_weak_rec(x::TimestampedFilePath) = x
+Deduplicators.reconstruct_weak_rec(x::TimestampedFilePath) = x
+
+function Deduplicators.cache_save(io, name, x::TimestampedFilePath)
+	# TODO: Do not save the structs as is, use either custom cache_save or custom_wrap.
+	io[name] = x
+	nothing
+end
+
+
 function Base.show(io::IO, ts::TimestampedFilePath)
 	print(io, '"', ts.path, '"')
 	printstyled(io, '@', Dates.unix2datetime(ts.timestamp); color=:light_black)
@@ -30,6 +41,16 @@ StableHashTraits.transformer(::Type{<:ChecksummedFilePath}) = StableHashTraits.T
 
 Base.:(==)(a::ChecksummedFilePath, b::ChecksummedFilePath) = a.checksum == b.checksum
 
+
+Deduplicators.deduplicate_type(::Type{ChecksummedFilePath}) = false
+Deduplicators.deconstruct_weak_rec(x::ChecksummedFilePath) = x
+Deduplicators.reconstruct_weak_rec(x::ChecksummedFilePath) = x
+
+function Deduplicators.cache_save(io, name, x::ChecksummedFilePath)
+	# TODO: Do not save the structs as is, use either custom cache_save or custom_wrap.
+	io[name] = x
+	nothing
+end
 
 
 
