@@ -217,7 +217,8 @@ function _replace_dependencies(upstream, nt::T) where T<:NamedTuple
 end
 
 function _replace_dependencies(upstream, df::DataFrame)
-	map(col->_replace_dependencies(upstream,col), eachcol(df)) # This handles the somewhat strange case of putting Specs as elements of DataFrame column vectors
+	# This handles the somewhat strange case of putting Specs as elements of DataFrame column vectors
+	DataFrame((name=>_replace_dependencies(upstream,col) for (name,col) in pairs(eachcol(df)))...; copycols=false)
 end
 
 function _replace_dependencies(upstream, x::T) where T
