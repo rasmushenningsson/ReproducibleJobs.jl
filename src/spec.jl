@@ -1,11 +1,8 @@
 mutable struct SpecArgs # TODO: Add template parameters for args/kwargs? Or find a another way to handle types better?
 	f::Any
-	# args::Union{ROVec,ROBitVec} # NB: BitVectors are possible due to canonicalization of args
-	# kwargs::ROVec
 	args::Tuple
 	kwargs::NamedTuple
 	function SpecArgs(f, args, kwargs)
-		# @assert issorted(kwargs; by=first)
 		@assert issorted(keys(kwargs))
 		new(f, args, kwargs)
 	end
@@ -29,13 +26,6 @@ function Deduplicators.deduplicate_children!(d, sa::SpecArgs; kwargs...)
 	end
 end
 function Deduplicators.deduplication_hash(d, sa::SpecArgs)
-	# f = sa.f
-	# a = Deduplicators.lookup_hash(d, parent(sa.args))
-	# @assert a !== nothing # Deduplication of args will be done before this, so we can assume it is !== nothing
-	# kw = Deduplicators.lookup_hash(d, parent(sa.kwargs))
-	# @assert kw !== nothing # Deduplication of kwargs will be done before this, so we can assume it is !== nothing
-	# Deduplicators.compute_hash(d, (Deduplicators.TypeTag(:SpecArgs), f, a, kw))
-
 	# TODO: Could we make this more efficient? (Is it a problem? Probably not.)
 	f = sa.f
 	a = Deduplicators.deduplication_hash(d, sa.args)
@@ -62,36 +52,6 @@ function Deduplicators.cache_load(cache::Cache, ::Val{:SpecArgs}, g)
 	sa = SpecArgs(f, args, kwargs)
 	deduplicate!(cache.deduplicator, sa; transfer_ownership=true)
 end
-
-
-
-
-# function create_spec_args(p, f, args, kwargs)
-# 	a = Any[copy_nested(p,x) for x in args]
-# 	kw = sort!(Pair{Symbol,Any}[k=>copy_nested(p,v) for (k,v) in kwargs]; by=first)
-# 	SpecArgs(f, ReadOnlyVector(a), ReadOnlyVector(kw))
-# end
-
-
-
-# function _get_kwarg_index(kwargs::ROVec{T}, name::Symbol) where T
-# 	r = searchsorted(kwargs, name=>nothing; by=first)
-# 	isempty(r) && return nothing
-# 	only(r)
-# end
-
-# function _get_kwarg(f, kwargs::ROVec{T}, name::Symbol) where T
-# 	i = _get_kwarg_index(kwargs, name)
-# 	i === nothing ? f() : last(kwargs[i])
-# end
-# _get_kwarg(kwargs::ROVec{T}, name::Symbol, default) where T =
-# 	_get_kwarg(Returns(default), kwargs, name)
-# _get_kwarg(kwargs::ROVec{T}, name::Symbol) where T =
-# 	_get_kwarg(()->throw(KeyError(name)), kwargs, name)
-
-
-# _get_kwarg(sa::SpecArgs, args...) = _get_kwarg(sa.kwargs, args...)
-# _get_kwarg(f, sa::SpecArgs) = _get_kwarg(f, sa.kwargs)
 
 _get_kwarg(sa::SpecArgs, key::Symbol, default) = get(sa.kwargs, key, default)
 _get_kwarg(f, sa::SpecArgs, key::Symbol) = get(f, sa.kwargs, key)
@@ -126,9 +86,7 @@ default_spec_op() = Forward()
 
 
 struct Spec
-	# ro::ReadOnly{SpecArgs}
 	sa::SpecArgs
-	# op::Any # Call/Fetch/Prefetch/Forward - is it better to use a Union? (Or a sum type?)
 	op::Union{Call,Fetch,Prefetch,Forward}
 end
 Spec(sa::SpecArgs) = Spec(sa, default_spec_op())
@@ -136,16 +94,10 @@ Spec(sa::SpecArgs) = Spec(sa, default_spec_op())
 Base.Broadcast.broadcastable(spec::Spec) = Ref(spec) # treat as scalar for broadcasting
 Base.Broadcast.broadcastable(sa::SpecArgs) = Ref(sa) # treat as scalar for broadcasting
 
-# # Usually accessed through getproperty
-# get_versioned_function(spec::Spec) = _get_spec_args(spec).f
-# get_args(spec::Spec) = manage(_get_spec_args(spec).args)
-# get_kwargs(spec::Spec) = KwargVector(_get_spec_args(spec).kwargs)
-
 # Usually accessed through getproperty
 get_function(spec::Spec) = spec.sa.f
 get_args(spec::Spec) = spec.sa.args
 get_kwargs(spec::Spec) = spec.sa.kwargs
-# get_kwargs(spec::Spec) = KwargVector(spec.sa.kwargs)
 
 
 function Base.getproperty(spec::Spec, s::Symbol)
@@ -160,8 +112,6 @@ function Base.propertynames(s::Spec, private::Bool=false)
 end
 
 
-# deduplicate_type(::Deduplicator, ::Type{Spec}) = false
-
 Deduplicators.deduplicate_type(::Type{Spec}) = true
 Deduplicators.deconstruct_type(::Type{Spec}) = true
 Deduplicators.type_to_tag(::Type{Spec}) = Deduplicators.TypeTag(:Spec)
@@ -171,52 +121,31 @@ Deduplicators.reconstruct(::Type{Spec}, (sa,op)::Tuple{SpecArgs,<:Any}) = Spec(s
 
 
 
-# _is_leaf_type(::Type{Spec}) = false
-# copy_arg(spec::Spec) = spec # Already managed, no need to copy
-# # copy_arg(ro::ReadOnly{SpecArgs}) = Spec(ro, nothing) # Wrap in Spec
-
-
-
-# manage(spec::Spec) = spec # Already managed
 
 function create_spec(f, args...; deduplicator=default_deduplicator(), kwargs...)
-	# a = deduplicate!(deduplicator, isempty(args) ? [] : collect(args)) # Use Any as eltype if no args
-
-	# kw = isempty(kwargs) ? [] : sort!(collect(kwargs); by=first) # Use Any as eltype if no kwargs
-	# kw = deduplicate!(deduplicator, kw)
-	# sa = deduplicate!(deduplicator, SpecArgs(f, a, kw))
-	# spec = Spec(sa)
-
 	kw = values(kwargs)
-	kw = NamedTuple{TupleTools.sort(keys(kw))}(kw)
-
+	kw = NamedTuple{TupleTools.sort(keys(kw))}(kw) # sort by key
 	sa = deduplicate!(deduplicator, SpecArgs(f, args, kw))
 	spec = Spec(sa)
 
 end
 
 
-
-# Base.:(==)(a::Spec, b::Spec) = a.op == b.op && a.ro == b.ro
 Base.:(==)(a::Spec, b::Spec) = a.op == b.op && a.sa == b.sa
 Base.isequal(a::Spec, b::Spec) = isequal(a.op, b.op) && isequal(a.sa, b.sa)
 
 
 _get_spec_args(spec::Spec) = spec.sa
 
-# get_hash(spec::Spec) = get_hash(spec.ro)
 
 
-
-# Can/should we implement visit_dependencies in a more general fashion? (So that custom, non-destructable, user types do not need to add methods.)
-
-# visit_dependencies(f, spec::Spec) = _visit_dependencies(f, spec.sa)
-_visit_dependencies(f, spec::Spec) = f(spec)
 
 function visit_dependencies(f, sa::SpecArgs)
 	_visit_dependencies(f, sa.args)
 	_visit_dependencies(f, sa.kwargs)
 end
+
+_visit_dependencies(f, spec::Spec) = f(spec)
 
 function _visit_dependencies(f, v::AbstractVector{T}) where T
 	# The eltype check gives some false positives, but it prevents some unnecessary traversal and mostly gets the job done
@@ -250,15 +179,13 @@ end
 
 
 
-# Can/should we implement replace_dependencies in a more general fashion? (So that custom, non-destructable, user types do not need to add methods.)
-
-_replace_dependencies(upstream, spec::Spec) = get(upstream, spec, spec)
-
 function replace_dependencies(upstream, sa::SpecArgs)
 	a = _replace_dependencies(upstream, sa.args)
 	kw = _replace_dependencies(upstream, sa.kwargs)
 	SpecArgs(sa.f, a, kw)
 end
+
+_replace_dependencies(upstream, spec::Spec) = get(upstream, spec, spec)
 
 function _replace_dependencies(upstream, v::AbstractVector{T}) where T
 	# The eltype check gives some false positives, but it prevents some unnecessary traversal and mostly gets the job done
@@ -304,40 +231,6 @@ function _replace_dependencies(upstream, x::T) where T
 	end
 end
 
-
-
-
-# # TODO: Use predicate version for smart early-outs?
-# function visit_dependencies(f, v::Vector)
-# 	visit_nested(v) do x
-# 		x isa Spec && f(x)
-# 	end
-# end
-# function visit_dependencies(f, sa::SpecArgs)
-# 	visit_dependencies(f, sa.args)
-# 	visit_dependencies(f, sa.kwargs)
-# end
-# visit_dependencies(f, spec::Spec) = visit_dependencies(f, _get_spec_args(spec))
-
-
-
-# deduplicate!(dedup::Deduplicator, spec::Spec) = Spec(deduplicate!(dedup, spec.ro), spec.op)
-
-
-
-# # Are these still needed?
-# forwarded(spec::Spec) = Spec(spec.ro, forward(spec.op))
-# forwarded(x) = x
-
-
-
-# _fetched(spec::Spec) = Spec(spec.ro, Fetch())
-# _fetched(x) = x
-# fetched(x::Any) = copy_nested(_fetched, x)
-
-# _prefetched(spec::Spec) = Spec(spec.ro, Prefetch())
-# _prefetched(x) = x
-# prefetched(x::Any) = copy_nested(_prefetched, x)
 
 fetched(spec::Spec) = Spec(spec.sa, Fetch())
 prefetched(spec::Spec) = Spec(spec.sa, Prefetch())
