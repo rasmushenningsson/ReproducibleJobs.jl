@@ -335,7 +335,8 @@ deduplication_pointer(a::BitArray) = pointer_from_objref(a)
 
 function deduplicate_children!(d, a::AbstractArray{T}; kwargs...) where T
 	if _deduplicate_eltype(T)
-		deduplicate!.(Ref(d), a; kwargs...) # This can mysteriously change eltype from e.g. Pair{Int,Any} to Pair{Int} - why is that? How do I avoid it?
+		# deduplicate!.(Ref(d), a; kwargs...) # This can mysteriously change eltype from e.g. Pair{Int,Any} to Pair{Int} - why is that? How do I avoid it?
+		map(x->deduplicate!(d, x; kwargs...), a) # This ensures we don't convert to BitArray like broadcasting could.
 	else
 		a # nothing to do
 	end
@@ -343,10 +344,9 @@ end
 
 
 
-# function canonicalize(a::Union{Array{T},ROArray{T}}) where T
 function canonicalize(a::Array{T}) where T
-	if !isconcretetype(T) || T === Bool # NB: We need Bool here because `identity.(a)` will change it to BitArray.
-		identity.(a)
+	if !isconcretetype(T)
+		map(identity, a) # This narrow eltype, but doesn't risk converting to BitArray like identity.(a) could.
 	else
 		a # TODO: Are there more cases where we can ensure the eltype will not be changed?
 	end
