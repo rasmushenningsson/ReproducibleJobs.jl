@@ -13,7 +13,8 @@ export
 	Cache,
 	CompoundResult,
 	deduplicate!,
-	cache_get!
+	cache_get!,
+	cache_get_subresult!
 
 
 

@@ -318,12 +318,13 @@ function process_once!(scheduler::Scheduler, sa::SpecArgs, op::T; parent_f) wher
 
 			# The remaining args specify subresults of `CompoundResult`s
 			# sub = length(sa.args)==1 ? nothing : collect(String, @view(sa.args[2:end]))
-			sub = length(sa.args)==1 ? nothing : only(@view(sa.args[2:end])) # we only support one level atm
+			# sub = length(sa.args)==1 ? nothing : only(@view(sa.args[2:end])) # we only support one level atm
+			sub = length(sa.args)==1 ? nothing : only(sa.args[2:end]) # we only support one level atm
 			return_keys = _get_kwarg(sa, :return_keys, false)
 
 			# TODO: Cleanup and simplify code
 			if sub !== nothing || return_keys
-				res = cache_get_subresult!(cache, inner_sa; use_disk=true, sub, return_keys) do
+				res = cache_get_subresult!(scheduler.cache, inner_sa; use_disk=true, sub, return_keys) do
 					_fetch_and_compute!(scheduler, inner_sa, inner_deps)
 				end
 			else
