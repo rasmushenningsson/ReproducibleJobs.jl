@@ -476,9 +476,11 @@ function cache_get_subresult!(f, cache::Cache{K}, key::K; use_disk=nothing, sub=
 	@assert cr === NotValid() "CompoundResult found in in-mem Cache was not matched by file on disk."
 
 	cr = f()
-	cr isa Exception || cr isa CompoundResult || throw(ArgumentError("Tried to retrieve sub-result from result that was not a CompoundResult."))
+	cr isa Exception && return cr
+
+	cr isa CompoundResult || throw(ArgumentError("Tried to retrieve sub-result from result that was not a CompoundResult."))
 	cr = deduplicate!(cache.deduplicator, cr; transfer_ownership=true)
-	cr isa Exception || _save_file(cache, key, fp, cr)
+	_save_file(cache, key, fp, cr)
 	cache_mem_set!(cache, key, cr)
 	return_keys && return get_keys(cr)
 	return get_subresult(cr, sub)
