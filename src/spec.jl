@@ -8,8 +8,6 @@ mutable struct SpecArgs # TODO: Add template parameters for args/kwargs? Or find
 	end
 end
 
-Base.:(==)(a::SpecArgs, b::SpecArgs) = a.f == b.f && a.args == b.args && a.kwargs == b.kwargs
-Base.isequal(a::SpecArgs, b::SpecArgs) = isequal(a.f, b.f) && isequal(a.args, b.args) && isequal(a.kwargs, b.kwargs)
 
 
 Deduplicators.deduplicate_type(::Type{SpecArgs}) = true
@@ -51,6 +49,69 @@ function Deduplicators.cache_load(cache::Cache, ::Val{:SpecArgs}, g)
 	sa = SpecArgs(f, args, kwargs)
 	deduplicate!(cache.deduplicator, sa; transfer_ownership=true)
 end
+
+
+
+
+function sa_isequal(a::SpecArgs, b::SpecArgs)
+	a === b && return true # early out
+	isequal(a.f, b.f) && sa_isequal(a.args, b.args) && sa_isequal(a.kwargs, b.kwargs)
+end
+
+function sa_isequal(a::AbstractVector{T1}, b::AbstractVector{T2}) where {T1,T2}
+	isequal(length(a), length(b)) || return false
+	all(t->sa_isequal(t[1], t[2]), zip(a,b))
+end
+
+function sa_isequal(a::Dict{K1,V1}, b::Dict{K2,V2}) where {K1,V1,K2,V2}
+	isequal(length(a), length(b)) || return false
+    for pair in a
+        in(pair, b, sa_isequal) || return false
+    end
+    true
+end
+
+sa_isequal(a::NamedTuple{n}, b::NamedTuple{n}) where n = sa_isequal(Tuple(a), Tuple(b))
+sa_isequal(a::NamedTuple, b::NamedTuple) = false # keys are different
+
+function sa_isequal(a::DataFrame, b::DataFrame)
+	isequal(ncol(a), ncol(b)) || return false
+	isequal(names(a), names(b)) || return false
+	all(t->sa_isequal(t[1], t[2]), zip(eachcol(a),eachol(b)))
+end
+
+function sa_isequal(a::T1, b::T2) where {T1,T2}
+	if Deduplicators.deconstruct_type(T1) && Deduplicators.deconstruct_type(T2)
+		ad = Deduplicators.deconstruct(a)::Tuple
+		bd = Deduplicators.deconstruct(b)::Tuple
+
+		isequal(length(ad), length(bd)) || return false
+		all(t->sa_isequal(t[1], t[2]), zip(ad,bd))
+	else
+		# TODO: Should we have this fallback?
+		isequal(a,b)
+	end
+end
+
+Base.isequal(a::SpecArgs, b::SpecArgs) = sa_isequal(a, b)
+
+
+
+# TODO: Remove this? It's not very useful anyway. isequal is the way to go.
+function Base.:(==)(a::SpecArgs, b::SpecArgs)
+	# Annoying way to handle missing values with ==.
+	rf = a.f == b.f
+	rf === false && return false
+	ra = a.args == b.args
+	ra === false && return false
+	rkw = a.kwargs == b.kwargs
+	rkw === false && return false
+	ismissing(rf) || ismissing(ra) || ismissing(rkw) ? missing : true
+end
+
+
+
+
 
 _get_kwarg(sa::SpecArgs, key::Symbol, default) = get(sa.kwargs, key, default)
 _get_kwarg(f, sa::SpecArgs, key::Symbol) = get(f, sa.kwargs, key)
