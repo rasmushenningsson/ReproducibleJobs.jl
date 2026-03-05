@@ -5,13 +5,14 @@ _nameof(::Type{<:ReadOnlyArray{V,N,T}}) where {V,N,T} = _nameof(T)
 _typenameof(x::T) where T = _nameof(T)
 
 
-struct PrintContext
+struct PrintContext{S<:Scheduler}
+	scheduler::S
 	hashes::Dict{Deduplicators.Hash,Int} # Hashes mapping to how many times they have been seen
 	hash_ordinals::Dict{Deduplicators.Hash,Int} # hashes seen at least twice, mapping to an ordinal
 	depth::Int
 	line_length::Int
 end
-PrintContext(; line_length=80) = PrintContext(Dict{Deduplicators.Hash,Int}(), Dict{Deduplicators.Hash,Int}(), 0, line_length)
+PrintContext(scheduler; line_length=80) = PrintContext(scheduler, Dict{Deduplicators.Hash,Int}(), Dict{Deduplicators.Hash,Int}(), 0, line_length)
 
 function add_hash!(pc::PrintContext, h::Deduplicators.Hash)
 	n = get(pc.hashes, h, 0)
@@ -20,7 +21,7 @@ function add_hash!(pc::PrintContext, h::Deduplicators.Hash)
 end
 
 
-descend(pc::PrintContext) = PrintContext(pc.hashes, pc.hash_ordinals, pc.depth+1, pc.line_length)
+descend(pc::PrintContext) = PrintContext(pc.scheduler, pc.hashes, pc.hash_ordinals, pc.depth+1, pc.line_length)
 
 
 
@@ -328,8 +329,7 @@ function extend_print_node!(pn::PrintNode, spec::Spec)
 
 	isempty(suffix) || extend_title!(pn, suffix)
 
-	deduplicator = default_scheduler().deduplicator # TODO: Avoid using default_scheduler.
-	h = Deduplicators.lookup_hash(deduplicator, spec.sa)
+	h = Deduplicators.lookup_hash(pn.context.scheduler.deduplicator, spec.sa)
 
 	extend_title!(pn, HashOridinal(pn.context, h))
 
@@ -354,8 +354,7 @@ function extend_print_node_expanded!(f, pn::PrintNode, a::T; unwrap=identity) wh
 	max_n = 20
 	extend_title!(pn, styled"{magenta:$(_nameof(T))}")
 
-	deduplicator = default_scheduler().deduplicator # TODO: Avoid using default_scheduler.
-	h = Deduplicators.lookup_hash(deduplicator, a)
+	h = Deduplicators.lookup_hash(pn.context.scheduler.deduplicator, a)
 	h !== nothing && extend_title!(pn, HashOridinal(pn.context,h))
 
 	if h === nothing || !add_hash!(pn.context, h)
@@ -459,8 +458,7 @@ function extend_print_node!(pn::PrintNode, x::DataFrame)
 
 	extend_title!(pn, styled"{magenta:DataFrame}")
 
-	deduplicator = default_scheduler().deduplicator # TODO: Avoid using default_scheduler.
-	h = Deduplicators.lookup_hash(deduplicator, x)
+	h = Deduplicators.lookup_hash(pn.context.scheduler.deduplicator, x)
 	h !== nothing && extend_title!(pn, HashOridinal(pn.context,h))
 
 	if h === nothing || !add_hash!(pn.context, h)
@@ -490,8 +488,8 @@ function build_print_node(context, value; prefix="")
 end
 
 
-function print_spec(io::IO, spec::Spec; kwargs...)
-	context = PrintContext(; line_length=displaysize(io)[2])
+function print_spec(io::IO, spec::Spec; scheduler=get_scheduler(), kwargs...)
+	context = PrintContext(scheduler; line_length=displaysize(io)[2])
 	tree = build_print_node(context, spec)
 	AbstractTrees.print_tree(io, tree; kwargs...)
 end
