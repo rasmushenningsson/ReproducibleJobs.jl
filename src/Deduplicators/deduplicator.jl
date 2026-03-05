@@ -10,6 +10,9 @@ deduplicate_type(::Type{T}) where T<:SupportedFunctions = false
 deduplicate_type(::Type{<:Exception}) = false
 
 
+deduplicate_type(::Type{<:AbstractString}) = true
+deduplication_preprocess(s::AbstractString) = convert(String, s)
+
 
 
 # Helper function, only used by (Abstract)Arrays a.t.m.
