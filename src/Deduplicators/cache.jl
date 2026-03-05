@@ -8,7 +8,7 @@ struct Cache{K,H}
 	# On-disk cache
 	dir::Union{String, Nothing}
 end
-function Cache(::Type{K}, deduplicator::Deduplicator{H}; dir=".cache") where {K,H}
+function Cache(::Type{K}, deduplicator::Deduplicator{H}; dir=get_cache_path()) where {K,H}
 	if dir !== nothing
 		dir = abspath(dir) # In case the user changes working directory afterwards
 	end
