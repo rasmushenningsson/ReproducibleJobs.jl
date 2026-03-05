@@ -9,7 +9,7 @@ Deduplicators.deconstruct_weak_rec(x::TimestampedFilePath) = x
 Deduplicators.reconstruct_weak_rec(x::TimestampedFilePath) = x
 
 function Deduplicators.cache_save(io, name, x::TimestampedFilePath)
-	# TODO: Do not save the structs as is, use either custom cache_save or custom_wrap.
+	# Refactoring TODO: Do not save the structs as is, use either custom cache_save or custom_wrap.
 	io[name] = x
 	nothing
 end
@@ -47,7 +47,7 @@ Deduplicators.deconstruct_weak_rec(x::ChecksummedFilePath) = x
 Deduplicators.reconstruct_weak_rec(x::ChecksummedFilePath) = x
 
 function Deduplicators.cache_save(io, name, x::ChecksummedFilePath)
-	# TODO: Do not save the structs as is, use either custom cache_save or custom_wrap.
+	# Refactoring TODO: Do not save the structs as is, use either custom cache_save or custom_wrap.
 	io[name] = x
 	nothing
 end
