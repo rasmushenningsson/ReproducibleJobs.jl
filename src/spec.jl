@@ -130,7 +130,7 @@ Deduplicators.deconstruct_weak_rec(x::T) where T<:AbstractSpecOp = x
 Deduplicators.reconstruct_weak_rec(x::T) where T<:AbstractSpecOp = x
 
 function Deduplicators.cache_save(io, name, x::AbstractSpecOp)
-	# TODO: Do not save the structs as is, use either custom cache_save or custom_wrap.
+	# Refactoring TODO: Do not save the structs as is, use either custom cache_save or custom_wrap.
 	io[name] = x
 	nothing
 end
