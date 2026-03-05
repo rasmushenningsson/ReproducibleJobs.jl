@@ -328,7 +328,7 @@ function extend_print_node!(pn::PrintNode, spec::Spec)
 
 	isempty(suffix) || extend_title!(pn, suffix)
 
-	deduplicator = default_deduplicator() # TODO: Use from scheduler somehow?
+	deduplicator = default_scheduler().deduplicator # TODO: Avoid using default_scheduler.
 	h = Deduplicators.lookup_hash(deduplicator, spec.sa)
 
 	extend_title!(pn, HashOridinal(pn.context, h))
@@ -354,7 +354,7 @@ function extend_print_node_expanded!(f, pn::PrintNode, a::T; unwrap=identity) wh
 	max_n = 20
 	extend_title!(pn, styled"{magenta:$(_nameof(T))}")
 
-	deduplicator = default_deduplicator() # TODO: Use from scheduler somehow?
+	deduplicator = default_scheduler().deduplicator # TODO: Avoid using default_scheduler.
 	h = Deduplicators.lookup_hash(deduplicator, a)
 	h !== nothing && extend_title!(pn, HashOridinal(pn.context,h))
 
@@ -459,7 +459,7 @@ function extend_print_node!(pn::PrintNode, x::DataFrame)
 
 	extend_title!(pn, styled"{magenta:DataFrame}")
 
-	deduplicator = default_deduplicator() # TODO: Use from scheduler somehow?
+	deduplicator = default_scheduler().deduplicator # TODO: Avoid using default_scheduler.
 	h = Deduplicators.lookup_hash(deduplicator, x)
 	h !== nothing && extend_title!(pn, HashOridinal(pn.context,h))
 

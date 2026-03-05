@@ -47,9 +47,9 @@ function propagate_error(sa, vals)::Union{Nothing, ProcessingException}
 end
 
 
-preprocess(err::ProcessingException) = err
+preprocess(::Scheduler, err::ProcessingException) = err
 
-function preprocess(sa::SpecArgs)
+function preprocess(scheduler::Scheduler, sa::SpecArgs)
 	f = sa.f
 	try
 		@info "Preprocessing $f"
@@ -57,8 +57,7 @@ function preprocess(sa::SpecArgs)
 		res = f(sa.args...; sa.kwargs...)
 		@assert res !== nothing "Preprocessing of $f returned nothing"
 
-		# TODO: use deduplicator in scheduler instead
-		res = deduplicate!(default_deduplicator(), res) # needed because forwarding can return a value
+		res = deduplicate!(scheduler.deduplicator, res) # needed because forwarding can return a value
 
 		return res
 	catch e
@@ -85,7 +84,7 @@ function replace_forwarded(sa::SpecArgs, upstream::IdDict{Spec,Any})
 end
 
 
-function compute(sa::SpecArgs, upstream::IdDict{Spec,Any})
+function compute(scheduler::Scheduler, sa::SpecArgs, upstream::IdDict{Spec,Any})
 	f = sa.f
 	try
 		@info "Running $f"
@@ -105,8 +104,7 @@ function compute(sa::SpecArgs, upstream::IdDict{Spec,Any})
 		res = f(args...; kwargs...)
 		@assert res !== nothing "Computation of $f returned nothing"
 
-		# TODO: use deduplicator in scheduler instead
-		res = deduplicate!(default_deduplicator(), res)
+		res = deduplicate!(scheduler.deduplicator, res)
 
 		return res
 	catch e
@@ -129,7 +127,7 @@ end
 
 function _fetch_and_compute!(scheduler, sa::SpecArgs, deps::Vector{Spec})
 	deps = fetch_dependencies!(scheduler, deps)
-	res = compute(sa, deps)
+	res = compute(scheduler, sa, deps)
 	@assert !(res isa Spec)
 	res
 end
@@ -142,12 +140,11 @@ function _process_once!(scheduler::Scheduler, sa::SpecArgs, deps::Vector{Spec})
 	end
 
 	if is_preprocessing(sa)
-		preprocess(sa)
+		preprocess(scheduler, sa)
 	else
 		sa isa ProcessingException && return sa
 
-		# TODO: use deduplicator in scheduler instead
-		sa = deduplicate!(default_deduplicator(), sa)
+		sa = deduplicate!(scheduler.deduplicator, sa)
 		Spec(sa, Call())
 	end
 end
