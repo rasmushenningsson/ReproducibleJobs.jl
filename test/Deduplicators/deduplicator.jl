@@ -6,6 +6,7 @@ using ReadOnlyArrays
 using StableHashTraits
 using SparseArrays
 using DataFrames
+using InlineStrings
 
 reporter_was_called::Bool = false
 
@@ -310,6 +311,15 @@ function run_deduplicator_tests()
 
 			@test !isempty(d.pointer2obj)
 		end
+	end
+
+	@testset "AbstractString" begin
+		d = Deduplicator()
+		for x in (String1("a"), String7("abc"))
+			@test @inferred(deduplicate!(d, x)) === convert(String, x)
+		end
+		@test isempty(d.pointer2obj)
+		@test isempty(d.hash2obj)
 	end
 
 	@testset "ReadOnlyArray" begin
