@@ -8,8 +8,9 @@ struct Scheduler{H}
 	cache::Cache{SpecArgs,H} # spec -> forwarded spec or result
 end
 Scheduler(cache::Cache{SpecArgs,H}) where H = Scheduler{H}(cache.deduplicator, cache)
-Scheduler(deduplicator::Deduplicator{H}) where H = Scheduler(Cache(SpecArgs, deduplicator))
-Scheduler() = Scheduler(default_deduplicator())
+Scheduler(deduplicator::Deduplicator{H}; kwargs...) where H = Scheduler(Cache(SpecArgs, deduplicator; kwargs...))
+# Scheduler() = Scheduler(default_deduplicator())
+Scheduler(; kwargs...) = Scheduler(Deduplicator(); kwargs...)
 
 
 function Base.empty!(scheduler::Scheduler)
@@ -18,9 +19,6 @@ function Base.empty!(scheduler::Scheduler)
 	scheduler
 end
 
-let scheduler_singleton = Scheduler()
-	global default_scheduler() = scheduler_singleton
-end
 
 
 fetch_dependencies!(scheduler, deps) = IdDict{Spec,Any}(dep=>fetch!(scheduler, dep) for dep in deps)

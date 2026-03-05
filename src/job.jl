@@ -21,7 +21,7 @@ prefetched(job::Job) = prefetched(job.spec)
 
 
 
-function fetch!(job::Job; scheduler=default_scheduler())
+function fetch!(job::Job; scheduler=get_scheduler())
 	if job.result === NotComputed()
 		job.result = process!(scheduler, job.spec)
 	end
@@ -29,12 +29,12 @@ function fetch!(job::Job; scheduler=default_scheduler())
 	job.result
 end
 
-function forward(job::Job; scheduler=default_scheduler())
+function forward(job::Job; scheduler=get_scheduler())
 	res = forward!(scheduler, job.spec)
 	res isa ProcessingException && throw(res)
 	res === job.spec ? job : Job(res)
 end
-function forward_once(job::Job; scheduler=default_scheduler())
+function forward_once(job::Job; scheduler=get_scheduler())
 	res = forward_once!(scheduler, job.spec)
 	res isa ProcessingException && throw(res)
 	res === job.spec ? job : Job(res)

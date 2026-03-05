@@ -122,12 +122,11 @@ Deduplicators.reconstruct(::Type{Spec}, (sa,op)::Tuple{SpecArgs,<:Any}) = Spec(s
 
 
 
-function create_spec(f, args...; scheduler=default_scheduler(), deduplicator=scheduler.deduplicator, kwargs...)
+function create_spec(f, args...; scheduler=get_scheduler(), deduplicator=scheduler.deduplicator, kwargs...)
 	kw = values(kwargs)
 	kw = NamedTuple{TupleTools.sort(keys(kw))}(kw) # sort by key
 	sa = deduplicate!(deduplicator, SpecArgs(f, args, kw))
 	spec = Spec(sa)
-
 end
 
 
