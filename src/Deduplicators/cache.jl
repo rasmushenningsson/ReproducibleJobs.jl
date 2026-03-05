@@ -187,12 +187,20 @@ function cache_load(cache::Cache, io, name)
 	else
 		# custom_unwrap(x)
 
-		# Deduplicate pointer-backed objects as soon as they are loaded
 		x = custom_unwrap(x)
-		if deduplication_pointer(x) !== nothing # Can we express this in a nicer way?
-			x = deduplicate!(cache.deduplicator, x; transfer_ownership=true)
+
+		# Find a nice way to do this?
+		if x isa Union{<:Array, <:BitArray}
+			x = ReadOnlyArray(x)
 		end
 		x
+
+		# # Deduplicate pointer-backed objects as soon as they are loaded
+		# x = custom_unwrap(x)
+		# if deduplication_pointer(x) !== nothing # Can we express this in a nicer way?
+		# 	x = deduplicate!(cache.deduplicator, x; transfer_ownership=true)
+		# end
+		# x
 	end
 end
 
@@ -265,8 +273,10 @@ end
 cache_save(io, name, result::ROArray{T,N}) where {T,N} = cache_save(io, name, parent(result))
 
 function cache_load_array(cache, g, sz::NTuple{N,Int}) where N
+	# a = [cache_load(cache, g, _index_to_string(ind)) for ind in CartesianIndices(sz)]
+	# deduplicate!(cache.deduplicator, a; transfer_ownership=true)
 	a = [cache_load(cache, g, _index_to_string(ind)) for ind in CartesianIndices(sz)]
-	deduplicate!(cache.deduplicator, a; transfer_ownership=true)
+	ReadOnlyArray(a)
 end
 function cache_load(cache::Cache, ::Val{:Array}, g)
 	sz = g["size"]
@@ -310,8 +320,9 @@ end
 function cache_load(cache::Cache, ::Val{:Dict}, g)
 	keys = parent(cache_load(cache, g, "keys"))
 	values = parent(cache_load(cache, g, "values"))
-	d = Dict(keys.=>values)
-	deduplicate!(cache.deduplicator, d; transfer_ownership=true)
+	# d = Dict(keys.=>values)
+	# deduplicate!(cache.deduplicator, d; transfer_ownership=true)
+	Dict(keys.=>values)
 end
 
 
@@ -326,10 +337,11 @@ function cache_save(io, name, df::DataFrame)
 	nothing
 end
 function cache_load(cache::Cache, ::Val{:DataFrame}, g)
-	names = g["names"]::Vector{String} # Do not use cache_load as it would deduplicate! and we don't want that for names that is temporary
+	names = g["names"]::Vector{String}
 	named_cols = (name=>cache_load(cache, g, string(i)) for (i,name) in enumerate(names))
-	df = DataFrame(named_cols...; copycols=false)
-	deduplicate!(cache.deduplicator, df; transfer_ownership=true)
+	# df = DataFrame(named_cols...; copycols=false)
+	# deduplicate!(cache.deduplicator, df; transfer_ownership=true)
+	DataFrame(named_cols...; copycols=false)
 end
 
 
@@ -365,26 +377,27 @@ end
 
 
 
-# Calls deduplicate (for pointer-backed values)
 function _load_file(cache::Cache{K}, key::K, fp) where K
 	jldopen(fp, "r") do io
-		original_key = cache_load(cache, io, "key") # TODO: This should not deduplicate, because that could hide bugs. And we throw away `original_key` immediately anyway, so there is no reason to deduplicate.
+		original_key = cache_load(cache, io, "key")
 		@assert isequal(key, original_key) # Maybe just warn instead? At least until we have a better way to compare.
-		cache_load(cache, io, "root")
+		x = cache_load(cache, io, "root")
+		deduplicate!(cache.deduplicator, x; transfer_ownership=true)
 	end
 end
 
 # Experimental CompoundResult support.
 function _load_compound_result_structure(cache::Cache{K}, key::K, fp) where K
 	jldopen(fp, "r") do io
-		original_key = cache_load(cache, io, "key") # TODO: This should not deduplicate, because that could hide bugs. And we throw away `original_key` immediately anyway, so there is no reason to deduplicate.
+		original_key = cache_load(cache, io, "key")
 		@assert isequal(key, original_key) # Maybe just warn instead? At least until we have a better way to compare.
 		cache_load_compound_result_structure(io["root"])
 	end
 end
 function _load_subresult!(cache, cr, fp, sub)
 	jldopen(fp, "r") do io
-		cache_load_subresult!(cache, cr, io["root"], sub)
+		x = cache_load_subresult!(cache, cr, io["root"], sub)
+		deduplicate!(cache.deduplicator, x; transfer_ownership=true)
 	end
 end
 

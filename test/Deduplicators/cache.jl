@@ -1163,8 +1163,9 @@ function run_cache_storage_tests()
 			@test w3 isa Tuple{ROVec{Int}, String}
 			@test deduplicate!(cache.deduplicator, w3) === w3
 
-			# --- Empty in-mem cache, i.e. mimic that the result was computed in a previous session ---
-			empty!(cache.mem)
+			# --- Reset cache, i.e. mimic that the result was computed in a previous session ---
+			cache = Cache(CacheKey, Deduplicator(); dir)
+			key = create_test_key(cache, key.f) # recreate key to make it exist in the new deduplicator
 
 			u4 = cache_get_subresult!(error_fun, cache, key; sub="sub", use_disk=true)
 			@test u4 == u
