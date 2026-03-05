@@ -139,96 +139,95 @@ Base.isequal(a::Spec, b::Spec) = isequal(a.op, b.op) && isequal(a.sa, b.sa)
 _get_spec_args(spec::Spec) = spec.sa
 
 
+# NB: To visit all dependencies of a spec, call visit_specs on spec.sa.
+visit_specs(f, spec::Spec) = f(spec)
 
-
-function visit_dependencies(f, sa::SpecArgs)
-	_visit_dependencies(f, sa.args)
-	_visit_dependencies(f, sa.kwargs)
+function visit_specs(f, sa::SpecArgs)
+	visit_specs(f, sa.args)
+	visit_specs(f, sa.kwargs)
 end
 
-_visit_dependencies(f, spec::Spec) = f(spec)
-
-function _visit_dependencies(f, v::AbstractVector{T}) where T
+function visit_specs(f, v::AbstractVector{T}) where T
 	# The eltype check gives some false positives, but it prevents some unnecessary traversal and mostly gets the job done
-	Deduplicators._deduplicate_eltype(T) && _visit_dependencies.(Ref(f), v)
+	Deduplicators._deduplicate_eltype(T) && visit_specs.(Ref(f), v)
 end
-function _visit_dependencies(f, d::Dict{K,V}) where {K,V}
+function visit_specs(f, d::Dict{K,V}) where {K,V}
 	# The eltype check gives some false positives, but it prevents some unnecessary traversal and mostly gets the job done
-	Deduplicators._deduplicate_eltype(K) && _visit_dependencies.(Ref(f), keys(d))
-	Deduplicators._deduplicate_eltype(V) && _visit_dependencies.(Ref(f), values(d))
+	Deduplicators._deduplicate_eltype(K) && visit_specs.(Ref(f), keys(d))
+	Deduplicators._deduplicate_eltype(V) && visit_specs.(Ref(f), values(d))
 end
 
-function _visit_dependencies(f, nt::T) where T<:NamedTuple
-	foreach(x->_visit_dependencies(f,x), nt)
+function visit_specs(f, nt::T) where T<:NamedTuple
+	foreach(x->visit_specs(f,x), nt)
 end
 
-function _visit_dependencies(f, df::DataFrame)
-	foreach(col->_visit_dependencies(f,col), eachcol(df)) # This handles the somewhat strange case of putting Specs as elements of DataFrame column vectors
+function visit_specs(f, df::DataFrame)
+	foreach(col->visit_specs(f,col), eachcol(df)) # This handles the somewhat strange case of putting Specs as elements of DataFrame column vectors
 end
 
-function _visit_dependencies(f, x::T) where T
-	# @assert Deduplicators.deconstruct_type(T) "_visit_dependencies fallback only available for types that can be deconstructed, got $T."
+function visit_specs(f, x::T) where T
+	# @assert Deduplicators.deconstruct_type(T) "visit_specs fallback only available for types that can be deconstructed, got $T."
 	if Deduplicators.deconstruct_type(T)
 		xd = Deduplicators.deconstruct(x)::Tuple
-		_visit_dependencies.(Ref(f), xd)
+		visit_specs.(Ref(f), xd)
 	else
-		# TODO: Should we have this fallback? Or define _visit_dependencies for everything including Int, String, etc.
+		# TODO: Should we have this fallback? Or define visit_specs for everything including Int, String, etc.
 		x
 	end
 end
 
 
 
+# NB: To map all dependencies of a spec, call map_specs on spec.sa.
+map_specs(f, spec::Spec) = f(spec)
 
-function replace_dependencies(upstream, sa::SpecArgs)
-	a = _replace_dependencies(upstream, sa.args)
-	kw = _replace_dependencies(upstream, sa.kwargs)
+function map_specs(f, sa::SpecArgs)
+	a = map_specs(f, sa.args)
+	kw = map_specs(f, sa.kwargs)
 	SpecArgs(sa.f, a, kw)
 end
 
-_replace_dependencies(upstream, spec::Spec) = get(upstream, spec, spec)
-
-function _replace_dependencies(upstream, v::AbstractVector{T}) where T
+function map_specs(f, v::AbstractVector{T}) where T
 	# The eltype check gives some false positives, but it prevents some unnecessary traversal and mostly gets the job done
 	if Deduplicators._deduplicate_eltype(T)
-		ReadOnlyArray(_replace_dependencies.(Ref(upstream), v))
+		ReadOnlyArray(map_specs.(Ref(f), v))
 	else
 		v # keep as is
 	end
 end
-function _replace_dependencies(upstream, dict::Dict{K,V}) where {K,V}
+function map_specs(f, dict::Dict{K,V}) where {K,V}
 	# The eltype check gives some false positives, but it prevents some unnecessary traversal and mostly gets the job done
 	replace_keys = Deduplicators._deduplicate_eltype(K)
 	replace_values = Deduplicators._deduplicate_eltype(V)
 
 	if dedup_keys && dedup_values
-		Dict(_replace_dependencies(upstream, k)=>_replace_dependencies(upstream, v) for (k,v) in dict)
+		Dict(map_specs(f, k)=>map_specs(f, v) for (k,v) in dict)
 	elseif dedup_values
-		Dict(k=>_replace_dependencies(upstream, v) for (k,v) in dict)
+		Dict(k=>map_specs(f, v) for (k,v) in dict)
 	elseif dedup_keys
-		Dict(_replace_dependencies(upstream, k)=>v for (k,v) in dict)
+		Dict(map_specs(f, k)=>v for (k,v) in dict)
 	else
 		dict
 	end
 end
 
-function _replace_dependencies(upstream, nt::T) where T<:NamedTuple
-	map(x->_replace_dependencies(upstream,x), nt)
+function map_specs(f, nt::T) where T<:NamedTuple
+	map(x->map_specs(f,x), nt)
 end
 
-function _replace_dependencies(upstream, df::DataFrame)
+function map_specs(f, df::DataFrame)
 	# This handles the somewhat strange case of putting Specs as elements of DataFrame column vectors
-	DataFrame((name=>_replace_dependencies(upstream,col) for (name,col) in pairs(eachcol(df)))...; copycols=false)
+	DataFrame((name=>map_specs(f,col) for (name,col) in pairs(eachcol(df)))...; copycols=false)
 end
 
-function _replace_dependencies(upstream, x::T) where T
-	# @assert Deduplicators.deconstruct_type(T) "_replace_dependencies fallback only available for types that can be deconstructed, got $T."
+function map_specs(f, x::T) where T
+	# @assert Deduplicators.deconstruct_type(T) "map_specs fallback only available for types that can be deconstructed, got $T."
 	if Deduplicators.deconstruct_type(T)
 		xd = Deduplicators.deconstruct(x)::Tuple
-		xd = map(x->_replace_dependencies(upstream,x), xd)
+		xd = map(x->map_specs(f,x), xd)
 		Deduplicators.reconstruct(T, xd)
 	else
-		# TODO: Should we have this fallback? Or define _replace_dependencies for everything including Int, String, etc.
+		# TODO: Should we have this fallback? Or define map_specs for everything including Int, String, etc.
 		x
 	end
 end
@@ -236,6 +235,10 @@ end
 
 fetched(spec::Spec) = Spec(spec.sa, Fetch())
 prefetched(spec::Spec) = Spec(spec.sa, Prefetch())
+
+fetched(x) = map_specs(fetched, x)
+prefetched(x) = map_specs(prefetched, x)
+
 
 
 # --- printing ---
