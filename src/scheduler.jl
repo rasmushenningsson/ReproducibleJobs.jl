@@ -120,7 +120,7 @@ function replace_forwarded(sa::SpecArgs, upstream::IdDict{Spec,Any})
 	err = propagate_error(sa, values(upstream))
 	err !== nothing && return err
 
-	return replace_dependencies(upstream, sa)
+	return map_specs(x->get(upstream,x,x), sa)
 
 	# replacer = _arg_replacer(upstream)
 
@@ -147,7 +147,7 @@ function compute(sa::SpecArgs, upstream::IdDict{Spec,Any})
 		# args = (copy_nested(unwrapper, a) for a in sa.args)
 		# kwargs = (copy_nested(unwrapper, k)=>copy_nested(unwrapper,v) for (k,v) in sa.kwargs if !startswith(string(k),"__"))
 
-		sa_replaced = replace_dependencies(upstream, sa)
+		sa_replaced = map_specs(x->get(upstream,x,x), sa)
 		args = sa_replaced.args
 		kwargs = sa_replaced.kwargs
 

@@ -10,7 +10,7 @@ is_preprocessing(f) = false
 
 function get_dependencies(f::F, sa::SpecArgs) where F
 	deps = Spec[]
-	visit_dependencies(sa) do dep::Spec
+	visit_specs(sa) do dep::Spec
 		f(dep.op) && push!(deps, dep)
 	end
 	return unique!(deps)
