@@ -331,8 +331,6 @@ function extend_print_node!(pn::PrintNode, spec::Spec)
 	deduplicator = default_deduplicator() # TODO: Use from scheduler somehow?
 	h = Deduplicators.lookup_hash(deduplicator, spec.sa)
 
-	# set_hash!(pn, h)
-
 	extend_title!(pn, HashOridinal(pn.context, h))
 
 	if !add_hash!(pn.context, h)

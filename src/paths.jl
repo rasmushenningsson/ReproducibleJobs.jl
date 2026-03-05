@@ -70,6 +70,3 @@ checksummedfilepath_spec(fp::AbstractString; kwargs...) =
 	checksummedfilepath_spec(TimestampedFilePath(fp); kwargs...)
 
 # checksummedfilepath_job(fp; kwargs...) = Job(checksummedfilepath_spec(fp; kwargs...))
-
-
-copy_arg(ts::TimestampedFilePath) = ts # Already managed, no need to copy

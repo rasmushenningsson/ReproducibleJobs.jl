@@ -11,7 +11,6 @@ end
 Base.:(==)(a::SpecArgs, b::SpecArgs) = a.f == b.f && a.args == b.args && a.kwargs == b.kwargs
 Base.isequal(a::SpecArgs, b::SpecArgs) = isequal(a.f, b.f) && isequal(a.args, b.args) && isequal(a.kwargs, b.kwargs)
 
-# deduplicate_type(::Deduplicator, ::Type{SpecArgs}) = true
 
 Deduplicators.deduplicate_type(::Type{SpecArgs}) = true
 Deduplicators.deduplication_pointer(sa::SpecArgs) = pointer_from_objref(sa)
@@ -246,7 +245,6 @@ function Base.show(io::IO, spec::Spec)
 	if get(io,:compact,false)
 		show(io, spec.f)
 	else
-		# print_spec_old(io, spec; maxdepth=20)
 		print_spec(io, spec; maxdepth=20)
 	end
 end
