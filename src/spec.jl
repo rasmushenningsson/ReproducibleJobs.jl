@@ -249,11 +249,11 @@ function _map_specs(f::F, dict::Dict{K,V}) where {F,K,V}
 	replace_keys = Deduplicators._deduplicate_eltype(K)
 	replace_values = Deduplicators._deduplicate_eltype(V)
 
-	if dedup_keys && dedup_values
+	if replace_keys && replace_values
 		Dict(map_specs(f, k)=>map_specs(f, v) for (k,v) in dict)
-	elseif dedup_values
+	elseif replace_values
 		Dict(k=>map_specs(f, v) for (k,v) in dict)
-	elseif dedup_keys
+	elseif replace_keys
 		Dict(map_specs(f, k)=>v for (k,v) in dict)
 	else
 		dict
