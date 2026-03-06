@@ -6,7 +6,6 @@ using Scratch: @get_scratch!
 using JLD2: JLD2, jldopen, load, ZstdFilter
 import AbstractTrees # for pretty printing
 using SHA
-import TupleTools # for sorting of tuples
 import Dates # for printing of timestamped paths
 
 using LinearAlgebra # For handling copy_arg(transposed)
