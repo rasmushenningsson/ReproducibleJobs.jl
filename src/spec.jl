@@ -97,19 +97,6 @@ Base.isequal(a::SpecArgs, b::SpecArgs) = sa_isequal(a, b)
 
 
 
-# TODO: Remove this? It's not very useful anyway. isequal is the way to go.
-function Base.:(==)(a::SpecArgs, b::SpecArgs)
-	# Annoying way to handle missing values with ==.
-	rf = a.f == b.f
-	rf === false && return false
-	ra = a.args == b.args
-	ra === false && return false
-	rkw = a.kwargs == b.kwargs
-	rkw === false && return false
-	ismissing(rf) || ismissing(ra) || ismissing(rkw) ? missing : true
-end
-
-
 
 
 
@@ -192,7 +179,6 @@ function create_spec(f, args...; scheduler=get_scheduler(), deduplicator=schedul
 end
 
 
-Base.:(==)(a::Spec, b::Spec) = a.op == b.op && a.sa == b.sa
 Base.isequal(a::Spec, b::Spec) = isequal(a.op, b.op) && isequal(a.sa, b.sa)
 
 
