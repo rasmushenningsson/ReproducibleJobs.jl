@@ -238,15 +238,16 @@ end
 
 
 # NB: To map all dependencies of a spec, call map_specs on spec.sa.
-map_specs(f, spec::Spec) = f(spec)
+map_specs(f::F, spec::Spec) where F = @something f(spec) spec
 
-function map_specs(f, sa::SpecArgs)
+function _map_specs(f::F, sa::SpecArgs) where F
 	a = map_specs(f, sa.args)
 	kw = map_specs(f, sa.kwargs)
 	SpecArgs(sa.f, a, kw)
 end
+map_specs(f::F, sa::SpecArgs) where F = @something f(sa) _map_specs(f, sa)
 
-function map_specs(f, v::AbstractVector{T}) where T
+function _map_specs(f::F, v::AbstractVector{T}) where {F,T}
 	# The eltype check gives some false positives, but it prevents some unnecessary traversal and mostly gets the job done
 	if Deduplicators._deduplicate_eltype(T)
 		ReadOnlyArray(map_specs.(Ref(f), v))
@@ -254,7 +255,9 @@ function map_specs(f, v::AbstractVector{T}) where T
 		v # keep as is
 	end
 end
-function map_specs(f, dict::Dict{K,V}) where {K,V}
+map_specs(f::F, v::AbstractVector{T}) where {F,T} = @something f(v) _map_specs(f, v)
+
+function _map_specs(f::F, dict::Dict{K,V}) where {F,K,V}
 	# The eltype check gives some false positives, but it prevents some unnecessary traversal and mostly gets the job done
 	replace_keys = Deduplicators._deduplicate_eltype(K)
 	replace_values = Deduplicators._deduplicate_eltype(V)
@@ -269,17 +272,17 @@ function map_specs(f, dict::Dict{K,V}) where {K,V}
 		dict
 	end
 end
+map_specs(f::F, dict::Dict{K,V}) where {F,K,V} = @something f(dict) _map_specs(f, dict)
 
-function map_specs(f, nt::T) where T<:NamedTuple
-	map(x->map_specs(f,x), nt)
-end
+map_specs(f::F, nt::T) where {F,T<:NamedTuple} =
+	@something f(nt) map(x->map_specs(f,x), nt)
 
-function map_specs(f, df::DataFrame)
+function map_specs(f::F, df::DataFrame) where F
 	# This handles the somewhat strange case of putting Specs as elements of DataFrame column vectors
-	DataFrame((name=>map_specs(f,col) for (name,col) in pairs(eachcol(df)))...; copycols=false)
+	@something f(df) DataFrame((name=>map_specs(f,col) for (name,col) in pairs(eachcol(df)))...; copycols=false)
 end
 
-function map_specs(f, x::T) where T
+function _map_specs(f::F, x::T) where {F,T}
 	# @assert Deduplicators.deconstruct_type(T) "map_specs fallback only available for types that can be deconstructed, got $T."
 	if Deduplicators.deconstruct_type(T)
 		xd = Deduplicators.deconstruct(x)::Tuple
@@ -290,13 +293,17 @@ function map_specs(f, x::T) where T
 		x
 	end
 end
+map_specs(f::F, x::T) where {F,T} = @something f(x) _map_specs(f, x)
 
 
-fetched(spec::Spec) = Spec(spec.sa, Fetch())
-prefetched(spec::Spec) = Spec(spec.sa, Prefetch())
+_fetched(::Any) = nothing
+_fetched(spec::Spec) = Spec(spec.sa, Fetch())
 
-fetched(x) = map_specs(fetched, x)
-prefetched(x) = map_specs(prefetched, x)
+_prefetched(::Any) = nothing
+_prefetched(spec::Spec) = Spec(spec.sa, Prefetch())
+
+fetched(x) = map_specs(_fetched, x)
+prefetched(x) = map_specs(_prefetched, x)
 
 
 
