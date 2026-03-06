@@ -380,7 +380,7 @@ end
 function _load_file(cache::Cache{K}, key::K, fp) where K
 	jldopen(fp, "r") do io
 		original_key = cache_load(cache, io, "key")
-		@assert isequal(key, original_key) # Maybe just warn instead? At least until we have a better way to compare.
+		@assert isequal(key, original_key) "Spec doesn't match cached spec, even though hashes are equal."
 		x = cache_load(cache, io, "root")
 		deduplicate!(cache.deduplicator, x; transfer_ownership=true)
 	end
@@ -390,7 +390,7 @@ end
 function _load_compound_result_structure(cache::Cache{K}, key::K, fp) where K
 	jldopen(fp, "r") do io
 		original_key = cache_load(cache, io, "key")
-		@assert isequal(key, original_key) # Maybe just warn instead? At least until we have a better way to compare.
+		@assert isequal(key, original_key) "Spec doesn't match cached spec, even though hashes are equal."
 		cache_load_compound_result_structure(io["root"])
 	end
 end
