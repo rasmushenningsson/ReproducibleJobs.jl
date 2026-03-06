@@ -78,7 +78,7 @@ end
 function replace_forwarded(sa::SpecArgs, upstream::IdDict{Spec,Any})
 	err = propagate_error(sa, values(upstream))
 	err !== nothing && return err
-	return map_specs(x->get(upstream,x,x), sa)
+	return map_specs(x->get(upstream,x,nothing), sa)
 end
 
 
@@ -92,7 +92,7 @@ function compute(scheduler::Scheduler, sa::SpecArgs, upstream::IdDict{Spec,Any})
 		v = _get_kwarg(sa, :__version, nothing)
 		@assert v !== nothing "__version kwarg must be provided for all (non-preprocessing) specs."
 
-		sa_replaced = map_specs(x->get(upstream,x,x), sa)
+		sa_replaced = map_specs(x->get(upstream,x,nothing), sa)
 		args = sa_replaced.args
 		kwargs = sa_replaced.kwargs
 
