@@ -110,15 +110,14 @@ abstract type AbstractSpecOp end
 struct Call <: AbstractSpecOp end
 struct Fetch <: AbstractSpecOp end # Means fetch immediately (e.g. get as value during preprocessing)
 struct Prefetch <: AbstractSpecOp end # Replace spec by result just before computing - useful to collapse multiple specs that yield the same result onto the same spec.
-struct Forward <: AbstractSpecOp end # Is this a good name?
+struct Forward <: AbstractSpecOp end
 
 Deduplicators.deduplicate_type(::Type{<:AbstractSpecOp}) = false
 Deduplicators.deconstruct_weak_rec(x::T) where T<:AbstractSpecOp = x
 Deduplicators.reconstruct_weak_rec(x::T) where T<:AbstractSpecOp = x
 
 function Deduplicators.cache_save(io, name, x::AbstractSpecOp)
-	# Refactoring TODO: Do not save the structs as is, use either custom cache_save or custom_wrap.
-	io[name] = x
+	io[name] = x # Rely on JLD2 standard handling for saving/loading
 	nothing
 end
 

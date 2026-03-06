@@ -1,3 +1,4 @@
+# NB: If we change how TimestampedFilePath works, we must change its stable_hash too.
 struct TimestampedFilePath
 	path::String
 	timestamp::Float64
@@ -9,8 +10,7 @@ Deduplicators.deconstruct_weak_rec(x::TimestampedFilePath) = x
 Deduplicators.reconstruct_weak_rec(x::TimestampedFilePath) = x
 
 function Deduplicators.cache_save(io, name, x::TimestampedFilePath)
-	# Refactoring TODO: Do not save the structs as is, use either custom cache_save or custom_wrap.
-	io[name] = x
+	io[name] = x # Rely on JLD2 standard handling for saving/loading
 	nothing
 end
 
@@ -21,6 +21,7 @@ function Base.show(io::IO, ts::TimestampedFilePath)
 end
 
 
+# NB: If we change how ChecksummedFilePath works, we must change its stable_hash too.
 struct ChecksummedFilePath
 	path::String
 	timestamp::Float64
@@ -39,7 +40,7 @@ checksummedfilepath(path) = ChecksummedFilePath(path)
 
 StableHashTraits.transformer(::Type{<:ChecksummedFilePath}) = StableHashTraits.Transformer(pick_fields(:checksum))
 
-Base.:(==)(a::ChecksummedFilePath, b::ChecksummedFilePath) = a.checksum == b.checksum
+Base.isequal(a::ChecksummedFilePath, b::ChecksummedFilePath) = isequal(a.checksum, b.checksum) # This allows us to compare with old specs saved to disk - even if the file moved change timestamp.
 
 
 Deduplicators.deduplicate_type(::Type{ChecksummedFilePath}) = false
@@ -47,8 +48,7 @@ Deduplicators.deconstruct_weak_rec(x::ChecksummedFilePath) = x
 Deduplicators.reconstruct_weak_rec(x::ChecksummedFilePath) = x
 
 function Deduplicators.cache_save(io, name, x::ChecksummedFilePath)
-	# Refactoring TODO: Do not save the structs as is, use either custom cache_save or custom_wrap.
-	io[name] = x
+	io[name] = x # Rely on JLD2 standard handling for saving/loading
 	nothing
 end
 
