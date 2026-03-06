@@ -5,36 +5,40 @@ _nameof(::Type{<:ReadOnlyArray{V,N,T}}) where {V,N,T} = _nameof(T)
 _typenameof(x::T) where T = _nameof(T)
 
 
-struct PrintContext{S<:Scheduler}
-	scheduler::S
-	hashes::Dict{Deduplicators.Hash,Int} # Hashes mapping to how many times they have been seen
-	hash_ordinals::Dict{Deduplicators.Hash,Int} # hashes seen at least twice, mapping to an ordinal
+struct PrintContext
+	pointers::Dict{Ptr{Nothing},Int} # Pointers mapping to how many times they have been seen
+	pointer_to_ordinal::Dict{Ptr{Nothing},Int} # Pointers seen at least twice, mapping to an ordinal
 	depth::Int
 	line_length::Int
 end
-PrintContext(scheduler; line_length=80) = PrintContext(scheduler, Dict{Deduplicators.Hash,Int}(), Dict{Deduplicators.Hash,Int}(), 0, line_length)
+PrintContext(; line_length=80) = PrintContext(Dict{Ptr{Nothing},Int}(), Dict{Ptr{Nothing},Int}(), 0, line_length)
 
-function add_hash!(pc::PrintContext, h::Deduplicators.Hash)
-	n = get(pc.hashes, h, 0)
-	pc.hashes[h] = n+1
+function add_pointer!(pc::PrintContext, p::Ptr{Nothing})
+	n = get(pc.pointers, p, 0)
+	pc.pointers[p] = n+1
 	n > 0 # return true if seen before
 end
 
 
-descend(pc::PrintContext) = PrintContext(pc.scheduler, pc.hashes, pc.hash_ordinals, pc.depth+1, pc.line_length)
+descend(pc::PrintContext) = PrintContext(pc.pointers, pc.pointer_to_ordinal, pc.depth+1, pc.line_length)
 
 
 
 _materialize_string(x::AbstractString) = x
 
 
-struct HashOridinal
+_get_pointer(x) = Deduplicators.deduplication_pointer(x)
+_get_pointer(x::ReadOnlyArray) = Deduplicators.deduplication_pointer(parent(x))
+
+
+
+struct PointerOridinal
 	context::PrintContext
-	h::Deduplicators.Hash
+	p::Ptr{Nothing}
 end
-function _materialize_string(ho::HashOridinal)
-	if ho.context.hashes[ho.h] > 1
-		ordinal = get!(ho.context.hash_ordinals, ho.h, length(ho.context.hash_ordinals)+1)
+function _materialize_string(po::PointerOridinal)
+	if po.context.pointers[po.p] > 1
+		ordinal = get!(po.context.pointer_to_ordinal, po.p, length(po.context.pointer_to_ordinal)+1)
 		styled"{blue:#$ordinal}"
 	else
 		nothing
@@ -155,7 +159,7 @@ function print_limited_string(io, max_n, ls::LimitedString)
 end
 
 
-const PrintTitleElement = Union{String, AnnotatedString, HashOridinal, LimitedString}
+const PrintTitleElement = Union{String, AnnotatedString, PointerOridinal, LimitedString}
 
 struct PrintTitle
 	items::Vector{PrintTitleElement}
@@ -181,7 +185,7 @@ function Base.show(io::IO, pn::PrintNode)
 	n_limited = 0
 	items = PrintTitleElement[]
 	for item in pn.title.items
-		if item isa HashOridinal
+		if item isa PointerOridinal
 			item = _materialize_string(item)
 		end
 		if item isa AbstractString
@@ -329,11 +333,11 @@ function extend_print_node!(pn::PrintNode, spec::Spec)
 
 	isempty(suffix) || extend_title!(pn, suffix)
 
-	h = Deduplicators.lookup_hash(pn.context.scheduler.deduplicator, spec.sa)
+	p = _get_pointer(spec.sa)
+	@assert p !== C_NULL
+	extend_title!(pn, PointerOridinal(pn.context, p))
 
-	extend_title!(pn, HashOridinal(pn.context, h))
-
-	if !add_hash!(pn.context, h)
+	if !add_pointer!(pn.context, p)
 		# First time we see this item
 		context2 = descend(pn.context)
 		for a in spec.sa.args
@@ -354,10 +358,11 @@ function extend_print_node_expanded!(f, pn::PrintNode, a::T; unwrap=identity) wh
 	max_n = 20
 	extend_title!(pn, styled"{magenta:$(_nameof(T))}")
 
-	h = Deduplicators.lookup_hash(pn.context.scheduler.deduplicator, a)
-	h !== nothing && extend_title!(pn, HashOridinal(pn.context,h))
+	p = _get_pointer(a)
+	@assert p !== C_NULL
+	p !== nothing && extend_title!(pn, PointerOridinal(pn.context, p))
 
-	if h === nothing || !add_hash!(pn.context, h)
+	if p === nothing || !add_pointer!(pn.context, p)
 		# First time we see this item
 		context2 = descend(pn.context)
 		for (i,x) in enumerate(unwrap(a))
@@ -458,10 +463,11 @@ function extend_print_node!(pn::PrintNode, x::DataFrame)
 
 	extend_title!(pn, styled"{magenta:DataFrame}")
 
-	h = Deduplicators.lookup_hash(pn.context.scheduler.deduplicator, x)
-	h !== nothing && extend_title!(pn, HashOridinal(pn.context,h))
+	p = _get_pointer(x)
+	@assert p !== C_NULL
+	extend_title!(pn, PointerOridinal(pn.context, p))
 
-	if h === nothing || !add_hash!(pn.context, h)
+	if !add_pointer!(pn.context, p)
 		context2 = descend(pn.context)
 		for (i,(k,v)) in enumerate(pairs(eachcol(x)))
 			if i > max_n
@@ -488,8 +494,8 @@ function build_print_node(context, value; prefix="")
 end
 
 
-function print_spec(io::IO, spec::Spec; scheduler=get_scheduler(), kwargs...)
-	context = PrintContext(scheduler; line_length=displaysize(io)[2])
+function print_spec(io::IO, spec::Spec; kwargs...)
+	context = PrintContext(; line_length=displaysize(io)[2])
 	tree = build_print_node(context, spec)
 	AbstractTrees.print_tree(io, tree; kwargs...)
 end
