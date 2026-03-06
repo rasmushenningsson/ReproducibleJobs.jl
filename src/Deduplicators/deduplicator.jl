@@ -421,6 +421,7 @@ end
 function deduplicate_children!(d, nt::T; kwargs...) where T<:NamedTuple
 	map(x->deduplicate!(d,x; kwargs...), nt)
 end
+canonicalize(nt::T) where T<:NamedTuple = sort_namedtuple_by_keys(nt)
 function deduplication_hash(d, nt::T) where T<:NamedTuple
 	compute_hash(d, map(x->hash_or_value(d,x), nt))
 end

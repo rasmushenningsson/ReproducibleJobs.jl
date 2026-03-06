@@ -1085,7 +1085,7 @@ function run_cache_storage_tests()
 
 		@testset "$T" for (f,T) in ((a->[a...], ROVec{Any}),
 		                            (identity, Tuple),
-		                            (a->NamedTuple(Symbol.(string.("s",1:length(a))) .=> a), NamedTuple),
+		                            (a->NamedTuple(Symbol.(string.("s",'A'.+(1:length(a)))) .=> a), NamedTuple),
 		                           )
 			x = f(values)
 			cache = Cache(CacheKey, Deduplicator(); dir)

@@ -133,8 +133,8 @@ function run_deduplicator_tests()
 			y = (; v=[8,2,4], u=[4,2])
 			y2 = @inferred deduplicate!(d, y)
 
-			@test y2 == y
-			@test y2 isa @NamedTuple{v::ROVec{Int64}, u::ROVec{Int64}}
+			@test pairs(y2) == pairs(y)
+			@test y2 isa @NamedTuple{u::ROVec{Int64}, v::ROVec{Int64}}
 			@test parent(y2.v) !== y.v
 
 			@test @inferred(deduplicate!(d, y)) === y2

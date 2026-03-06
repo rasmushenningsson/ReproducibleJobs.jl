@@ -2,6 +2,7 @@ module Deduplicators
 
 using StableHashTraits
 using ReadOnlyArrays
+import TupleTools # for sorting of tuples
 using JLD2: JLD2, jldopen, ZstdFilter
 
 using SparseArrays # TODO: Move to package extension
@@ -36,6 +37,7 @@ persist_cache_path!(path::String) = @set_preferences!("cache_path"=>expanduser(p
 get_cache_path() = @something @load_preference("cache_path") ".cache"
 
 
+include("utils.jl")
 include("hash.jl")
 include("compound_result.jl")
 include("deduplicator.jl")
