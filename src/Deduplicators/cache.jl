@@ -146,35 +146,24 @@ JLD2.rconvert(::Type{CustomStorage{T}}, value::String) where T<:SupportedFunctio
 
 
 
-
-# Testing
-function store_eltype_inline(::Type{T}) where T
+function _store_eltype_union_rec(::Type{T}) where T
 	if T isa Union
-		_store_eltype_inline(T.a) && _store_eltype_inline(T.b)
+		_store_eltype_union_rec(T.a) && _store_eltype_union_rec(T.b) # recursion handles Unions of more than two types
 	else
-		_store_eltype_inline(T)
+		isbitstype(T) || T == String || T == Symbol
 	end
 end
+function store_eltype_union(::Type{T}) where T
+	T isa Union ? _store_eltype_union_rec(T) : false
+end
 
-# Not allowed in Unions/Tuples
-store_eltype_inline(::Type{<:String}) = true
-store_eltype_inline(::Type{<:Symbol}) = true
-
-# Allowed in Unions
-_store_eltype_inline(::Type{T}) where T<:Tuple =
-	all(_store_eltype_inline, fieldtypes(T))
-_store_eltype_inline(::Type{T}) where T<:NamedTuple =
-	all(_store_eltype_inline, fieldtypes(T))
-_store_eltype_inline(::Type{Pair{K,V}}) where {K,V} =
-	_store_eltype_inline(K) && _store_eltype_inline(V)
-_store_eltype_inline(::Type{<:Number}) = true
-_store_eltype_inline(::Type{<:Char}) = true
-_store_eltype_inline(::Type{<:Nothing}) = true
-_store_eltype_inline(::Type{<:Missing}) = true
-_store_eltype_inline(::Type{<:Colon}) = true
-
-# Default behavior is to not inline
-_store_eltype_inline(::Type{T}) where T = false
+function split_union_type(::Type{T}) where T
+	if T isa Union
+		(split_union_type(T.a)..., split_union_type(T.b)...)
+	else
+		(T,)
+	end
+end
 
 
 
@@ -255,10 +244,48 @@ end
 _index_to_string(i::Int) = string(i)
 _index_to_string(I::CartesianIndex) = join(Tuple(I), '_')
 
-function cache_save(io, name, result::Array{T,N}) where {T,N}
-	if store_eltype_inline(T) || isempty(result)
+
+function _cache_save_string_array(io, name, type_str, result::Array{T,N}) where {T,N}
+	g = JLD2.Group(io, name)
+	g["type"] = type_str
+	g["size"] = size(result)
+
+	lengths = ncodeunits.(String.(result)) # This handles Symbols too
+	g["lengths"] = lengths
+
+	tot_length = sum(lengths)
+	bytes = UInt8[]
+	sizehint!(bytes, tot_length)
+	for s in result
+		append!(bytes, codeunits(String(s))) # This handles Symbols too
+	end
+	@assert length(bytes) == tot_length
+	g["bytes"] = bytes
+	nothing
+end
+
+cache_save(io, name, result::Array{String,N}) where N =
+	_cache_save_string_array(io, name, "ArrayOfStrings", result)
+cache_save(io, name, result::Array{Symbol,N}) where N =
+	_cache_save_string_array(io, name, "ArrayOfSymbols", result)
+
+function cache_save(io, name, result::Array{T,N}) where {T,N} # NB: Strings/Symbols are handled above
+	# if store_eltype_inline(T) || isempty(result)
+	if isbitstype(T) || isempty(result)
 		# Rely on JLD2 for inlined eltypes - and to store type info for empty arrays
 		io[name] = result
+	elseif store_eltype_union(T)
+		g = JLD2.Group(io, name)
+		g["type"] = "ArrayUnion"
+		g["size"] = size(result)
+
+		ut = split_union_type(T)
+		type_index = UInt8[findfirst(S->x isa S, ut) for x in result]
+		g["type_index"] = type_index
+		for (i,Ti) in enumerate(ut)
+			part = Ti[result[k] for k in eachindex(result) if result[k] isa Ti]
+			cache_save(g, string(i), part)
+		end
 	else
 		# Save as a group
 		g = JLD2.Group(io, name)
@@ -272,6 +299,30 @@ function cache_save(io, name, result::Array{T,N}) where {T,N}
 end
 cache_save(io, name, result::ROArray{T,N}) where {T,N} = cache_save(io, name, parent(result))
 
+
+function _cache_load_string_array(::Type{T}, cache::Cache, g, sz::NTuple{N,Int}) where {T,N}
+	lengths = g["lengths"]::Array{Int,N}
+	@assert length(lengths) == prod(sz)
+	bytes = g["bytes"]::Vector{UInt8}
+	out = Array{T,N}(undef, sz)
+	pos = 1
+	for (i,len) in enumerate(lengths)
+		out[i] = T(String(@views(bytes[pos:pos+len-1]))) # Using StringViews.jl we could get rid of an allocation when creating Symbols here
+		pos += len
+	end
+	out
+end
+function cache_load(cache::Cache, ::Val{:ArrayOfStrings}, g)
+	sz = g["size"]
+	_cache_load_string_array(String, cache, g, sz)
+end
+function cache_load(cache::Cache, ::Val{:ArrayOfSymbols}, g)
+	sz = g["size"]
+	_cache_load_string_array(Symbol, cache, g, sz)
+end
+
+
+
 function cache_load_array(cache, g, sz::NTuple{N,Int}) where N
 	# a = [cache_load(cache, g, _index_to_string(ind)) for ind in CartesianIndices(sz)]
 	# deduplicate!(cache.deduplicator, a; transfer_ownership=true)
@@ -284,13 +335,34 @@ function cache_load(cache::Cache, ::Val{:Array}, g)
 end
 
 
+function _merge_union_parts(sz, type_index, parts::T) where T<:Tuple
+	out = Array{Union{eltype.(fieldtypes(T))...}}(undef, sz)
+	for i in 1:length(parts)
+		out[type_index.==i] .= parts[i]
+	end
+	out
+end
+function cache_load_array_union(cache, g, sz::NTuple{N,Int}, type_index::Vector{UInt8}) where N
+	n_types = maximum(type_index)
+	parts = ntuple(i->parent(cache_load(cache, g, string(i))), n_types)
+	_merge_union_parts(sz, type_index, parts)
+end
+function cache_load(cache::Cache, ::Val{:ArrayUnion}, g)
+	sz = g["size"]
+	type_index = g["type_index"]
+	a = cache_load_array_union(cache, g, sz, type_index)
+	ReadOnlyArray(a)
+end
+
+
+
+
 function cache_save(io, name, result::ROBitArray{N}) where N
 	# Unwrap ROBitArray into BitArray and rely on JLD2 handling of the BitArray. This implicitly relies on BitArray internals, but we don't need to explicitly deal with them here...
 	# We could consider using CustomStorage, but then we need some way to construct a BitArray from chunks and there is no public interface for that.
 	io[name] = parent(result)
 	nothing
 end
-
 
 
 function cache_save(io, name, result::T) where T<:NamedTuple
