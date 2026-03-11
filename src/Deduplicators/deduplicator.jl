@@ -1,6 +1,5 @@
 deduplicate_type(::Type{T}) where T<:Union{<:Number,String,Symbol,Char,DataType,Colon,Nothing,Missing,VersionNumber,Regex} = false
 
-deduplicate_type(::Type{<:AbstractUnitRange{T}}) where T<:Union{Number,Char} = false
 deduplicate_type(::Type{<:AbstractRange{T}}) where T<:Union{Number,Char} = false
 
 # Simple temporary(?) solution for allowing some functions to be used as arguments
@@ -444,18 +443,6 @@ deduplication_pointer(dict::Dict) = pointer_from_objref(dict)
 
 
 function deduplicate_children!(d, dict::Dict{K,V}; kwargs...) where {K,V}
-	# dedup_keys = _deduplicate_eltype(K)
-	# dedup_values = _deduplicate_eltype(V)
-	# if dedup_keys && dedup_values
-	# 	Dict(deduplicate!(d, k; kwargs...)=>deduplicate!(d, v; kwargs...) for (k,v) in dict)
-	# elseif dedup_values
-	# 	Dict(k=>deduplicate!(d, v; kwargs...) for (k,v) in dict)
-	# elseif dedup_keys
-	# 	Dict(deduplicate!(d, k; kwargs...)=>v for (k,v) in dict)
-	# else
-	# 	dict # nothing to do
-	# end
-
 	dedup_keys = _deduplicate_eltype(K)
 	dedup_values = _deduplicate_eltype(V)
 
