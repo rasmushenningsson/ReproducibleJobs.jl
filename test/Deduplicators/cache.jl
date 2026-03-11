@@ -625,7 +625,7 @@ function run_cache_storage_tests()
 	end
 
 	@testset "Regex" begin
-		@testset "$(repr(x))" for x in (r"text",)# r"^a\d+[^_]", r"text"i, r"text"m, r"text"s, r"text"x, r"text"a)
+		@testset "$(repr(x))" for x in (r"text", r"^a\d+[^_]", r"text"i, r"text"m, r"text"s, r"text"x, r"text"a)
 			cache = Cache(CacheKey, Deduplicator(); dir)
 			key = new_key(cache)
 			x2 = cache_get!(Returns(x), cache, key; use_disk=true)
@@ -780,7 +780,6 @@ function run_cache_storage_tests()
 			@test read(root["type"]) == "DataFrame"
 			@test read(root["names"]) == ["a", "b"]
 			@test read(root["1"]) == [1,5]
-			# @test read(root["2"]) == ["r\"abc\"", "r\"def\""]
 			@test read(root["2"], "type") == "Array"
 			@test read(root["2"], "size") == (; var"1"=2,)
 			@test read(root["2"], "1") == "r\"abc\""
@@ -795,31 +794,34 @@ function run_cache_storage_tests()
 	end
 
 
-	# @testset "Inconcrete pairs" begin
-	# 	# x = [2=>3, 5=>[r"a"]]
-	# 	# x = (2=>3, 5=>[r"a"])
-	# 	# x = (; a=Pair{Int,Any}(5, [r"a"]))
-	# 	# x = Pair{Int,Any}(5, r"a")
-	# 	cache = Cache(CacheKey, Deduplicator(); dir)
-	# 	key = new_key(cache)
-	# 	x2 = cache_get!(Returns(x), cache, key; use_disk=true)
-	# 	@test x2 == x
-	# 	@test deduplicate!(cache.deduplicator, x2) === x2
-	# 	empty!(cache.mem) # force loading from disk
-	# 	x3 = cache_get!(error_fun, cache, key; use_disk=true)
-	# 	@test x3 == x
-	# 	@show typeof(x3)
-	# 	# @test x3 isa ROVec{Pair{Int,Any}}
-	# 	@test deduplicate!(cache.deduplicator, x3) === x3
+	@testset "Inconcrete pairs" begin
+		x = [2=>3, 5=>[1,2]]
+		cache = Cache(CacheKey, Deduplicator(); dir)
+		key = new_key(cache)
+		x2 = cache_get!(Returns(x), cache, key; use_disk=true)
+		@test x2 == x
+		@test deduplicate!(cache.deduplicator, x2) === x2
+		empty!(cache.mem) # force loading from disk
+		x3 = cache_get!(error_fun, cache, key; use_disk=true)
+		@test x3 == x
+		@test x3 isa ROVec{Pair{Int}}
+		@test deduplicate!(cache.deduplicator, x3) === x3
 
-	# 	# Test that the value was properly written using Groups and CustomStorage
-	# 	h5open(key2path(cache, key), "r") do h5
-	# 		root = h5["root"]
-	# 		@show root
-	# 		# read(h5, "root")
-	# 		# @show read(root, "type")
-	# 	end
-	# end
+		# Test that the value was properly written using Groups and CustomStorage
+		h5open(key2path(cache, key), "r") do h5
+			root = h5["root"]
+			@test read(root, "type") == "Array"
+			@test read(root, "size") == (; var"1"=2,)
+			@test read(root["1"], "type") == "Pair"
+			@test read(root["1"], "length") == 2
+			@test read(root["1"], "1") == 2
+			@test read(root["1"], "2") == 3
+			@test read(root["2"], "type") == "Pair"
+			@test read(root["2"], "length") == 2
+			@test read(root["2"], "1") == 5
+			@test read(root["2"], "2") == [1,2]
+		end
+	end
 
 
 	@testset "Returns" begin
@@ -1004,15 +1006,10 @@ function run_cache_storage_tests()
 		                            (a->Dict(1:length(a) .=> a), Dict{Int}), # test values
 		                            (a->Dict(a .=> 1:length(a)), Dict{K,Int} where K), # test keys 
 		                           )
-			@testset "$E" for (elements,E) in ( # ((1,nothing,5), Union{Int,Nothing}),
-				                                # ((1,missing,5), Union{Int,Missing}),
-				                                ((1=>false,5=>true), Pair{Int,Bool}),
+			@testset "$E" for (elements,E) in ( ((1=>false,5=>true), Pair{Int,Bool}),
 				                                (((1,5.0),(8,7.0)), Tuple{Int,Float64}),
 				                                (((;v=1,u=5.0),(;v=8,u=7.0)), @NamedTuple{v::Int,u::Float64}),
-				                                # ((Returns(1),Returns(5)), Returns{Int}), # ACTUALLY I DON'T WANT THIS TO INLINE, FIX!
 				                                (((1,2)=>(3=>4),(5,6)=>(7=>8)), Pair{Tuple{Int,Int},Pair{Int,Int}}), # some nesting
-				                                # (("a","b"), String),
-				                                # ((:a,:b), Symbol),
 				                                (('a','b'), Char),
 			                                  )
 				if Nothing <: E && T == Dict{K,Int} where K
@@ -1059,7 +1056,6 @@ function run_cache_storage_tests()
 						_fuzzy_pop!(types, "NTuple")
 						_fuzzy_pop!(types, r"(^|\.)Tuple")
 					end
-					# E <: Returns && @test _fuzzy_pop!(types, "Returns")
 					if E <: Pair{<:Tuple, <:Pair}
 						# We don't care that much JLD2 stores the Pair, so no @test for these:
 						_fuzzy_pop!(types, "NTuple")
@@ -1072,60 +1068,6 @@ function run_cache_storage_tests()
 			end
 		end
 	end
-
-
-	# @testset "Non-inlined eltypes" begin
-	# 	@testset "$T" for (f,T) in ((a->[a...], ROVec),
-	# 	                            (a->Dict(1:length(a) .=> a), Dict{Int}), # test values
-	# 	                            (a->Dict(a .=> 1:length(a)), Dict{K,Int} where K), # test keys - are there any Key types we can test this with?
-	# 	                           )
-	# 		@testset "$E" for (elements,E) in ( ((Returns(1), Returns(5)), Returns{Int}),
-	# 			                                ((1=>"a",5=>"b"), Pair{Int,String}),
-	# 			                                ((:a=>1,:b=>5), Pair{Symbol,Int}),
-	# 			                                ((('a',"A"),('b',"B")), Tuple{Char,String}),
-	# 		                                  )
-	# 			if E <: Returns && T == Dict{K,Int} where K
-	# 				continue # We do not support Returns as a Key in Dicts because it cannot be naturally compared with isless (which is need for hashing currently)
-	# 			end
-
-	# 			x = f(elements)
-	# 			cache = Cache(CacheKey, Deduplicator(); dir)
-	# 			key = new_key(cache)
-	# 			x2 = cache_get!(Returns(x), cache, key; use_disk=true)
-	# 			@test x2 == x
-	# 			@test deduplicate!(cache.deduplicator, x2) === x2
-	# 			empty!(cache.mem) # force loading from disk
-	# 			x3 = cache_get!(error_fun, cache, key; use_disk=true)
-	# 			@test x3 == x
-	# 			@test x3 isa T{E}
-	# 			@test deduplicate!(cache.deduplicator, x3) === x3
-
-	# 			h5open(key2path(cache, key), "r") do h5
-	# 				root = h5["root"]
-	# 				if T <: ROArray
-	# 					g = root
-	# 				elseif T <: Dict{Int}
-	# 					@test read(root, "type") == "Dict"
-	# 					g = root["values"]
-	# 				elseif T <: Dict{<:Any,Int}
-	# 					@test read(root, "type") == "Dict"
-	# 					g = root["keys"]
-	# 				else
-	# 					error("Unhandled case.")
-	# 				end
-	# 				@test read(g, "type") == "Array"
-	# 				@test read(g, "size") == (; var"1"=length(elements),)
-
-	# 				types, custom = extract_jld2_types(h5)
-	# 				@test _fuzzy_pop!(types, r"(^|\.)Tuple") # used for Array size
-	# 				E <: Pair{Symbol} && @test _fuzzy_pop!(types, "Symbol")
-	# 				E <: Tuple{Char,<:Any} && @test _fuzzy_pop!(types, "Char")
-	# 				@test types == []
-	# 				@test custom == []
-	# 			end
-	# 		end
-	# 	end
-	# end
 
 
 	# TODO: Test with Dict/Set too?
@@ -1282,7 +1224,6 @@ function run_cache_storage_tests()
 			@test x3 isa ROVec{eltype(x)}
 			@test deduplicate!(cache.deduplicator, x3) === x3
 
-			clipboard(key2path(cache, key))
 			h5open(key2path(cache, key), "r") do h5
 				root = h5["root"]
 
