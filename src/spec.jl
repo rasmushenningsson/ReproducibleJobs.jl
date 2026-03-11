@@ -122,13 +122,6 @@ function Deduplicators.cache_save(io, name, x::AbstractSpecOp)
 end
 
 
-
-# Are these still needed?
-forward(::Call) = Call()
-forward(::Fetch) = Fetch()
-forward(::Prefetch) = Prefetch()
-forward(::Forward) = Forward()
-
 default_spec_op() = Forward()
 
 
@@ -173,7 +166,7 @@ function create_spec(f, args...; scheduler=get_scheduler(), deduplicator=schedul
 	kw = values(kwargs)
 	kw = Deduplicators.sort_namedtuple_by_keys(kw)
 	sa = SpecArgs(f, args, kw)
-	deduplicator !== nothing && (sa = deduplicate!(deduplicator, SpecArgs(f, args, kw)))
+	deduplicator !== nothing && (sa = deduplicate!(deduplicator, sa))
 	spec = Spec(sa)
 end
 

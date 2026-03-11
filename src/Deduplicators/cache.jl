@@ -12,7 +12,7 @@ function Cache(::Type{K}, deduplicator::Deduplicator{H}; dir=get_cache_path()) w
 	if dir !== nothing
 		dir = abspath(dir) # In case the user changes working directory afterwards
 	end
-	Cache{K,H}(deduplicator, Dict(), dir)
+	Cache{K,H}(deduplicator, WeakKeyDict{K, Any}(), dir)
 end
 
 function Base.empty!(cache::Cache)
@@ -203,10 +203,6 @@ function cache_save(io, name, x::T) where T<:Union{VersionNumber,Regex}
 end
 
 function cache_save(io, name, x::AbstractRange{T}) where T<:Union{Number,Char}
-	io[name] = x
-	nothing
-end
-function cache_save(io, name, x::AbstractUnitRange{T}) where T<:Union{Number,Char}
 	io[name] = x
 	nothing
 end
