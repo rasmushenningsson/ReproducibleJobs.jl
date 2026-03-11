@@ -472,17 +472,6 @@ function deduplicate_children!(d, dict::Dict{K,V}; kwargs...) where {K,V}
 	else
 		dict # nothing to do
 	end
-
-	if dedup_keys && dedup_values
-		Dict(deduplicate!(d, k; kwargs...)=>deduplicate!(d, v; kwargs...) for (k,v) in dict)
-	elseif dedup_values
-		Dict(k=>deduplicate!(d, v; kwargs...) for (k,v) in dict)
-	elseif dedup_keys
-		Dict(deduplicate!(d, k; kwargs...)=>v for (k,v) in dict)
-	else
-		dict # nothing to do
-	end
-
 end
 
 function canonicalize(dict::Dict{K,V}) where {K,V}
