@@ -138,7 +138,7 @@ function run_deduplicator_tests()
 			@test parent(y2.v) !== y.v
 
 			@test @inferred(deduplicate!(d, y)) === y2
-			@test @inferred(deduplicate!(d, y2)) == y2
+			@test @inferred(deduplicate!(d, y2)) === y2
 		end
 
 		@testset "Pair" begin
@@ -663,16 +663,15 @@ function run_deduplicator_tests()
 
 	@testset "Inconcrete Pairs" begin
 		d = Deduplicator()
-		x = [2=>3, 4=>"a"]
-		@test eltype(x) == Pair{Int, Any}
-		@test typeof(x[1]) == Pair{Int, Any} # This is the surprising part, we would have expected it to be Pair{Int,Int}
+		@testset "$(typeof(x))" for x in (Pair{Int,Any}[2=>3, 4=>"a"], Pair{Int}[2=>3, 4=>"a"])
+			x2 = deduplicate!(d, x)
+			@test x2 == x
+			@test x2 !== x
+			@test x2 isa ROVec{Pair{Int}}
 
-		x2 = deduplicate!(d, x)
-		@test x2 == x
-		@test x2 !== x
-
-		@test deduplicate!(d, x) === x2
-		@test deduplicate!(d, x2) === x2 # TODO: Can we make this @inferred?
+			@test deduplicate!(d, x) === x2
+			@test @inferred deduplicate!(d, x2) === x2
+		end
 	end
 
 	@testset "Many items" begin
