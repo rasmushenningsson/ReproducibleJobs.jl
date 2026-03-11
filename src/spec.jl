@@ -77,7 +77,7 @@ sa_isequal(a::NamedTuple, b::NamedTuple) = false # keys are different
 function sa_isequal(a::DataFrame, b::DataFrame)
 	isequal(ncol(a), ncol(b)) || return false
 	isequal(names(a), names(b)) || return false
-	all(t->sa_isequal(t[1], t[2]), zip(eachcol(a),eachol(b)))
+	all(t->sa_isequal(t[1], t[2]), zip(eachcol(a),eachcol(b)))
 end
 
 function sa_isequal(a::T1, b::T2) where {T1,T2}
