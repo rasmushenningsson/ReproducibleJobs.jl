@@ -3,7 +3,11 @@ struct TimestampedFilePath
 	path::String
 	timestamp::Float64
 end
-TimestampedFilePath(path) = (@assert isfile(path); TimestampedFilePath(path, mtime(path)))
+function TimestampedFilePath(path)
+	st = stat(path)
+	@assert isfile(st) "File not found: \"$path\"."
+	TimestampedFilePath(st, mtime(st))
+end
 
 Deduplicators.deduplicate_type(::Type{TimestampedFilePath}) = false
 Deduplicators.deconstruct_weak_rec(x::TimestampedFilePath) = x
