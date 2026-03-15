@@ -6,7 +6,7 @@ end
 function TimestampedFilePath(path)
 	st = stat(path)
 	@assert isfile(st) "File not found: \"$path\"."
-	TimestampedFilePath(st, mtime(st))
+	TimestampedFilePath(path, mtime(st))
 end
 
 Deduplicators.deduplicate_type(::Type{TimestampedFilePath}) = false
