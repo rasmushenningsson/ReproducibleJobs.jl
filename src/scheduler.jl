@@ -15,7 +15,7 @@ Scheduler(; kwargs...) = Scheduler(Deduplicator(); kwargs...)
 
 function Base.empty!(scheduler::Scheduler)
 	empty!(scheduler.deduplicator)
-	empty!(scheduler.cache)
+	# empty!(scheduler.cache)
 	scheduler
 end
 
@@ -163,6 +163,16 @@ end
 
 
 
+# DEBUG
+let proccessing_counts = Dict{Deduplicators.Hash,Int}()
+	global function processing_count(h::Deduplicators.Hash)
+		c = get(proccessing_counts, h, 0) + 1
+		proccessing_counts[h] = c
+		c
+	end
+end
+
+
 
 # Return tuple with result and Bool telling if it's done (TODO: Make code more clear)
 function process_once!(scheduler::Scheduler, sa::SpecArgs, op::T; parent_f) where T
@@ -173,6 +183,11 @@ function process_once!(scheduler::Scheduler, sa::SpecArgs, op::T; parent_f) wher
 		end
 	end
 
+	# DEBUG
+	h = Deduplicators.lookup_hash(scheduler.deduplicator, sa)
+	@info "Processing $(sa.f) ($(Deduplicators.hash_string(h)[1:6]), n=$(processing_count(h)))"
+
+
 	deps = get_dependencies(sa)
 
 	if !is_preprocessing(sa) && all(s->s.op === Call(), deps)
@@ -181,29 +196,32 @@ function process_once!(scheduler::Scheduler, sa::SpecArgs, op::T; parent_f) wher
 		# Stop if we are forwarding, nothing left to do
 		T <: Forward && return (Spec(sa, Call()), true)
 
-		if sa.f === get_cached
-			inner_spec = sa.args[1]::Spec
-			inner_sa = inner_spec.sa
-			@assert inner_sa.f !== get_cached # we cannot handle nested get_cached
-			inner_deps = get_dependencies(inner_sa)
-			@assert all(s->s.op === Call(), inner_deps) # The outer Call has enforced all inner `op`s to be called has well.
 
-			# The remaining args specify subresults of `CompoundResult`s
-			sub = length(sa.args)==1 ? nothing : only(sa.args[2:end]) # we only support one level atm
-			return_keys = _get_kwarg(sa, :return_keys, false)
+		# New
+		# TODO: Simplify code
+		res = get_result!(sa) do
+			if sa.f == get_cached
+				inner_spec = sa.args[1]::Spec
+				inner_sa = inner_spec.sa
+				inner_deps = get_dependencies(inner_sa)
+				@assert all(s->s.op === Call(), inner_deps) # The outer Call has enforced all inner `op`s to be called has well.
 
-			# TODO: Cleanup and simplify code
-			if sub !== nothing || return_keys
-				res = cache_get_subresult!(scheduler.cache, inner_sa; use_disk=true, sub, return_keys) do
-					_fetch_and_compute!(scheduler, inner_sa, inner_deps)
+				# The remaining args specify subresults of `CompoundResult`s
+				sub = length(sa.args)==1 ? nothing : only(sa.args[2:end]) # we only support one level atm
+				return_keys = _get_kwarg(sa, :return_keys, false)
+
+				if sub !== nothing || return_keys
+					cache_get_compoundresult!(scheduler.cache, inner_sa; sub, return_keys) do
+						cr = _fetch_and_compute!(scheduler, inner_sa, inner_deps)
+						# TODO: Put all subresults in the LRU
+						cr
+					end
+				else
+					cache_get!(scheduler.cache, inner_sa) do
+						_fetch_and_compute!(scheduler, inner_sa, inner_deps)
+					end
 				end
 			else
-				res = cache_get!(scheduler.cache, inner_sa; use_disk=true) do
-					_fetch_and_compute!(scheduler, inner_sa, inner_deps)
-				end
-			end
-		else
-			res = cache_get!(scheduler.cache, sa; use_disk=false) do
 				_fetch_and_compute!(scheduler, sa, deps)
 			end
 		end
@@ -212,7 +230,7 @@ function process_once!(scheduler::Scheduler, sa::SpecArgs, op::T; parent_f) wher
 		return res, true
 	end
 
-	res = cache_get!(scheduler.cache, sa; use_disk=false) do
+	res = get_next!(sa) do
 		_process_once!(scheduler, sa, deps) # Should we add op back in?
 	end
 

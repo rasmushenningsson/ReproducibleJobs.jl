@@ -1,13 +1,44 @@
+abstract type AbstractSpecOp end
+
+struct Call <: AbstractSpecOp end
+struct Fetch <: AbstractSpecOp end # Means fetch immediately (e.g. get as value during preprocessing)
+struct Prefetch <: AbstractSpecOp end # Replace spec by result just before computing - useful to collapse multiple specs that yield the same result onto the same spec.
+struct Forward <: AbstractSpecOp end
+
+Deduplicators.deduplicate_type(::Type{<:AbstractSpecOp}) = false
+Deduplicators.deconstruct_weak_rec(x::T) where T<:AbstractSpecOp = x
+Deduplicators.reconstruct_weak_rec(x::T) where T<:AbstractSpecOp = x
+
+function Deduplicators.cache_save(io, name, x::AbstractSpecOp)
+	io[name] = x # Rely on JLD2 standard handling for saving/loading
+	nothing
+end
+
+
+default_spec_op() = Forward()
+
+
+
+
 mutable struct SpecArgs # TODO: Add template parameters for args/kwargs? Or find a another way to handle types better?
 	f::Any
 	args::Tuple
 	kwargs::NamedTuple
+
+	# Cache (forwarding)
+	# This is the result of `process_once`, when preprocessing. In the rare case it is forwarded to a value, the value is wrapped in Some.
+	# NB: The Tuple is just a way to store a `Spec` before Spec has been defined. When Julia supports mutually recursive types, we can use that instead.
+	next::Union{Nothing, Tuple{SpecArgs,Union{Call,Fetch,Prefetch,Forward}}, Some}
+
+	# Cache (result)
+	# NB: The result is stored weakly.
+	result::Any # Maybe use some other value to signal that it's not computed?
+
 	function SpecArgs(f, args, kwargs)
 		@assert issorted(keys(kwargs))
-		new(f, args, kwargs)
+		new(f, args, kwargs, nothing, nothing)
 	end
 end
-
 
 
 Deduplicators.deduplicate_type(::Type{SpecArgs}) = true
@@ -98,31 +129,46 @@ Base.isequal(a::SpecArgs, b::SpecArgs) = sa_isequal(a, b)
 
 
 
-
-
 _get_kwarg(sa::SpecArgs, key::Symbol, default) = get(sa.kwargs, key, default)
 _get_kwarg(f, sa::SpecArgs, key::Symbol) = get(f, sa.kwargs, key)
 _get_kwarg(sa::SpecArgs, key::Symbol) = getindex(sa.kwargs, key)
 
 
-abstract type AbstractSpecOp end
+# TODO: Make this code easier to read
+function get_next!(f, sa::SpecArgs)
+	if sa.next === nothing
+		res = f()
+		if res isa Spec
+			sa.next = (res.sa, res.op)
+		else
+			sa.next = Some(res)
+		end
+		return res
+	elseif sa.next isa Tuple{SpecArgs,Union{Call,Fetch,Prefetch,Forward}}
+		Spec(sa.next...)
+	elseif sa.next isa Some
+		something(sa.next)
+	end
+end
 
-struct Call <: AbstractSpecOp end
-struct Fetch <: AbstractSpecOp end # Means fetch immediately (e.g. get as value during preprocessing)
-struct Prefetch <: AbstractSpecOp end # Replace spec by result just before computing - useful to collapse multiple specs that yield the same result onto the same spec.
-struct Forward <: AbstractSpecOp end
+# TODO: Make this code easier to read
+function get_result!(f, sa::SpecArgs)
+	if sa.result !== nothing
+		# Attempt to reconstruct from weakly stored reference
+		res = Deduplicators.reconstruct_weak_rec(sa.result)
+		res !== Deduplicators.NotValid() && return res
+	end
 
-Deduplicators.deduplicate_type(::Type{<:AbstractSpecOp}) = false
-Deduplicators.deconstruct_weak_rec(x::T) where T<:AbstractSpecOp = x
-Deduplicators.reconstruct_weak_rec(x::T) where T<:AbstractSpecOp = x
-
-function Deduplicators.cache_save(io, name, x::AbstractSpecOp)
-	io[name] = x # Rely on JLD2 standard handling for saving/loading
-	nothing
+	res = f()
+	if res isa CompoundResult
+		error("Not implemented")
+	end
+	sa.result = Deduplicators.deconstruct_weak_rec(res)
+	return res
 end
 
 
-default_spec_op() = Forward()
+
 
 
 struct Spec

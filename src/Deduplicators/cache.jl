@@ -1,25 +1,13 @@
 struct Cache{K,H}
 	deduplicator::Deduplicator{H}
 
-	# In-memory cache
-	# mem::Dict{Hash,WeakRef} # Value is a WeakRef to the result
-	mem::WeakKeyDict{K, Any} # Value contains the output of deconstruct_weak_rec, i.e. mutable objects such as Vectors are stored using WeakRefs
-
 	# On-disk cache
-	dir::Union{String, Nothing}
+	dir::String
 end
 function Cache(::Type{K}, deduplicator::Deduplicator{H}; dir=get_cache_path()) where {K,H}
-	if dir !== nothing
-		dir = abspath(dir) # In case the user changes working directory afterwards
-	end
-	Cache{K,H}(deduplicator, WeakKeyDict{K, Any}(), dir)
+	dir = abspath(dir) # In case the user changes working directory afterwards
+	Cache{K,H}(deduplicator, dir)
 end
-
-function Base.empty!(cache::Cache)
-	empty!(cache.mem)
-	cache
-end
-
 
 
 struct NotValid end # we cannot use Nothing below, because that could be a real value
@@ -43,12 +31,10 @@ function deconstruct_weak_rec(nt::T) where T<:NamedTuple # TODO: Decide how to h
 	return DeconstructedWeak(T, ntd)
 end
 
-# Experimental
-function deconstruct_weak_rec(cr::CompoundResult)
-	WeakCompoundResult(cr.keys, Any[deconstruct_weak_rec(v) for v in cr.values])
-end
+# deconstruct_weak_rec(x::Union{<:Number,String,Symbol,Char,DataType,Colon,Nothing,Missing,VersionNumber,Regex}) = x
+deconstruct_weak_rec(x::Union{<:Number,String,Symbol,Char,DataType,Colon,Missing,VersionNumber,Regex}) = x
+deconstruct_weak_rec(::Nothing) = Some(nothing) # In order to distinguish a value of nothing from the absence of a value
 
-deconstruct_weak_rec(x::Union{<:Number,String,Symbol,Char,DataType,Colon,Nothing,Missing,VersionNumber,Regex}) = x
 deconstruct_weak_rec(x::AbstractUnitRange{T}) where T<:Union{Number,Char} = x
 deconstruct_weak_rec(x::AbstractRange{T}) where T<:Union{Number,Char} = x
 deconstruct_weak_rec(x::SupportedFunctions) = x
@@ -72,24 +58,14 @@ function reconstruct_weak_rec(w::WeakRef)
 	value = w.value
 	value !== nothing ? deduplication_postprocess(value) : NotValid() # deduplication_postprocess is used to wrap in ReadOnlyArray
 end
-reconstruct_weak_rec(x::Union{<:Number,String,Symbol,Char,DataType,Colon,Nothing,Missing,VersionNumber,Regex}) = x
+# reconstruct_weak_rec(x::Union{<:Number,String,Symbol,Char,DataType,Colon,Nothing,Missing,VersionNumber,Regex}) = x
+reconstruct_weak_rec(x::Union{<:Number,String,Symbol,Char,DataType,Colon,Missing,VersionNumber,Regex}) = x
+reconstruct_weak_rec(::Some{Nothing}) = nothing
 reconstruct_weak_rec(x::AbstractUnitRange{T}) where T<:Union{Number,Char} = x
 reconstruct_weak_rec(x::AbstractRange{T}) where T<:Union{Number,Char} = x
 reconstruct_weak_rec(x::SupportedFunctions) = x
 
 reconstruct_weak_rec(x::T) where T<:Exception = x
-
-
-function cache_mem_get(cache::Cache{K}, key::K) where K
-	w = get(cache.mem, key, NotValid())
-	w === NotValid() && return NotValid()
-	reconstruct_weak_rec(w)
-end
-function cache_mem_set!(cache::Cache{K}, key::K, value) where K
-	cache.mem[key] = deconstruct_weak_rec(value)
-	# cache.mem[key] = WeakRef(value)
-	cache
-end
 
 
 
@@ -428,19 +404,18 @@ end
 function cache_load(cache::Cache, ::Val{:CompoundResult}, g)
 	error("Loading an entire CompoundResult is not allowed, a sub-result must be specified.")
 end
-function cache_load_compound_result_structure(io)
-	@assert io["type"] == "CompoundResult"
-	k = ReadOnlyVector(io["keys"])
-	WeakCompoundResult(k)
-end
-function cache_load_subresult!(cache::Cache, cr::WeakCompoundResult, g, sub::String)
-	@assert cr.keys == g["keys"]
-	ind = findfirst(==(sub), cr.keys)
-	x = cache_load(cache, g, string(ind))
-	cr.values[ind] = deconstruct_weak_rec(x) # Store weakly in the Cache
-	x
-end
 
+
+function cache_load_compoundresult_keys!(cache::Cache, g)::Vector{String}
+	@assert g["type"] == "CompoundResult"
+	g["keys"]
+end
+function cache_load_subresult!(cache::Cache, g, sub::String)
+	@assert g["type"] == "CompoundResult"
+	keys = g["keys"]
+	ind = findfirst(==(sub), keys)
+	cache_load(cache, g, string(ind))
+end
 
 
 
@@ -455,16 +430,17 @@ function _load_file(cache::Cache{K}, key::K, fp) where K
 end
 
 # Experimental CompoundResult support.
-function _load_compound_result_structure(cache::Cache{K}, key::K, fp) where K
+function _load_compoundresult!(cache, key, fp; sub, return_keys)
 	jldopen(fp, "r") do io
+		# TODO: Avoid comparing with the original key everytime we load a subresult
 		original_key = cache_load(cache, io, "key")
 		@assert isequal(key, original_key) "Spec doesn't match cached spec, even though hashes are equal."
-		cache_load_compound_result_structure(io["root"])
-	end
-end
-function _load_subresult!(cache, cr, fp, sub)
-	jldopen(fp, "r") do io
-		x = cache_load_subresult!(cache, cr, io["root"], sub)
+
+		if return_keys
+			x = cache_load_compoundresult_keys!(cache, io["root"])
+		else
+			x = cache_load_subresult!(cache, io["root"], sub)
+		end
 		deduplicate!(cache.deduplicator, x; transfer_ownership=true)
 	end
 end
@@ -480,89 +456,32 @@ function _save_file(cache::Cache{K}, key::K, fp, result) where K
 end
 
 
-function cache_get!(f, cache::Cache{K}, key::K; use_disk=nothing) where K
-	if cache.dir === nothing
-		use_disk = false
-	else
-		@assert use_disk isa Bool "Please specify use_disk::Bool."
-	end
-	use_disk::Bool # Probably not needed?
-
-	# Check in-memory cache
-	result = cache_mem_get(cache, key)
-	result isa CompoundResult && throw(ArgumentError("Cannot retrieve CompoundResult directly from cache. You must specify sub-result(s) using cached(key,sub...)."))
-
-	result !== NotValid() && return result
-
+function cache_get!(f, cache::Cache{K}, key::K) where K
 	# Check on-disk cache
-	if use_disk
-		fp = key2path(cache, key)
-		if isfile(fp)
-			result = _load_file(cache, key, fp) # This should deduplicate already
-		end
-	end
+	fp = key2path(cache, key)
+	isfile(fp) && return _load_file(cache, key, fp) # This should deduplicate already
 
-
-	if result === NotValid()
-		result = f()
-		result isa CompoundResult && throw(ArgumentError("Cannot retrieve CompoundResult directly from cache. You must specify sub-result(s) using cached(key,sub...)."))
-		result = deduplicate!(cache.deduplicator, result; transfer_ownership=true)
-		use_disk && !(result isa Exception) && _save_file(cache, key, fp, result)
-	end
-
-	cache_mem_set!(cache, key, result)
+	result = f()
+	result isa CompoundResult && throw(ArgumentError("Cannot retrieve CompoundResult directly from cache. You must specify sub-result(s) using cached(key,sub...)."))
+	result = deduplicate!(cache.deduplicator, result; transfer_ownership=true)
+	!(result isa Exception) && _save_file(cache, key, fp, result)
 	return result
 end
 
 # This is experimental.
-# TODO: simplify code
-function cache_get_subresult!(f, cache::Cache{K}, key::K; use_disk=nothing, sub=nothing, return_keys::Bool=false) where K
+function cache_get_compoundresult!(f, cache::Cache{K}, key::K; sub=nothing, return_keys::Bool=false) where K
 	(sub===nothing) == (return_keys==false) && throw(ArgumentError("Either specify sub or set return_keys=true (but not both)."))
-	@assert use_disk "CompoundResults are only available when use_disk=true"
-	@assert cache.dir !== nothing
-
-	# Check in-memory cache
-	# cr = cache_mem_get(cache, key)
-	cr = get(cache.mem, key, NotValid()) # Load without reconstructing
-
-	if cr isa WeakCompoundResult
-		return_keys && return get_keys(cr)
-
-		# Return partial result if still valid
-		# subresult = get_subresult(cr, sub; return_keys)
-		subresult = get_subresult(cr, sub)
-		subresult = reconstruct_weak_rec(subresult)
-		subresult !== NotValid() && return subresult
-	elseif cr isa Exception
-		return cr
-	elseif cr !== NotValid()
-		throw(ArgumentError("Tried to retrieve sub-result from result that was not a CompoundResult."))
-	end
 
 	# Check on-disk cache
 	fp = key2path(cache, key)
-	if isfile(fp)
-		if cr === NotValid()
-			cr = _load_compound_result_structure(cache, key, fp)
-			# cache_mem_set!(cache, key, cr) # NB: This is directly from the Weak version
-			cache.mem[key] = cr # Since we have loaded the Weak version, we shouldn't call deconstruct_weak_rec
-
-			return_keys && return get_keys(cr)
-			# return_keys && return get_subresult(cr, sub; return_keys)
-		end
-		return _load_subresult!(cache, cr, fp, sub)
-	end
-
-	# Sanity check
-	@assert cr === NotValid() "CompoundResult found in in-mem Cache was not matched by file on disk."
+	isfile(fp) && return _load_compoundresult!(cache, key, fp; sub, return_keys) # This should deduplicate already
 
 	cr = f()
 	cr isa Exception && return cr
-
 	cr isa CompoundResult || throw(ArgumentError("Tried to retrieve sub-result from result that was not a CompoundResult."))
 	cr = deduplicate!(cache.deduplicator, cr; transfer_ownership=true)
 	_save_file(cache, key, fp, cr)
-	cache_mem_set!(cache, key, cr)
+
 	return_keys && return get_keys(cr)
 	return get_subresult(cr, sub)
 end
