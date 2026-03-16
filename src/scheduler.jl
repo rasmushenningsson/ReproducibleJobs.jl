@@ -131,6 +131,73 @@ function _fetch_and_compute!(scheduler, sa::SpecArgs, deps::Vector{Spec})
 end
 
 
+function _fetch_and_compute_cached!(scheduler, sa::SpecArgs, deps::Vector{Spec})
+	inner_spec = sa.args[1]::Spec
+	inner_sa = inner_spec.sa
+	inner_deps = get_dependencies(inner_sa)
+	@assert all(s->s.op === Call(), inner_deps) # The outer Call has enforced all inner `op`s to be called has well.
+
+	cache_get!(scheduler.cache, inner_sa) do
+		_fetch_and_compute!(scheduler, inner_sa, inner_deps)
+	end
+end
+function _fetch_and_compute_sub!(scheduler, sa::SpecArgs, deps::Vector{Spec})
+	@assert sa.f in (compoundresult_sub, compoundresult_keys)
+
+	sub_spec = sa.args[1]::Spec
+	sub_sa = sub_spec.sa
+	sub_deps = get_dependencies(sub_sa)
+	@assert all(s->s.op === Call(), sub_deps) # The outer Call has enforced all sub `op`s to be called has well.
+	@assert sub_sa.f == get_cached
+
+	# TODO: Try in this order
+	# 0. (Already done) Is it cached and still valid in sa.result.
+	# 1. Is the sub_sa result still valid? Then return subresult from that.
+	# 2. Is the sub_sa cached to disk? Then load the subresult (only) from disk.
+	# 3. Compute compoundresult and return sub.
+
+	if sa.f == compoundresult_sub
+		sub = sa.args[2]::String
+	else #if sa.f == compoundresult_keys
+		sub = nothing
+	end
+
+
+	# TODO: Put part of this in a helper function, get_result?, in spec.jl?
+	# 1.
+	if sub_sa.result !== nothing
+		@info "Attempting 1 ($(sub_sa.args[1].sa.f))"
+		# Attempt to reconstruct from weakly stored reference
+		cr = sub_sa.result
+		@assert cr isa CompoundResult
+		# sub === nothing && return get_keys(cr)
+		sub === nothing && return (@info "1 success $sub ($(sub_sa.args[1].sa.f))"; return get_keys(cr))
+		v = Deduplicators.reconstruct_weak_rec(get_subresult(cr, sub))
+		# v !== Deduplicators.NotValid() && return v
+		v !== Deduplicators.NotValid() && (@info "1 success $sub ($(sub_sa.args[1].sa.f))"; return v)
+		@info "1 failed ($(sub_sa.args[1].sa.f))"
+	end
+
+	# 2.
+	cached_sa = sub_sa.args[1].sa
+	@info "Attempting 2 ($(sub_sa.args[1].sa.f))"
+	v = cache_try_get_compoundresult(scheduler.cache, cached_sa; sub, return_keys=sub===nothing)
+	# v !== Deduplicators.NotValid() && return v
+	v !== Deduplicators.NotValid() && (@info "2 success $sub ($(sub_sa.args[1].sa.f))"; return v)
+	@info "2 failed ($(sub_sa.args[1].sa.f))"
+
+	# 3.
+	@info "Attempting 3 ($(sub_sa.args[1].sa.f))"
+	cr = get_result!(sub_sa) do # This is to ensure sub_sa.result gets set, maybe use set_result! instead? Because we should never reach here if sub_sa.result !== nothing.
+		_fetch_and_compute_cached!(scheduler, sub_sa, sub_deps)
+	end
+	cr isa Exception && return cr
+	cr isa CompoundResult || throw(ArgumentError("Tried to retrieve sub-result from result that was not a CompoundResult."))
+	return sub === nothing ? get_keys(cr) : get_subresult(cr, sub)
+end
+
+
+
 function _process_once!(scheduler::Scheduler, sa::SpecArgs, deps::Vector{Spec})
 	forwarded_deps = process_dependencies!(scheduler, deps; parent_f=sa.f)
 	if !isempty(forwarded_deps)
@@ -151,15 +218,34 @@ end
 
 
 
-
 # TODO: Move these somewhere else?
-function get_cached end # `get_cached` is actually never called. We just use it as singleton value to show that something is using the on-disk cache.
+# These functions are actually never called. We just use them as singleton values to show that something is using the on-disk cache.
+function compoundresult_sub end
+function compoundresult_keys end
+function get_cached end
 
-# Use `sub` to retrieve parts of `CompoundResult`s
-function cached(spec, sub::String...; return_keys=false)
-	extra_kwargs = (return_keys ? (; return_keys) : (;)) # only pass kwarg if set to true
-	create_spec(get_cached, spec, sub...; extra_kwargs..., __version=v"1.0.0")
+function cached(spec, sub::Union{Nothing,String}=nothing; return_keys::Bool=false)
+	@assert sub==nothing || return_keys==false
+
+	c = create_spec(get_cached, spec; __version=v"1.0.0")
+	if sub !== nothing
+		create_spec(compoundresult_sub, c, sub; __version=v"0.0.1")
+	elseif return_keys
+		create_spec(compoundresult_keys, c; __version=v"0.0.1")
+	else
+		c
+	end
 end
+
+
+# # TODO: Move these somewhere else?
+# function get_cached end # `get_cached` is actually never called. We just use it as singleton value to show that something is using the on-disk cache.
+
+# # Use `sub` to retrieve parts of `CompoundResult`s
+# function cached(spec, sub::String...; return_keys=false)
+# 	extra_kwargs = (return_keys ? (; return_keys) : (;)) # only pass kwarg if set to true
+# 	create_spec(get_cached, spec, sub...; extra_kwargs..., __version=v"1.0.0")
+# end
 
 
 
@@ -183,9 +269,9 @@ function process_once!(scheduler::Scheduler, sa::SpecArgs, op::T; parent_f) wher
 		end
 	end
 
-	# DEBUG
-	h = Deduplicators.lookup_hash(scheduler.deduplicator, sa)
-	@info "Processing $(sa.f) ($(Deduplicators.hash_string(h)[1:6]), n=$(processing_count(h)))"
+	# # DEBUG
+	# h = Deduplicators.lookup_hash(scheduler.deduplicator, sa)
+	# @info "Processing $(sa.f) ($(Deduplicators.hash_string(h)[1:6]), n=$(processing_count(h)))"
 
 
 	deps = get_dependencies(sa)
@@ -200,32 +286,15 @@ function process_once!(scheduler::Scheduler, sa::SpecArgs, op::T; parent_f) wher
 		# New
 		# TODO: Simplify code
 		res = get_result!(sa) do
-			if sa.f == get_cached
-				inner_spec = sa.args[1]::Spec
-				inner_sa = inner_spec.sa
-				inner_deps = get_dependencies(inner_sa)
-				@assert all(s->s.op === Call(), inner_deps) # The outer Call has enforced all inner `op`s to be called has well.
-
-				# The remaining args specify subresults of `CompoundResult`s
-				sub = length(sa.args)==1 ? nothing : only(sa.args[2:end]) # we only support one level atm
-				return_keys = _get_kwarg(sa, :return_keys, false)
-
-				if sub !== nothing || return_keys
-					cache_get_compoundresult!(scheduler.cache, inner_sa; sub, return_keys) do
-						cr = _fetch_and_compute!(scheduler, inner_sa, inner_deps)
-						# TODO: Put all subresults in the LRU
-						cr
-					end
-				else
-					cache_get!(scheduler.cache, inner_sa) do
-						_fetch_and_compute!(scheduler, inner_sa, inner_deps)
-					end
-				end
+			if sa.f == compoundresult_sub || sa.f == compoundresult_keys
+				_fetch_and_compute_sub!(scheduler, sa, deps)
+			elseif sa.f == get_cached
+				_fetch_and_compute_cached!(scheduler, sa, deps)
 			else
 				_fetch_and_compute!(scheduler, sa, deps)
 			end
 		end
-
+		@assert !(res isa CompoundResult) # Is this a good place to check? Maybe should be ensured earlier.
 		@assert !(res isa Spec)
 		return res, true
 	end

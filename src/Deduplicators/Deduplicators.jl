@@ -19,7 +19,9 @@ export
 	get_cache_path,
 	deduplicate!,
 	cache_get!,
-	cache_get_compoundresult!
+	cache_try_get_compoundresult,
+	get_subresult,
+	get_keys
 
 
 

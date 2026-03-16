@@ -31,6 +31,11 @@ function deconstruct_weak_rec(nt::T) where T<:NamedTuple # TODO: Decide how to h
 	return DeconstructedWeak(T, ntd)
 end
 
+# Experimental
+function deconstruct_weak_rec(cr::CompoundResult) # NB: This is never mean to be reconstructed as a whole
+	CompoundResult(cr.keys, [deconstruct_weak_rec(v) for v in cr.values])
+end
+
 # deconstruct_weak_rec(x::Union{<:Number,String,Symbol,Char,DataType,Colon,Nothing,Missing,VersionNumber,Regex}) = x
 deconstruct_weak_rec(x::Union{<:Number,String,Symbol,Char,DataType,Colon,Missing,VersionNumber,Regex}) = x
 deconstruct_weak_rec(::Nothing) = Some(nothing) # In order to distinguish a value of nothing from the absence of a value
@@ -462,26 +467,21 @@ function cache_get!(f, cache::Cache{K}, key::K) where K
 	isfile(fp) && return _load_file(cache, key, fp) # This should deduplicate already
 
 	result = f()
-	result isa CompoundResult && throw(ArgumentError("Cannot retrieve CompoundResult directly from cache. You must specify sub-result(s) using cached(key,sub...)."))
+	# result isa CompoundResult && throw(ArgumentError("Cannot retrieve CompoundResult directly from cache. You must specify sub-result(s) using cached(key,sub...)."))
 	result = deduplicate!(cache.deduplicator, result; transfer_ownership=true)
 	!(result isa Exception) && _save_file(cache, key, fp, result)
 	return result
 end
 
 # This is experimental.
-function cache_get_compoundresult!(f, cache::Cache{K}, key::K; sub=nothing, return_keys::Bool=false) where K
+function cache_try_get_compoundresult(cache::Cache{K}, key::K; sub=nothing, return_keys::Bool=false) where K
 	(sub===nothing) == (return_keys==false) && throw(ArgumentError("Either specify sub or set return_keys=true (but not both)."))
 
 	# Check on-disk cache
 	fp = key2path(cache, key)
-	isfile(fp) && return _load_compoundresult!(cache, key, fp; sub, return_keys) # This should deduplicate already
-
-	cr = f()
-	cr isa Exception && return cr
-	cr isa CompoundResult || throw(ArgumentError("Tried to retrieve sub-result from result that was not a CompoundResult."))
-	cr = deduplicate!(cache.deduplicator, cr; transfer_ownership=true)
-	_save_file(cache, key, fp, cr)
-
-	return_keys && return get_keys(cr)
-	return get_subresult(cr, sub)
+	if isfile(fp)
+		_load_compoundresult!(cache, key, fp; sub, return_keys) # This should deduplicate already
+	else
+		NotValid()
+	end
 end

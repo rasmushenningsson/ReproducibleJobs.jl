@@ -160,9 +160,6 @@ function get_result!(f, sa::SpecArgs)
 	end
 
 	res = f()
-	if res isa CompoundResult
-		error("Not implemented")
-	end
 	sa.result = Deduplicators.deconstruct_weak_rec(res)
 	return res
 end
