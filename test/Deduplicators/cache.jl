@@ -161,7 +161,7 @@ function _load_array_of_strings(::Type{T}, g) where T <: Union{String,Symbol}
 end
 
 
-
+# TODO: This should now be part of spec tests instead
 # function run_cache_mem_tests()
 # 	@testset "Basic" begin
 # 		cache = Cache(CacheKey, Deduplicator(); dir=nothing)
@@ -221,6 +221,7 @@ end
 # end
 
 
+# TODO: This should now be part of spec tests instead
 # function run_cache_disk_tests()
 # 	@testset "Basic" begin
 # 		mktempdir() do dir

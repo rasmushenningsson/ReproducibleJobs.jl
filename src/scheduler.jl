@@ -6,8 +6,10 @@ struct Scheduler{H}
 	deduplicator::Deduplicator{H}
 
 	cache::Cache{SpecArgs,H} # spec -> forwarded spec or result
+
+	lru::LRUCache{SpecArgs,Any} # To prevent GC of most recently used results
 end
-Scheduler(cache::Cache{SpecArgs,H}) where H = Scheduler{H}(cache.deduplicator, cache)
+Scheduler(cache::Cache{SpecArgs,H}) where H = Scheduler{H}(cache.deduplicator, cache, LRUCache{SpecArgs,Any}())
 Scheduler(deduplicator::Deduplicator{H}; kwargs...) where H = Scheduler(Cache(SpecArgs, deduplicator; kwargs...))
 # Scheduler() = Scheduler(default_deduplicator())
 Scheduler(; kwargs...) = Scheduler(Deduplicator(); kwargs...)
@@ -16,6 +18,7 @@ Scheduler(; kwargs...) = Scheduler(Deduplicator(); kwargs...)
 function Base.empty!(scheduler::Scheduler)
 	empty!(scheduler.deduplicator)
 	# empty!(scheduler.cache)
+	empty!(scheduler.lru)
 	scheduler
 end
 
@@ -144,16 +147,16 @@ end
 function _fetch_and_compute_sub!(scheduler, sa::SpecArgs, deps::Vector{Spec})
 	@assert sa.f in (compoundresult_sub, compoundresult_keys)
 
-	sub_spec = sa.args[1]::Spec
-	sub_sa = sub_spec.sa
-	sub_deps = get_dependencies(sub_sa)
-	@assert all(s->s.op === Call(), sub_deps) # The outer Call has enforced all sub `op`s to be called has well.
-	@assert sub_sa.f == get_cached
+	cached_spec = sa.args[1]::Spec
+	cached_sa = cached_spec.sa
+	@assert cached_sa.f == get_cached
+	cached_deps = get_dependencies(cached_sa)
+	@assert all(s->s.op === Call(), cached_deps) # The outer Call has enforced all sub `op`s to be called has well.
 
 	# TODO: Try in this order
 	# 0. (Already done) Is it cached and still valid in sa.result.
-	# 1. Is the sub_sa result still valid? Then return subresult from that.
-	# 2. Is the sub_sa cached to disk? Then load the subresult (only) from disk.
+	# 1. Is the cached_sa result still valid? Then return subresult from that.
+	# 2. Is the cached_sa cached to disk? Then load the subresult (only) from disk.
 	# 3. Compute compoundresult and return sub.
 
 	if sa.f == compoundresult_sub
@@ -165,34 +168,37 @@ function _fetch_and_compute_sub!(scheduler, sa::SpecArgs, deps::Vector{Spec})
 
 	# TODO: Put part of this in a helper function, get_result?, in spec.jl?
 	# 1.
-	if sub_sa.result !== nothing
-		@info "Attempting 1 ($(sub_sa.args[1].sa.f))"
+	if cached_sa.result !== nothing
+		@info "Attempting 1 ($(cached_sa.args[1].sa.f))"
 		# Attempt to reconstruct from weakly stored reference
-		cr = sub_sa.result
+		cr = cached_sa.result
 		@assert cr isa CompoundResult
 		# sub === nothing && return get_keys(cr)
-		sub === nothing && return (@info "1 success $sub ($(sub_sa.args[1].sa.f))"; return get_keys(cr))
+		sub === nothing && return (@info "1 success $sub ($(cached_sa.args[1].sa.f))"; return get_keys(cr))
 		v = Deduplicators.reconstruct_weak_rec(get_subresult(cr, sub))
 		# v !== Deduplicators.NotValid() && return v
-		v !== Deduplicators.NotValid() && (@info "1 success $sub ($(sub_sa.args[1].sa.f))"; return v)
-		@info "1 failed ($(sub_sa.args[1].sa.f))"
+		v !== Deduplicators.NotValid() && (@info "1 success $sub ($(cached_sa.args[1].sa.f))"; return v)
+		@info "1 failed ($(cached_sa.args[1].sa.f))"
 	end
 
 	# 2.
-	cached_sa = sub_sa.args[1].sa
-	@info "Attempting 2 ($(sub_sa.args[1].sa.f))"
-	v = cache_try_get_compoundresult(scheduler.cache, cached_sa; sub, return_keys=sub===nothing)
+	inner_sa = cached_sa.args[1].sa
+	@info "Attempting 2 ($(cached_sa.args[1].sa.f))"
+	v = cache_try_get_compoundresult(scheduler.cache, inner_sa; sub, return_keys=sub===nothing)
 	# v !== Deduplicators.NotValid() && return v
-	v !== Deduplicators.NotValid() && (@info "2 success $sub ($(sub_sa.args[1].sa.f))"; return v)
-	@info "2 failed ($(sub_sa.args[1].sa.f))"
+	v !== Deduplicators.NotValid() && (@info "2 success $sub ($(cached_sa.args[1].sa.f))"; return v)
+	@info "2 failed ($(cached_sa.args[1].sa.f))"
 
 	# 3.
-	@info "Attempting 3 ($(sub_sa.args[1].sa.f))"
-	cr = get_result!(sub_sa) do # This is to ensure sub_sa.result gets set, maybe use set_result! instead? Because we should never reach here if sub_sa.result !== nothing.
-		_fetch_and_compute_cached!(scheduler, sub_sa, sub_deps)
+	@info "Attempting 3 ($(cached_sa.args[1].sa.f))"
+	cr = get_result!(cached_sa) do # This is to ensure cached_sa.result gets set, maybe use set_result! instead? Because we should never reach here if cached_sa.result !== nothing.
+		_fetch_and_compute_cached!(scheduler, cached_sa, cached_deps)
 	end
 	cr isa Exception && return cr
 	cr isa CompoundResult || throw(ArgumentError("Tried to retrieve sub-result from result that was not a CompoundResult."))
+
+	lru_touch!(scheduler.lru, inner_sa, cr)
+
 	return sub === nothing ? get_keys(cr) : get_subresult(cr, sub)
 end
 
@@ -296,6 +302,10 @@ function process_once!(scheduler::Scheduler, sa::SpecArgs, op::T; parent_f) wher
 		end
 		@assert !(res isa CompoundResult) # Is this a good place to check? Maybe should be ensured earlier.
 		@assert !(res isa Spec)
+
+		# lru
+		lru_touch!(scheduler.lru, sa, res)
+
 		return res, true
 	end
 

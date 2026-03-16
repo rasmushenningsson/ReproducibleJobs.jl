@@ -3,6 +3,7 @@ module ReproducibleJobs
 using StableHashTraits
 using ReadOnlyArrays
 using JLD2: JLD2, jldopen, load, ZstdFilter
+using DataStructures: DataStructures, MutableBinaryMinHeap # For LRU functionality
 import AbstractTrees # for pretty printing
 using SHA
 import Dates # for printing of timestamped paths
@@ -63,6 +64,7 @@ include("spec_meta.jl")
 include("preprocess.jl")
 include("job.jl")
 include("processing_exception.jl")
+include("lru_cache.jl")
 include("scheduler.jl")
 
 include("paths.jl")
