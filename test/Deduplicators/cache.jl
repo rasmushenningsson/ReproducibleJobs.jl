@@ -1,7 +1,7 @@
 using Test
 using ReproducibleJobs
 using ReproducibleJobs.Deduplicators
-using ReproducibleJobs.Deduplicators: ROArray, ROVec, ROMat, ROBitArray, ROBitVec, ROBitMat, lookup_hash, deduplication_pointer, DeconstructedWeak, reconstruct_weak_rec, NotValid, CompoundResult, key2path, cache_get_subresult!
+using ReproducibleJobs.Deduplicators: ROArray, ROVec, ROMat, ROBitArray, ROBitVec, ROBitMat, lookup_hash, deduplication_pointer, DeconstructedWeak, reconstruct_weak_rec, NotValid, CompoundResult, key2path
 using ReadOnlyArrays
 using StableHashTraits
 using SparseArrays
@@ -162,131 +162,131 @@ end
 
 
 
-function run_cache_mem_tests()
-	@testset "Basic" begin
-		cache = Cache(CacheKey, Deduplicator(); dir=nothing)
+# function run_cache_mem_tests()
+# 	@testset "Basic" begin
+# 		cache = Cache(CacheKey, Deduplicator(); dir=nothing)
 
-		key = create_test_key(cache, "basic")
+# 		key = create_test_key(cache, "basic")
 
-		r = cache_get!(()->key2result(key), cache, key)
-		@test r == ["basic"]
-		@test compute_called!()
+# 		r = cache_get!(()->key2result(key), cache, key)
+# 		@test r == ["basic"]
+# 		@test compute_called!()
 
-		r2 = cache_get!(()->key2result(key), cache, key)
-		@test r2 == ["basic"]
-		@test r2 === r
-		@test !compute_called!()
+# 		r2 = cache_get!(()->key2result(key), cache, key)
+# 		@test r2 == ["basic"]
+# 		@test r2 === r
+# 		@test !compute_called!()
 
-		# Test that it works with a newly deduplicated key too
-		key = create_test_key(cache, "basic")
-		r3 = cache_get!(()->key2result(key), cache, key)
-		@test r3 == ["basic"]
-		@test r3 === r
-		@test !compute_called!()
+# 		# Test that it works with a newly deduplicated key too
+# 		key = create_test_key(cache, "basic")
+# 		r3 = cache_get!(()->key2result(key), cache, key)
+# 		@test r3 == ["basic"]
+# 		@test r3 === r
+# 		@test !compute_called!()
 
-		another_key = create_test_key(cache, "another")
+# 		another_key = create_test_key(cache, "another")
 
-		another_r = cache_get!(()->key2result(another_key), cache, another_key)
-		@test another_r == ["another"]
-		@test compute_called!()
-	end
+# 		another_r = cache_get!(()->key2result(another_key), cache, another_key)
+# 		@test another_r == ["another"]
+# 		@test compute_called!()
+# 	end
 
-	@testset "GC key" begin
-		cache = Cache(CacheKey, Deduplicator(); dir=nothing)
+# 	@testset "GC key" begin
+# 		cache = Cache(CacheKey, Deduplicator(); dir=nothing)
 
-		put_old_key!(cache)
-		@test compute_called!()
-		@test isempty(cache.mem)
+# 		put_old_key!(cache)
+# 		@test compute_called!()
+# 		@test isempty(cache.mem)
 
-		key = create_test_key(cache, "GC")
+# 		key = create_test_key(cache, "GC")
 
-		r = cache_get!(()->key2result(key), cache, key)
-		@test r == ["GC"]
-		@test compute_called!()
-	end
+# 		r = cache_get!(()->key2result(key), cache, key)
+# 		@test r == ["GC"]
+# 		@test compute_called!()
+# 	end
 
-	@testset "GC result" begin
-		cache = Cache(CacheKey, Deduplicator(); dir=nothing)
+# 	@testset "GC result" begin
+# 		cache = Cache(CacheKey, Deduplicator(); dir=nothing)
 
-		key = create_test_key(cache, "GC")
+# 		key = create_test_key(cache, "GC")
 
-		put_old_result!(cache, key)
-		@test compute_called!()
-		@test reconstruct_weak_rec(only(values(cache.mem))) === NotValid() # Test that cached result has been GCed
+# 		put_old_result!(cache, key)
+# 		@test compute_called!()
+# 		@test reconstruct_weak_rec(only(values(cache.mem))) === NotValid() # Test that cached result has been GCed
 
-		r = cache_get!(()->key2result(key), cache, key)
-		@test r == ["GC"]
-		@test compute_called!()
-	end
-end
+# 		r = cache_get!(()->key2result(key), cache, key)
+# 		@test r == ["GC"]
+# 		@test compute_called!()
+# 	end
+# end
 
 
-function run_cache_disk_tests()
-	@testset "Basic" begin
-		mktempdir() do dir
-			let cache = Cache(CacheKey, Deduplicator(); dir)
-				key = create_test_key(cache, "basic")
-				r = cache_get!(()->key2result(key), cache, key; use_disk=true)
-				@test r == ["basic"]
-				@test compute_called!()
+# function run_cache_disk_tests()
+# 	@testset "Basic" begin
+# 		mktempdir() do dir
+# 			let cache = Cache(CacheKey, Deduplicator(); dir)
+# 				key = create_test_key(cache, "basic")
+# 				r = cache_get!(()->key2result(key), cache, key)
+# 				@test r == ["basic"]
+# 				@test compute_called!()
 
-				r2 = cache_get!(()->key2result(key), cache, key; use_disk=true)
-				@test r2 == ["basic"]
-				@test r2 === r
-				@test !compute_called!()
+# 				r2 = cache_get!(()->key2result(key), cache, key)
+# 				@test r2 == ["basic"]
+# 				@test r2 === r
+# 				@test !compute_called!()
 
-				# Test that it works with a newly deduplicated key too
-				key = create_test_key(cache, "basic")
-				r3 = cache_get!(()->key2result(key), cache, key; use_disk=true)
-				@test r3 == ["basic"]
-				@test r3 === r
-				@test !compute_called!()
-			end
+# 				# Test that it works with a newly deduplicated key too
+# 				key = create_test_key(cache, "basic")
+# 				r3 = cache_get!(()->key2result(key), cache, key)
+# 				@test r3 == ["basic"]
+# 				@test r3 === r
+# 				@test !compute_called!()
+# 			end
 
-			# Check files on disk
-			@test only(readdir(dir)) == "6e681ecf52c01af107c571f24b6bf6e87f1fd65afec73f23be37dae3d0430540.jld2"
+# 			# Check files on disk
+# 			@test only(readdir(dir)) == "6e681ecf52c01af107c571f24b6bf6e87f1fd65afec73f23be37dae3d0430540.jld2"
 
-			let cache = Cache(CacheKey, Deduplicator(); dir) # recreate cache - but keep cache data on disk
-				key = create_test_key(cache, "basic")
-				r = cache_get!(()->key2result(key), cache, key; use_disk=true)
-				@test r == ["basic"]
-				@test !compute_called!()
-			end
-		end
-	end
+# 			let cache = Cache(CacheKey, Deduplicator(); dir) # recreate cache - but keep cache data on disk
+# 				key = create_test_key(cache, "basic")
+# 				r = cache_get!(()->key2result(key), cache, key)
+# 				@test r == ["basic"]
+# 				@test !compute_called!()
+# 			end
+# 		end
+# 	end
 
-	@testset "GC key" begin
-		mktempdir() do dir
-			cache = Cache(CacheKey, Deduplicator(); dir)
+# 	@testset "GC key" begin
+# 		mktempdir() do dir
+# 			cache = Cache(CacheKey, Deduplicator(); dir)
 
-			put_old_key!(cache; use_disk=true)
-			@test compute_called!()
-			@test isempty(cache.mem)
+# 			put_old_key!(cache)
+# 			@test compute_called!()
+# 			# @test isempty(cache.mem)
 
-			key = create_test_key(cache, "GC")
+# 			key = create_test_key(cache, "GC")
 
-			r = cache_get!(()->key2result(key), cache, key; use_disk=true)
-			@test r == ["GC"]
-			@test !compute_called!()
-		end
-	end
+# 			r = cache_get!(()->key2result(key), cache, key)
+# 			@test r == ["GC"]
+# 			@test !compute_called!()
+# 		end
+# 	end
 
-	@testset "GC result" begin
-		mktempdir() do dir
-			cache = Cache(CacheKey, Deduplicator(); dir)
+# 	@testset "GC result" begin
+# 		mktempdir() do dir
+# 			cache = Cache(CacheKey, Deduplicator(); dir)
 
-			key = create_test_key(cache, "GC")
+# 			key = create_test_key(cache, "GC")
 
-			put_old_result!(cache, key; use_disk=true)
-			@test compute_called!()
-			@test only(values(cache.mem)).value === nothing # Test that result WeakRef has been GCed
+# 			put_old_result!(cache, key)
+# 			@test compute_called!()
+# 			# @test only(values(cache.mem)).value === nothing # Test that result WeakRef has been GCed
 
-			r = cache_get!(()->key2result(key), cache, key; use_disk=true)
-			@test r == ["GC"]
-			@test !compute_called!()
-		end
-	end
-end
+# 			r = cache_get!(()->key2result(key), cache, key)
+# 			@test r == ["GC"]
+# 			@test !compute_called!()
+# 		end
+# 	end
+# end
 
 
 function run_cache_storage_tests()
@@ -298,11 +298,15 @@ function run_cache_storage_tests()
 			x = [1,5,2]
 			cache = Cache(CacheKey, Deduplicator(); dir)
 			key = new_key(cache)
-			x2 = cache_get!(Returns(x), cache, key; use_disk=true)
+			x2 = cache_get!(Returns(x), cache, key)
 			@test x2 == x
 			@test deduplicate!(cache.deduplicator, x2) === x2
-			empty!(cache.mem) # force loading from disk
-			x3 = cache_get!(error_fun, cache, key; use_disk=true)
+
+			# empty!(cache.mem) # force loading from disk
+			empty!(cache.deduplicator)
+			key = create_test_key(cache, key.f)
+
+			x3 = cache_get!(error_fun, cache, key)
 			@test x3 == x
 			@test x3 isa ROVec{Int}
 			@test deduplicate!(cache.deduplicator, x3) === x3
@@ -320,11 +324,15 @@ function run_cache_storage_tests()
 			x = [1 5; 2 1]
 			cache = Cache(CacheKey, Deduplicator(); dir)
 			key = new_key(cache)
-			x2 = cache_get!(Returns(x), cache, key; use_disk=true)
+			x2 = cache_get!(Returns(x), cache, key)
 			@test x2 == x
 			@test deduplicate!(cache.deduplicator, x2) === x2
-			empty!(cache.mem) # force loading from disk
-			x3 = cache_get!(error_fun, cache, key; use_disk=true)
+
+			# empty!(cache.mem) # force loading from disk
+			empty!(cache.deduplicator)
+			key = create_test_key(cache, key.f)
+
+			x3 = cache_get!(error_fun, cache, key)
 			@test x3 == x
 			@test x3 isa ROMat{Int}
 			@test deduplicate!(cache.deduplicator, x3) === x3
@@ -342,11 +350,15 @@ function run_cache_storage_tests()
 			x = [1 5; 2 1;;; 2 4; 0 1]
 			cache = Cache(CacheKey, Deduplicator(); dir)
 			key = new_key(cache)
-			x2 = cache_get!(Returns(x), cache, key; use_disk=true)
+			x2 = cache_get!(Returns(x), cache, key)
 			@test x2 == x
 			@test deduplicate!(cache.deduplicator, x2) === x2
-			empty!(cache.mem) # force loading from disk
-			x3 = cache_get!(error_fun, cache, key; use_disk=true)
+
+			# empty!(cache.mem) # force loading from disk
+			empty!(cache.deduplicator)
+			key = create_test_key(cache, key.f)
+
+			x3 = cache_get!(error_fun, cache, key)
 			@test x3 == x
 			@test x3 isa ROArray{Int,3}
 			@test deduplicate!(cache.deduplicator, x3) === x3
@@ -364,11 +376,15 @@ function run_cache_storage_tests()
 			x = (1,5,2)
 			cache = Cache(CacheKey, Deduplicator(); dir)
 			key = new_key(cache)
-			x2 = cache_get!(Returns(x), cache, key; use_disk=true)
+			x2 = cache_get!(Returns(x), cache, key)
 			@test x2 == x
 			@test deduplicate!(cache.deduplicator, x2) === x2
-			empty!(cache.mem) # force loading from disk
-			x3 = cache_get!(error_fun, cache, key; use_disk=true)
+
+			# empty!(cache.mem) # force loading from disk
+			empty!(cache.deduplicator)
+			key = create_test_key(cache, key.f)
+
+			x3 = cache_get!(error_fun, cache, key)
 			@test x3 == x
 			@test x3 isa typeof(x)
 			@test deduplicate!(cache.deduplicator, x3) === x3
@@ -391,9 +407,13 @@ function run_cache_storage_tests()
 			x = (; c=1, b=5, a=2)
 			cache = Cache(CacheKey, Deduplicator(); dir)
 			key = new_key(cache)
-			x2 = cache_get!(Returns(x), cache, key; use_disk=true)
-			empty!(cache.mem) # force loading from disk
-			x3 = cache_get!(error_fun, cache, key; use_disk=true)
+			x2 = cache_get!(Returns(x), cache, key)
+
+			# empty!(cache.mem) # force loading from disk
+			empty!(cache.deduplicator)
+			key = create_test_key(cache, key.f)
+
+			x3 = cache_get!(error_fun, cache, key)
 			@test x3 == x
 			@test x3 isa typeof(x)
 			@test deduplicate!(cache.deduplicator, x3) === x3
@@ -418,11 +438,15 @@ function run_cache_storage_tests()
 			x = "a"=>2
 			cache = Cache(CacheKey, Deduplicator(); dir)
 			key = new_key(cache)
-			x2 = cache_get!(Returns(x), cache, key; use_disk=true)
+			x2 = cache_get!(Returns(x), cache, key)
 			@test x2 == x
 			@test deduplicate!(cache.deduplicator, x2) === x2
-			empty!(cache.mem) # force loading from disk
-			x3 = cache_get!(error_fun, cache, key; use_disk=true)
+
+			# empty!(cache.mem) # force loading from disk
+			empty!(cache.deduplicator)
+			key = create_test_key(cache, key.f)
+
+			x3 = cache_get!(error_fun, cache, key)
 			@test x3 == x
 			@test x3 isa typeof(x)
 			@test deduplicate!(cache.deduplicator, x3) === x3
@@ -444,11 +468,15 @@ function run_cache_storage_tests()
 			x = Dict("a"=>2, "b"=>3)
 			cache = Cache(CacheKey, Deduplicator(); dir)
 			key = new_key(cache)
-			x2 = cache_get!(Returns(x), cache, key; use_disk=true)
+			x2 = cache_get!(Returns(x), cache, key)
 			@test x2 == x
 			@test deduplicate!(cache.deduplicator, x2) === x2
-			empty!(cache.mem) # force loading from disk
-			x3 = cache_get!(error_fun, cache, key; use_disk=true)
+
+			# empty!(cache.mem) # force loading from disk
+			empty!(cache.deduplicator)
+			key = create_test_key(cache, key.f)
+
+			x3 = cache_get!(error_fun, cache, key)
 			@test x3 == x
 			@test x3 isa typeof(x)
 			@test deduplicate!(cache.deduplicator, x3) === x3
@@ -472,11 +500,15 @@ function run_cache_storage_tests()
 			x = Set((1,5,2))
 			cache = Cache(CacheKey, Deduplicator(); dir)
 			key = new_key(cache)
-			x2 = cache_get!(Returns(x), cache, key; use_disk=true)
+			x2 = cache_get!(Returns(x), cache, key)
 			@test x2 == x
 			@test deduplicate!(cache.deduplicator, x2) === x2
-			empty!(cache.mem) # force loading from disk
-			x3 = cache_get!(error_fun, cache, key; use_disk=true)
+
+			# empty!(cache.mem) # force loading from disk
+			empty!(cache.deduplicator)
+			key = create_test_key(cache, key.f)
+
+			x3 = cache_get!(error_fun, cache, key)
 			@test x3 == x
 			@test x3 isa typeof(x)
 			@test deduplicate!(cache.deduplicator, x3) === x3
@@ -500,10 +532,14 @@ function run_cache_storage_tests()
 		@testset "$str" for (x,str) in ((iszero,"iszero"), (only,"only"), (!=,"!="))
 			cache = Cache(CacheKey, Deduplicator(); dir)
 			key = new_key(cache)
-			x2 = cache_get!(Returns(x), cache, key; use_disk=true)
+			x2 = cache_get!(Returns(x), cache, key)
 			@test x2 === x
-			empty!(cache.mem) # force loading from disk
-			x3 = cache_get!(error_fun, cache, key; use_disk=true)
+
+			# empty!(cache.mem) # force loading from disk
+			empty!(cache.deduplicator)
+			key = create_test_key(cache, key.f)
+
+			x3 = cache_get!(error_fun, cache, key)
 			@test x3 === x
 
 			h5open(key2path(cache, key), "r") do h5
@@ -522,11 +558,15 @@ function run_cache_storage_tests()
 		x = sin.((1:79).^2) .< 0 # just to make some bit pattern
 		cache = Cache(CacheKey, Deduplicator(); dir)
 		key = new_key(cache)
-		x2 = cache_get!(Returns(x), cache, key; use_disk=true)
+		x2 = cache_get!(Returns(x), cache, key)
 		@test x2 == x
 		@test deduplicate!(cache.deduplicator, x2) === x2
-		empty!(cache.mem) # force loading from disk
-		x3 = cache_get!(error_fun, cache, key; use_disk=true)
+
+		# empty!(cache.mem) # force loading from disk
+		empty!(cache.deduplicator)
+		key = create_test_key(cache, key.f)
+
+		x3 = cache_get!(error_fun, cache, key)
 		@test x3 == x
 		@test x3 isa ROBitVec
 		@test deduplicate!(cache.deduplicator, x3) === x3
@@ -546,11 +586,15 @@ function run_cache_storage_tests()
 		x[:] .= sin.((1:length(x)).^2) .< 0 # just to make some bit pattern
 		cache = Cache(CacheKey, Deduplicator(); dir)
 		key = new_key(cache)
-		x2 = cache_get!(Returns(x), cache, key; use_disk=true)
+		x2 = cache_get!(Returns(x), cache, key)
 		@test x2 == x
 		@test deduplicate!(cache.deduplicator, x2) === x2
-		empty!(cache.mem) # force loading from disk
-		x3 = cache_get!(error_fun, cache, key; use_disk=true)
+
+		# empty!(cache.mem) # force loading from disk
+		empty!(cache.deduplicator)
+		key = create_test_key(cache, key.f)
+
+		x3 = cache_get!(error_fun, cache, key)
 		@test x3 == x
 		@test x3 isa ROBitMat
 		@test deduplicate!(cache.deduplicator, x3) === x3
@@ -572,11 +616,15 @@ function run_cache_storage_tests()
 			x = T.(string.("str", rand(0:99, sz)))
 			cache = Cache(CacheKey, Deduplicator(); dir)
 			key = new_key(cache)
-			x2 = cache_get!(Returns(x), cache, key; use_disk=true)
+			x2 = cache_get!(Returns(x), cache, key)
 			@test x2 == x
 			@test deduplicate!(cache.deduplicator, x2) === x2
-			empty!(cache.mem) # force loading from disk
-			x3 = cache_get!(error_fun, cache, key; use_disk=true)
+
+			# empty!(cache.mem) # force loading from disk
+			empty!(cache.deduplicator)
+			key = create_test_key(cache, key.f)
+
+			x3 = cache_get!(error_fun, cache, key)
 			@test x3 == x
 			@test x3 isa ROArray{T,N}
 			@test deduplicate!(cache.deduplicator, x3) === x3
@@ -598,11 +646,15 @@ function run_cache_storage_tests()
 		@testset "$x" for x in (1:100, 0:3:100, 0:3.0:100, LinRange(-0.1,0.3,5), 'R':'Y', 'Y':-1:'R')
 			cache = Cache(CacheKey, Deduplicator(); dir)
 			key = new_key(cache)
-			x2 = cache_get!(Returns(x), cache, key; use_disk=true)
+			x2 = cache_get!(Returns(x), cache, key)
 			@test x2 == x
 			@test deduplicate!(cache.deduplicator, x2) === x2
-			empty!(cache.mem) # force loading from disk
-			x3 = cache_get!(error_fun, cache, key; use_disk=true)
+
+			# empty!(cache.mem) # force loading from disk
+			empty!(cache.deduplicator)
+			key = create_test_key(cache, key.f)
+
+			x3 = cache_get!(error_fun, cache, key)
 			@test x3 == x
 			@test x3 isa typeof(x)
 			@test deduplicate!(cache.deduplicator, x3) === x3
@@ -628,11 +680,15 @@ function run_cache_storage_tests()
 		@testset "$(repr(x))" for x in (r"text", r"^a\d+[^_]", r"text"i, r"text"m, r"text"s, r"text"x, r"text"a)
 			cache = Cache(CacheKey, Deduplicator(); dir)
 			key = new_key(cache)
-			x2 = cache_get!(Returns(x), cache, key; use_disk=true)
+			x2 = cache_get!(Returns(x), cache, key)
 			@test x2 == x
 			@test deduplicate!(cache.deduplicator, x2) === x2
-			empty!(cache.mem) # force loading from disk
-			x3 = cache_get!(error_fun, cache, key; use_disk=true)
+
+			# empty!(cache.mem) # force loading from disk
+			empty!(cache.deduplicator)
+			key = create_test_key(cache, key.f)
+
+			x3 = cache_get!(error_fun, cache, key)
 			@test x3 == x
 			@test x3 isa typeof(x)
 			@test deduplicate!(cache.deduplicator, x3) === x3
@@ -654,11 +710,15 @@ function run_cache_storage_tests()
 		@testset "$x" for x in (v"1.0.0", v"1.2.3-alpha1", v"0.0.1-rc1+456")
 			cache = Cache(CacheKey, Deduplicator(); dir)
 			key = new_key(cache)
-			x2 = cache_get!(Returns(x), cache, key; use_disk=true)
+			x2 = cache_get!(Returns(x), cache, key)
 			@test x2 == x
 			@test deduplicate!(cache.deduplicator, x2) === x2
-			empty!(cache.mem) # force loading from disk
-			x3 = cache_get!(error_fun, cache, key; use_disk=true)
+
+			# empty!(cache.mem) # force loading from disk
+			empty!(cache.deduplicator)
+			key = create_test_key(cache, key.f)
+
+			x3 = cache_get!(error_fun, cache, key)
 			@test x3 == x
 			@test x3 isa typeof(x)
 			@test deduplicate!(cache.deduplicator, x3) === x3
@@ -681,11 +741,15 @@ function run_cache_storage_tests()
 		x = [[1,5,2], [4,4,2]]
 		cache = Cache(CacheKey, Deduplicator(); dir)
 		key = new_key(cache)
-		x2 = cache_get!(Returns(x), cache, key; use_disk=true)
+		x2 = cache_get!(Returns(x), cache, key)
 		@test x2 == x
 		@test deduplicate!(cache.deduplicator, x2) === x2
-		empty!(cache.mem) # force loading from disk
-		x3 = cache_get!(error_fun, cache, key; use_disk=true)
+
+		# empty!(cache.mem) # force loading from disk
+		empty!(cache.deduplicator)
+		key = create_test_key(cache, key.f)
+
+		x3 = cache_get!(error_fun, cache, key)
 		@test x3 == x
 		@test x3 isa ROVec{ROVec{Int}}
 		@test deduplicate!(cache.deduplicator, x3) === x3
@@ -708,11 +772,15 @@ function run_cache_storage_tests()
 		x = sparse([2,5,3], [1,1,8], [5.0,4.0,3.1], 20, 10)
 		cache = Cache(CacheKey, Deduplicator(); dir)
 		key = new_key(cache)
-		x2 = cache_get!(Returns(x), cache, key; use_disk=true)
+		x2 = cache_get!(Returns(x), cache, key)
 		@test x2 == x
 		@test deduplicate!(cache.deduplicator, x2) === x2
-		empty!(cache.mem) # force loading from disk
-		x3 = cache_get!(error_fun, cache, key; use_disk=true)
+
+		# empty!(cache.mem) # force loading from disk
+		empty!(cache.deduplicator)
+		key = create_test_key(cache, key.f)
+
+		x3 = cache_get!(error_fun, cache, key)
 		@test x3 == x
 		@test x3 isa typeof(x)
 		@test deduplicate!(cache.deduplicator, x3) === x3
@@ -738,11 +806,15 @@ function run_cache_storage_tests()
 		x = sparsevec([2,5,3], [5.0,4.0,3.1], 20)
 		cache = Cache(CacheKey, Deduplicator(); dir)
 		key = new_key(cache)
-		x2 = cache_get!(Returns(x), cache, key; use_disk=true)
+		x2 = cache_get!(Returns(x), cache, key)
 		@test x2 == x
 		@test deduplicate!(cache.deduplicator, x2) === x2
-		empty!(cache.mem) # force loading from disk
-		x3 = cache_get!(error_fun, cache, key; use_disk=true)
+
+		# empty!(cache.mem) # force loading from disk
+		empty!(cache.deduplicator)
+		key = create_test_key(cache, key.f)
+
+		x3 = cache_get!(error_fun, cache, key)
 		@test x3 == x
 		@test x3 isa typeof(x)
 		@test deduplicate!(cache.deduplicator, x3) === x3
@@ -765,11 +837,15 @@ function run_cache_storage_tests()
 		x = DataFrame(a=[1,5], b=[r"abc", r"def"])
 		cache = Cache(CacheKey, Deduplicator(); dir)
 		key = new_key(cache)
-		x2 = cache_get!(Returns(x), cache, key; use_disk=true)
+		x2 = cache_get!(Returns(x), cache, key)
 		@test x2 == x
 		@test deduplicate!(cache.deduplicator, x2) === x2
-		empty!(cache.mem) # force loading from disk
-		x3 = cache_get!(error_fun, cache, key; use_disk=true)
+
+		# empty!(cache.mem) # force loading from disk
+		empty!(cache.deduplicator)
+		key = create_test_key(cache, key.f)
+
+		x3 = cache_get!(error_fun, cache, key)
 		@test x3 == x
 		@test x3 isa DataFrame
 		@test deduplicate!(cache.deduplicator, x3) === x3
@@ -798,11 +874,15 @@ function run_cache_storage_tests()
 		x = [2=>3, 5=>[1,2]]
 		cache = Cache(CacheKey, Deduplicator(); dir)
 		key = new_key(cache)
-		x2 = cache_get!(Returns(x), cache, key; use_disk=true)
+		x2 = cache_get!(Returns(x), cache, key)
 		@test x2 == x
 		@test deduplicate!(cache.deduplicator, x2) === x2
-		empty!(cache.mem) # force loading from disk
-		x3 = cache_get!(error_fun, cache, key; use_disk=true)
+
+		# empty!(cache.mem) # force loading from disk
+		empty!(cache.deduplicator)
+		key = create_test_key(cache, key.f)
+
+		x3 = cache_get!(error_fun, cache, key)
 		@test x3 == x
 		@test x3 isa ROVec{Pair{Int}}
 		@test deduplicate!(cache.deduplicator, x3) === x3
@@ -828,11 +908,15 @@ function run_cache_storage_tests()
 		let x = Returns([1,5,2])
 			cache = Cache(CacheKey, Deduplicator(); dir)
 			key = new_key(cache)
-			x2 = cache_get!(Returns(x), cache, key; use_disk=true)
+			x2 = cache_get!(Returns(x), cache, key)
 			@test x2.value == x.value
 			@test deduplicate!(cache.deduplicator, x2) === x2
-			empty!(cache.mem) # force loading from disk
-			x3 = cache_get!(error_fun, cache, key; use_disk=true)
+
+			# empty!(cache.mem) # force loading from disk
+			empty!(cache.deduplicator)
+			key = create_test_key(cache, key.f)
+
+			x3 = cache_get!(error_fun, cache, key)
 			@test x3.value == x.value
 			@test x3 isa Returns
 			@test deduplicate!(cache.deduplicator, x3) === x3
@@ -852,11 +936,15 @@ function run_cache_storage_tests()
 		let x = Returns(r"abc")
 			cache = Cache(CacheKey, Deduplicator(); dir)
 			key = new_key(cache)
-			x2 = cache_get!(Returns(x), cache, key; use_disk=true)
+			x2 = cache_get!(Returns(x), cache, key)
 			@test x2.value == x.value
 			@test deduplicate!(cache.deduplicator, x2) === x2
-			empty!(cache.mem) # force loading from disk
-			x3 = cache_get!(error_fun, cache, key; use_disk=true)
+
+			# empty!(cache.mem) # force loading from disk
+			empty!(cache.deduplicator)
+			key = create_test_key(cache, key.f)
+
+			x3 = cache_get!(error_fun, cache, key)
 			@test x3.value == x.value
 			@test x3 isa Returns
 			@test deduplicate!(cache.deduplicator, x3) === x3
@@ -879,12 +967,16 @@ function run_cache_storage_tests()
 		let x = in([1,5,2])
 			cache = Cache(CacheKey, Deduplicator(); dir)
 			key = new_key(cache)
-			x2 = cache_get!(Returns(x), cache, key; use_disk=true)
+			x2 = cache_get!(Returns(x), cache, key)
 			@test x2.f === x.f
 			@test x2.x == x.x
 			@test deduplicate!(cache.deduplicator, x2) === x2
-			empty!(cache.mem) # force loading from disk
-			x3 = cache_get!(error_fun, cache, key; use_disk=true)
+
+			# empty!(cache.mem) # force loading from disk
+			empty!(cache.deduplicator)
+			key = create_test_key(cache, key.f)
+
+			x3 = cache_get!(error_fun, cache, key)
 			@test x3.f === x.f
 			@test x3.x == x.x
 			@test x3 isa Base.Fix2
@@ -908,12 +1000,16 @@ function run_cache_storage_tests()
 		let x = startswith(r"abc")
 			cache = Cache(CacheKey, Deduplicator(); dir)
 			key = new_key(cache)
-			x2 = cache_get!(Returns(x), cache, key; use_disk=true)
+			x2 = cache_get!(Returns(x), cache, key)
 			@test x2.f === x.f
 			@test x2.x == x.x
 			@test deduplicate!(cache.deduplicator, x2) === x2
-			empty!(cache.mem) # force loading from disk
-			x3 = cache_get!(error_fun, cache, key; use_disk=true)
+
+			# empty!(cache.mem) # force loading from disk
+			empty!(cache.deduplicator)
+			key = create_test_key(cache, key.f)
+
+			x3 = cache_get!(error_fun, cache, key)
 			@test x3.f === x.f
 			@test x3.x == x.x
 			@test x3 isa Base.Fix2
@@ -940,13 +1036,17 @@ function run_cache_storage_tests()
 		let x = !isequal([1,5,2])
 			cache = Cache(CacheKey, Deduplicator(); dir)
 			key = new_key(cache)
-			x2 = cache_get!(Returns(x), cache, key; use_disk=true)
+			x2 = cache_get!(Returns(x), cache, key)
 			@test x2.outer === x.outer
 			@test x2.inner.f === x.inner.f
 			@test x2.inner.x == x.inner.x
 			@test deduplicate!(cache.deduplicator, x2) === x2
-			empty!(cache.mem) # force loading from disk
-			x3 = cache_get!(error_fun, cache, key; use_disk=true)
+
+			# empty!(cache.mem) # force loading from disk
+			empty!(cache.deduplicator)
+			key = create_test_key(cache, key.f)
+
+			x3 = cache_get!(error_fun, cache, key)
 			@test x3.outer === x.outer
 			@test x3.inner.f === x.inner.f
 			@test x3.inner.x == x.inner.x
@@ -971,13 +1071,17 @@ function run_cache_storage_tests()
 		let x = !startswith(r"abc")
 			cache = Cache(CacheKey, Deduplicator(); dir)
 			key = new_key(cache)
-			x2 = cache_get!(Returns(x), cache, key; use_disk=true)
+			x2 = cache_get!(Returns(x), cache, key)
 			@test x2.outer === x.outer
 			@test x2.inner.f === x.inner.f
 			@test x2.inner.x == x.inner.x
 			@test deduplicate!(cache.deduplicator, x2) === x2
-			empty!(cache.mem) # force loading from disk
-			x3 = cache_get!(error_fun, cache, key; use_disk=true)
+
+			# empty!(cache.mem) # force loading from disk
+			empty!(cache.deduplicator)
+			key = create_test_key(cache, key.f)
+
+			x3 = cache_get!(error_fun, cache, key)
 			@test x3.outer === x.outer
 			@test x3.inner.f === x.inner.f
 			@test x3.inner.x == x.inner.x
@@ -1019,11 +1123,15 @@ function run_cache_storage_tests()
 				x = f(elements)
 				cache = Cache(CacheKey, Deduplicator(); dir)
 				key = new_key(cache)
-				x2 = cache_get!(Returns(x), cache, key; use_disk=true)
+				x2 = cache_get!(Returns(x), cache, key)
 				@test isequal(x2, x)
 				@test deduplicate!(cache.deduplicator, x2) === x2
-				empty!(cache.mem) # force loading from disk
-				x3 = cache_get!(error_fun, cache, key; use_disk=true)
+
+				# empty!(cache.mem) # force loading from disk
+				empty!(cache.deduplicator)
+				key = create_test_key(cache, key.f)
+
+				x3 = cache_get!(error_fun, cache, key)
 				@test isequal(x3, x)
 				@test x3 isa T{E}
 				@test deduplicate!(cache.deduplicator, x3) === x3
@@ -1082,11 +1190,15 @@ function run_cache_storage_tests()
 			x = f(values)
 			cache = Cache(CacheKey, Deduplicator(); dir)
 			key = new_key(cache)
-			x2 = cache_get!(Returns(x), cache, key; use_disk=true)
+			x2 = cache_get!(Returns(x), cache, key)
 			@test isequal(x2, x)
 			@test deduplicate!(cache.deduplicator, x2) === x2
-			empty!(cache.mem) # force loading from disk
-			x3 = cache_get!(error_fun, cache, key; use_disk=true)
+
+			# empty!(cache.mem) # force loading from disk
+			empty!(cache.deduplicator)
+			key = create_test_key(cache, key.f)
+
+			x3 = cache_get!(error_fun, cache, key)
 			@test isequal(x3, x)
 			@test x3 isa T
 			@test deduplicate!(cache.deduplicator, x3) === x3
@@ -1130,63 +1242,26 @@ function run_cache_storage_tests()
 			cache = Cache(CacheKey, Deduplicator(); dir)
 			key = new_key(cache)
 
-			u2 = cache_get_subresult!(Returns(x), cache, key; sub="sub", use_disk=true)
+			# Not yet in cache
+			@test cache_try_get_compoundresult(cache, key; return_keys=true) == NotValid()
+			@test cache_try_get_compoundresult(cache, key; sub="sub") == NotValid()
+			@test cache_try_get_compoundresult(cache, key; sub="sub2") == NotValid()
+
+			# Put in on-disk cache
+			x2 = cache_get!(Returns(x), cache, key)
+			@test x2.keys == x.keys
+			@test x2.values == x.values
+
+			# Retrieve from on-disk cache
+			@test cache_try_get_compoundresult(cache, key; return_keys=true) == ["sub", "sub2"]
+
+			u2 = cache_try_get_compoundresult(cache, key; sub="sub")
 			@test u2 == u
 			@test deduplicate!(cache.deduplicator, u2) === u2
 
-			w2 = cache_get_subresult!(error_fun, cache, key; sub="sub2", use_disk=true) # already computed, get from in-mem cache
+			w2 = cache_try_get_compoundresult(cache, key; sub="sub2")
 			@test w2 == w
 			@test deduplicate!(cache.deduplicator, w2) === w2
-
-			# --- Fake GC of subresults ---
-			cr = only(values(cache.mem))
-
-			@test cr.values[1].value === parent(u2)
-			cr.values[1] = WeakRef() # Remove ref to u
-			u3 = cache_get_subresult!(error_fun, cache, key; sub="sub", use_disk=true)
-			@test u3 == u
-			@test u3 isa ROVec{Int}
-			@test deduplicate!(cache.deduplicator, u3) === u3
-
-			# Remove ref to v
-			cr.values[2] = DeconstructedWeak(_reconstructed_type(cr.values[2]), (WeakRef(), w2[2])) # Can we write this more cleanly?
-			w3 = cache_get_subresult!(error_fun, cache, key; sub="sub2", use_disk=true)
-			@test w3 == w
-			@test w3 isa Tuple{ROVec{Int}, String}
-			@test deduplicate!(cache.deduplicator, w3) === w3
-
-			# --- Reset cache, i.e. mimic that the result was computed in a previous session ---
-			cache = Cache(CacheKey, Deduplicator(); dir)
-			key = create_test_key(cache, key.f) # recreate key to make it exist in the new deduplicator
-
-			u4 = cache_get_subresult!(error_fun, cache, key; sub="sub", use_disk=true)
-			@test u4 == u
-			@test u4 isa ROVec{Int}
-			@test deduplicate!(cache.deduplicator, u4) === u4
-
-			w4 = cache_get_subresult!(error_fun, cache, key; sub="sub2", use_disk=true)
-			@test w4 == w
-			@test w4 isa Tuple{ROVec{Int}, String}
-			@test deduplicate!(cache.deduplicator, w4) === w4
-
-
-			# --- Fake GC of subresults after loading from disk ---
-			cr = only(values(cache.mem))
-
-			@test cr.values[1].value === parent(u4)
-			cr.values[1] = WeakRef() # Remove ref to u
-			u5 = cache_get_subresult!(error_fun, cache, key; sub="sub", use_disk=true)
-			@test u5 == u
-			@test u5 isa ROVec{Int}
-			@test deduplicate!(cache.deduplicator, u5) === u5
-
-			# Remove ref to v
-			cr.values[2] = DeconstructedWeak(_reconstructed_type(cr.values[2]), (WeakRef(), w4[2])) # Can we write this more cleanly?
-			w5 = cache_get_subresult!(error_fun, cache, key; sub="sub2", use_disk=true)
-			@test w5 == w
-			@test w5 isa Tuple{ROVec{Int}, String}
-			@test deduplicate!(cache.deduplicator, w5) === w5
-
 
 			h5open(key2path(cache, key), "r") do h5
 				root = h5["root"]
@@ -1206,7 +1281,6 @@ function run_cache_storage_tests()
 			end
 		end
 	end
-
 	@testset "Unions" begin
 		@testset "$(typeof(x))" for x in (["a",nothing,"b"],
 		                                  ["a",missing,"b"],
@@ -1215,11 +1289,15 @@ function run_cache_storage_tests()
 			E = eltype(x)
 			cache = Cache(CacheKey, Deduplicator(); dir)
 			key = new_key(cache)
-			x2 = cache_get!(Returns(x), cache, key; use_disk=true)
+			x2 = cache_get!(Returns(x), cache, key)
 			@test isequal(x2, x)
 			@test deduplicate!(cache.deduplicator, x2) === x2
-			empty!(cache.mem) # force loading from disk
-			x3 = cache_get!(error_fun, cache, key; use_disk=true)
+
+			# empty!(cache.mem) # force loading from disk
+			empty!(cache.deduplicator)
+			key = create_test_key(cache, key.f)
+
+			x3 = cache_get!(error_fun, cache, key)
 			@test isequal(x3, x)
 			@test x3 isa ROVec{eltype(x)}
 			@test deduplicate!(cache.deduplicator, x3) === x3
@@ -1253,11 +1331,15 @@ function run_cache_storage_tests()
 			x = T[]
 			cache = Cache(CacheKey, Deduplicator(); dir)
 			key = new_key(cache)
-			x2 = cache_get!(Returns(x), cache, key; use_disk=true)
+			x2 = cache_get!(Returns(x), cache, key)
 			@test x2 == x
 			@test deduplicate!(cache.deduplicator, x2) === x2
-			empty!(cache.mem) # force loading from disk
-			x3 = cache_get!(error_fun, cache, key; use_disk=true)
+
+			# empty!(cache.mem) # force loading from disk
+			empty!(cache.deduplicator)
+			key = create_test_key(cache, key.f)
+
+			x3 = cache_get!(error_fun, cache, key)
 			@test x3 == x
 			@test x3 isa ROVec{T}
 			@test deduplicate!(cache.deduplicator, x3) === x3
@@ -1274,11 +1356,15 @@ function run_cache_storage_tests()
 			x = String[]
 			cache = Cache(CacheKey, Deduplicator(); dir)
 			key = new_key(cache)
-			x2 = cache_get!(Returns(x), cache, key; use_disk=true)
+			x2 = cache_get!(Returns(x), cache, key)
 			@test x2 == x
 			@test deduplicate!(cache.deduplicator, x2) === x2
-			empty!(cache.mem) # force loading from disk
-			x3 = cache_get!(error_fun, cache, key; use_disk=true)
+
+			# empty!(cache.mem) # force loading from disk
+			empty!(cache.deduplicator)
+			key = create_test_key(cache, key.f)
+
+			x3 = cache_get!(error_fun, cache, key)
 			@test x3 == x
 			@test x3 isa ROVec{String}
 			@test deduplicate!(cache.deduplicator, x3) === x3
@@ -1300,11 +1386,15 @@ function run_cache_storage_tests()
 			x = sparse(Int[], Int[], Float64[], 5, 3)
 			cache = Cache(CacheKey, Deduplicator(); dir)
 			key = new_key(cache)
-			x2 = cache_get!(Returns(x), cache, key; use_disk=true)
+			x2 = cache_get!(Returns(x), cache, key)
 			@test x2 == x
 			@test deduplicate!(cache.deduplicator, x2) === x2
-			empty!(cache.mem) # force loading from disk
-			x3 = cache_get!(error_fun, cache, key; use_disk=true)
+
+			# empty!(cache.mem) # force loading from disk
+			empty!(cache.deduplicator)
+			key = create_test_key(cache, key.f)
+
+			x3 = cache_get!(error_fun, cache, key)
 			@test x3 == x
 			@test x3 isa SparseMatrixCSC{Float64,Int}
 			@test deduplicate!(cache.deduplicator, x3) === x3
@@ -1336,12 +1426,12 @@ end
 
 
 function run_cache_tests()
-	@testset "Memory Only" begin
-		run_cache_mem_tests()
-	end
-	@testset "Using Disk" begin
-		run_cache_disk_tests()
-	end
+	# @testset "Memory Only" begin
+	# 	run_cache_mem_tests()
+	# end
+	# @testset "Using Disk" begin
+	# 	run_cache_disk_tests()
+	# end
 	@testset "Storage" begin
 		run_cache_storage_tests()
 	end

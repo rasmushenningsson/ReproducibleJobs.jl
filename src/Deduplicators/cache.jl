@@ -473,7 +473,7 @@ function cache_get!(f, cache::Cache{K}, key::K) where K
 	return result
 end
 
-# This is experimental.
+# This is experimental. Find a better name?
 function cache_try_get_compoundresult(cache::Cache{K}, key::K; sub=nothing, return_keys::Bool=false) where K
 	(sub===nothing) == (return_keys==false) && throw(ArgumentError("Either specify sub or set return_keys=true (but not both)."))
 
