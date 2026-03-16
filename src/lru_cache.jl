@@ -8,15 +8,29 @@ LRUCache{K,V}() where {K,V} = LRUCache{K,V}(WeakKeyDict{K, Tuple{V,Int}}(), Muta
 
 function lru_touch!(lru::LRUCache{K,V}, key::K, val::V) where {K,V}
 	lru.counter += 1
-	if haskey(lru.wkd, key)
-		old_val, handle = lru.wkd[key]
-		@assert old_val === val # We are not allowed to change the value when updating
-		lru.wkd[key] = (val, handle)
-		DataStructures.update!(lru.heap, handle, (lru.counter, WeakRef(key)))
-	else
-		handle = push!(lru.heap, (lru.counter, WeakRef(key)))
-		lru.wkd[key] = (val, handle)
+
+	# if haskey(lru.wkd, key)
+	# 	old_val, handle = lru.wkd[key]
+	# 	@assert old_val === val # We are not allowed to change the value when updating
+	# 	# lru.wkd[key] = (val, handle)
+	# 	DataStructures.update!(lru.heap, handle, (lru.counter, WeakRef(key)))
+	# else
+	# 	handle = push!(lru.heap, (lru.counter, WeakRef(key)))
+	# 	lru.wkd[key] = (val, handle)
+	# end
+
+	# Attempt to rewrite using `get!` in order to avoid one lookup.
+	n_items = length(lru.heap)
+	old_val, handle = get!(lru.wkd, key) do
+		h = push!(lru.heap, (lru.counter, WeakRef(key)))
+		val, h
 	end
+	if n_items == length(lru.heap)
+		# No item was inserted, so we must update the prio of the old entry
+		@assert old_val === val # We are not allowed to change the value when updating
+		DataStructures.update!(lru.heap, handle, (lru.counter, WeakRef(key)))
+	end
+
 	lru
 end
 
