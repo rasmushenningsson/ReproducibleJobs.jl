@@ -37,7 +37,7 @@ end
 function lru_pop!(lru::LRUCache{K}) where {K}
 	_, ref = pop!(lru.heap)
 	key = ref.value
-	key === nothing && return nothing, nothing
+	key === nothing && return nothing
 	key::K
 	val, _ = pop!(lru.wkd, key)
 	return key, val

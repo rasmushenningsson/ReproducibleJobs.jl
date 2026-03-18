@@ -199,6 +199,12 @@ function _fetch_and_compute_sub!(scheduler, sa::SpecArgs, deps::Vector{Spec})
 
 	lru_touch!(scheduler.lru, inner_sa, cr)
 
+	# # Experimental version - only insert in the LRU if it was deconstructed!
+	# # TODO: We want to improve this condition so that we check if the deconstructed result contains any weak refs, and if it does, put it in the LRU.
+	# if cr !== cached_sa.result
+	# 	lru_touch!(scheduler.lru, inner_sa, cr)
+	# end
+
 	return sub === nothing ? get_keys(cr) : get_subresult(cr, sub)
 end
 
@@ -305,6 +311,12 @@ function process_once!(scheduler::Scheduler, sa::SpecArgs, op::T; parent_f) wher
 
 		# lru
 		lru_touch!(scheduler.lru, sa, res)
+
+		# # Experimental version - only insert in the LRU if it was deconstructed!
+		# # TODO: We want to improve this condition so that we check if the deconstructed result contains any weak refs, and if it does, put it in the LRU.
+		# if res !== sa.result
+		# 	lru_touch!(scheduler.lru, sa, res)
+		# end
 
 		return res, true
 	end
