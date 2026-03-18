@@ -5,11 +5,11 @@ struct Fetch <: AbstractSpecOp end # Means fetch immediately (e.g. get as value 
 struct Prefetch <: AbstractSpecOp end # Replace spec by result just before computing - useful to collapse multiple specs that yield the same result onto the same spec.
 struct Forward <: AbstractSpecOp end
 
-Deduplicators.deduplicate_type(::Type{<:AbstractSpecOp}) = false
-Deduplicators.deconstruct_weak_rec(x::T) where T<:AbstractSpecOp = x
-Deduplicators.reconstruct_weak_rec(x::T) where T<:AbstractSpecOp = x
+deduplicate_type(::Type{<:AbstractSpecOp}) = false
+deconstruct_weak_rec(x::T) where T<:AbstractSpecOp = x
+reconstruct_weak_rec(x::T) where T<:AbstractSpecOp = x
 
-function Deduplicators.cache_save(io, name, x::AbstractSpecOp)
+function cache_save(io, name, x::AbstractSpecOp)
 	io[name] = x # Rely on JLD2 standard handling for saving/loading
 	nothing
 end
@@ -41,9 +41,9 @@ mutable struct SpecArgs # TODO: Add template parameters for args/kwargs? Or find
 end
 
 
-Deduplicators.deduplicate_type(::Type{SpecArgs}) = true
-Deduplicators.deduplication_pointer(sa::SpecArgs) = pointer_from_objref(sa)
-function Deduplicators.deduplicate_children!(d, sa::SpecArgs; kwargs...)
+deduplicate_type(::Type{SpecArgs}) = true
+deduplication_pointer(sa::SpecArgs) = pointer_from_objref(sa)
+function deduplicate_children!(d, sa::SpecArgs; kwargs...)
 	f = sa.f # TODO: Should this be processed somehow? Probably not.
 	a = deduplicate!(d, sa.args; kwargs...)
 	kw = deduplicate!(d, sa.kwargs; kwargs...)
@@ -53,30 +53,30 @@ function Deduplicators.deduplicate_children!(d, sa::SpecArgs; kwargs...)
 		SpecArgs(f, a, kw)
 	end
 end
-function Deduplicators.deduplication_hash(d, sa::SpecArgs)
+function deduplication_hash(d, sa::SpecArgs)
 	# TODO: Could we make this more efficient? (Is it a problem? Probably not.)
 	f = sa.f
-	a = Deduplicators.deduplication_hash(d, sa.args)
-	kw = Deduplicators.deduplication_hash(d, sa.kwargs)
-	Deduplicators.compute_hash(d, (Deduplicators.TypeTag(:SpecArgs), f, a, kw))
+	a = deduplication_hash(d, sa.args)
+	kw = deduplication_hash(d, sa.kwargs)
+	compute_hash(d, (TypeTag(:SpecArgs), f, a, kw))
 end
-Deduplicators.deduplication_copy(sa::SpecArgs) = sa
+deduplication_copy(sa::SpecArgs) = sa
 
 
 
-function Deduplicators.cache_save(io, name, spec::SpecArgs)
+function cache_save(io, name, spec::SpecArgs)
 	# Save as a group
 	g = JLD2.Group(io, name)
 	g["type"] = "SpecArgs"
 	g["f"] = spec.f # Is this the best I can do?
-	Deduplicators.cache_save(g, "args", spec.args)
-	Deduplicators.cache_save(g, "kwargs", spec.kwargs)
+	cache_save(g, "args", spec.args)
+	cache_save(g, "kwargs", spec.kwargs)
 	nothing
 end
-function Deduplicators.cache_load(cache::Cache, ::Val{:SpecArgs}, g)
+function cache_load(cache::Cache, ::Val{:SpecArgs}, g)
 	f = g["f"]
-	args = Deduplicators.cache_load(cache, g, "args")
-	kwargs = Deduplicators.cache_load(cache, g, "kwargs")
+	args = cache_load(cache, g, "args")
+	kwargs = cache_load(cache, g, "kwargs")
 	sa = SpecArgs(f, args, kwargs)
 	deduplicate!(cache.deduplicator, sa; transfer_ownership=true)
 end
@@ -112,9 +112,9 @@ function sa_isequal(a::DataFrame, b::DataFrame)
 end
 
 function sa_isequal(a::T1, b::T2) where {T1,T2}
-	if Deduplicators.deconstruct_type(T1) && Deduplicators.deconstruct_type(T2)
-		ad = Deduplicators.deconstruct(a)::Tuple
-		bd = Deduplicators.deconstruct(b)::Tuple
+	if deconstruct_type(T1) && deconstruct_type(T2)
+		ad = deconstruct(a)::Tuple
+		bd = deconstruct(b)::Tuple
 
 		isequal(length(ad), length(bd)) || return false
 		all(t->sa_isequal(t[1], t[2]), zip(ad,bd))
@@ -155,12 +155,12 @@ end
 function get_result!(f, sa::SpecArgs)
 	if sa.result !== nothing
 		# Attempt to reconstruct from weakly stored reference
-		res = Deduplicators.reconstruct_weak_rec(sa.result)
-		res !== Deduplicators.NotValid() && return res
+		res = reconstruct_weak_rec(sa.result)
+		res !== NotValid() && return res
 	end
 
 	res = f()
-	sa.result = Deduplicators.deconstruct_weak_rec(res)
+	sa.result = deconstruct_weak_rec(res)
 	return res
 end
 
@@ -195,19 +195,19 @@ function Base.propertynames(s::Spec, private::Bool=false)
 end
 
 
-Deduplicators.deduplicate_type(::Type{Spec}) = true
-Deduplicators.deconstruct_type(::Type{Spec}) = true
-Deduplicators.type_to_tag(::Type{Spec}) = Deduplicators.TypeTag(:Spec)
-Deduplicators.tag_to_type(::Val{:Spec}) = Spec
-Deduplicators.deconstruct(spec::Spec) = (spec.sa, spec.op)
-Deduplicators.reconstruct(::Type{Spec}, (sa,op)::Tuple{SpecArgs,<:Any}) = Spec(sa, op)
+deduplicate_type(::Type{Spec}) = true
+deconstruct_type(::Type{Spec}) = true
+type_to_tag(::Type{Spec}) = TypeTag(:Spec)
+tag_to_type(::Val{:Spec}) = Spec
+deconstruct(spec::Spec) = (spec.sa, spec.op)
+reconstruct(::Type{Spec}, (sa,op)::Tuple{SpecArgs,<:Any}) = Spec(sa, op)
 
 
 
 
 function create_spec(f, args...; scheduler=get_scheduler(), deduplicator=scheduler.deduplicator, kwargs...)
 	kw = values(kwargs)
-	kw = Deduplicators.sort_namedtuple_by_keys(kw)
+	kw = sort_namedtuple_by_keys(kw)
 	sa = SpecArgs(f, args, kw)
 	deduplicator !== nothing && (sa = deduplicate!(deduplicator, sa))
 	spec = Spec(sa)
@@ -230,12 +230,12 @@ end
 
 function visit_specs(f, v::AbstractVector{T}) where T
 	# The eltype check gives some false positives, but it prevents some unnecessary traversal and mostly gets the job done
-	Deduplicators._deduplicate_eltype(T) && visit_specs.(Ref(f), v)
+	_deduplicate_eltype(T) && visit_specs.(Ref(f), v)
 end
 function visit_specs(f, d::Dict{K,V}) where {K,V}
 	# The eltype check gives some false positives, but it prevents some unnecessary traversal and mostly gets the job done
-	Deduplicators._deduplicate_eltype(K) && visit_specs.(Ref(f), keys(d))
-	Deduplicators._deduplicate_eltype(V) && visit_specs.(Ref(f), values(d))
+	_deduplicate_eltype(K) && visit_specs.(Ref(f), keys(d))
+	_deduplicate_eltype(V) && visit_specs.(Ref(f), values(d))
 end
 
 function visit_specs(f, nt::T) where T<:NamedTuple
@@ -247,9 +247,9 @@ function visit_specs(f, df::DataFrame)
 end
 
 function visit_specs(f, x::T) where T
-	# @assert Deduplicators.deconstruct_type(T) "visit_specs fallback only available for types that can be deconstructed, got $T."
-	if Deduplicators.deconstruct_type(T)
-		xd = Deduplicators.deconstruct(x)::Tuple
+	# @assert deconstruct_type(T) "visit_specs fallback only available for types that can be deconstructed, got $T."
+	if deconstruct_type(T)
+		xd = deconstruct(x)::Tuple
 		visit_specs.(Ref(f), xd)
 	else
 		# TODO: Should we have this fallback? Or define visit_specs for everything including Int, String, etc.
@@ -271,7 +271,7 @@ map_specs(f::F, sa::SpecArgs) where F = @something f(sa) _map_specs(f, sa)
 
 function _map_specs(f::F, v::AbstractVector{T}) where {F,T}
 	# The eltype check gives some false positives, but it prevents some unnecessary traversal and mostly gets the job done
-	if Deduplicators._deduplicate_eltype(T)
+	if _deduplicate_eltype(T)
 		ReadOnlyArray(map_specs.(Ref(f), v))
 	else
 		v # keep as is
@@ -281,8 +281,8 @@ map_specs(f::F, v::AbstractVector{T}) where {F,T} = @something f(v) _map_specs(f
 
 function _map_specs(f::F, dict::Dict{K,V}) where {F,K,V}
 	# The eltype check gives some false positives, but it prevents some unnecessary traversal and mostly gets the job done
-	replace_keys = Deduplicators._deduplicate_eltype(K)
-	replace_values = Deduplicators._deduplicate_eltype(V)
+	replace_keys = _deduplicate_eltype(K)
+	replace_values = _deduplicate_eltype(V)
 
 	if replace_keys && replace_values
 		Dict(map_specs(f, k)=>map_specs(f, v) for (k,v) in dict)
@@ -305,11 +305,11 @@ function map_specs(f::F, df::DataFrame) where F
 end
 
 function _map_specs(f::F, x::T) where {F,T}
-	# @assert Deduplicators.deconstruct_type(T) "map_specs fallback only available for types that can be deconstructed, got $T."
-	if Deduplicators.deconstruct_type(T)
-		xd = Deduplicators.deconstruct(x)::Tuple
+	# @assert deconstruct_type(T) "map_specs fallback only available for types that can be deconstructed, got $T."
+	if deconstruct_type(T)
+		xd = deconstruct(x)::Tuple
 		xd = map(x->map_specs(f,x), xd)
-		Deduplicators.reconstruct(T, xd)
+		reconstruct(T, xd)
 	else
 		# TODO: Should we have this fallback? Or define map_specs for everything including Int, String, etc.
 		x

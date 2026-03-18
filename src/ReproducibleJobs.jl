@@ -1,19 +1,24 @@
 module ReproducibleJobs
 
+
 using StableHashTraits
 using ReadOnlyArrays
-using JLD2: JLD2, jldopen, load, ZstdFilter
+import TupleTools # for sorting of tuples
+using JLD2: JLD2, jldopen, ZstdFilter
+
+using Preferences # For persisting cache dir
+
 using DataStructures: DataStructures, MutableBinaryMinHeap # For LRU functionality
-import AbstractTrees # for pretty printing
 using SHA
-import Dates # for printing of timestamped paths
 
 using LinearAlgebra # For handling copy_arg(transposed)
 
 using DataFrames # TODO: Use package extension?
 using SparseArrays # TODO: Use package extension?
 
+import AbstractTrees # for pretty printing
 using StyledStrings # For Spec printing
+import Dates # for printing of timestamped paths
 
 export
 	Deduplicator,
@@ -53,12 +58,31 @@ if VERSION >= v"1.11.0-DEV.469"
 	end
 end
 
-include("Deduplicators/Deduplicators.jl")
-using .Deduplicators
-using .Deduplicators: ROArray, ROVec, ROMat, ROBitVec
+
+# ReadOnlyArray accepts any AbstractArray as the underlying object - these types enforce Array to be used
+const ROArray{T,N} = ReadOnlyArray{T,N,Array{T,N}}
+const ROVec{T} = ROArray{T,1}
+const ROMat{T} = ROArray{T,2}
+
+const ROBitArray{N} = ReadOnlyArray{Bool,N,BitArray{N}}
+const ROBitVec = ROBitArray{1}
+const ROBitMat = ROBitArray{2}
+
+
+persist_cache_path!(path::String) = @set_preferences!("cache_path"=>expanduser(path))
+get_cache_path() = @something @load_preference("cache_path") ".cache"
+
+
+# Deduplicator and cache
+include("utils.jl")
+include("hash.jl")
+include("compound_result.jl")
+include("deduplicator.jl")
+include("cache.jl")
 
 
 
+# Specs and scheduling
 include("spec.jl")
 include("spec_meta.jl")
 include("preprocess.jl")

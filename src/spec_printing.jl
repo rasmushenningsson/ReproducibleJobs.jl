@@ -27,8 +27,8 @@ descend(pc::PrintContext) = PrintContext(pc.pointers, pc.pointer_to_ordinal, pc.
 _materialize_string(x::AbstractString) = x
 
 
-_get_pointer(x) = Deduplicators.deduplication_pointer(x)
-_get_pointer(x::ReadOnlyArray) = Deduplicators.deduplication_pointer(parent(x))
+_get_pointer(x) = deduplication_pointer(x)
+_get_pointer(x::ReadOnlyArray) = deduplication_pointer(parent(x))
 
 
 

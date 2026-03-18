@@ -5,9 +5,18 @@ using Test
 # 2. includet("test/xyz.jl")
 # 3. call run_xyz_tests()
 
+include("hash.jl")
+include("deduplicator.jl")
+include("cache.jl")
 include("spec.jl")
 
 @testset "ReproducibleJobs" begin
-	include("Deduplicators/runtests.jl")
+	run_hash_tests()
+	@testset "Deduplicator" begin
+		run_deduplicator_tests()
+	end
+	@testset "Cache" begin
+		run_cache_tests()
+	end
 	run_spec_tests()
 end

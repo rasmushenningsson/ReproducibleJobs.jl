@@ -1,7 +1,6 @@
 using Test
 using ReproducibleJobs
-using ReproducibleJobs.Deduplicators
-using ReproducibleJobs.Deduplicators: ROArray, ROVec, ROMat, ROBitArray, ROBitVec, ROBitMat, Hash, deduplication_hash, lookup_hash, deduplicate_type, deduplication_pointer, CompoundResult
+using ReproducibleJobs: ROArray, ROVec, ROMat, ROBitArray, ROBitVec, ROBitMat, Hash, deduplication_hash, lookup_hash, deduplicate_type, deduplication_pointer, CompoundResult
 using ReadOnlyArrays
 using StableHashTraits
 using SparseArrays
@@ -13,13 +12,13 @@ reporter_was_called::Bool = false
 struct Reporter
 	expected_transfer_ownership::Bool
 end
-Deduplicators.deduplicate_type(::Type{Reporter}) = true
-function Deduplicators.deduplicate_children!(d, r::Reporter; transfer_ownership)
+ReproducibleJobs.deduplicate_type(::Type{Reporter}) = true
+function ReproducibleJobs.deduplicate_children!(d, r::Reporter; transfer_ownership)
 	@test transfer_ownership == r.expected_transfer_ownership
 	global reporter_was_called = true
 	r
 end
-function Deduplicators.deduplication_hash(d, r::Reporter)
+function ReproducibleJobs.deduplication_hash(d, r::Reporter)
 	Hash((UInt64(1),UInt64(2),UInt64(3),UInt64(4))) # dummy
 end
 

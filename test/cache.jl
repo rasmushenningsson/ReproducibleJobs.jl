@@ -1,7 +1,6 @@
 using Test
 using ReproducibleJobs
-using ReproducibleJobs.Deduplicators
-using ReproducibleJobs.Deduplicators: ROArray, ROVec, ROMat, ROBitArray, ROBitVec, ROBitMat, lookup_hash, deduplication_pointer, DeconstructedWeak, reconstruct_weak_rec, NotValid, CompoundResult, key2path
+using ReproducibleJobs: ROArray, ROVec, ROMat, ROBitArray, ROBitVec, ROBitMat, lookup_hash, deduplication_pointer, DeconstructedWeak, reconstruct_weak_rec, NotValid, CompoundResult, key2path, cache_get!, cache_try_get_compoundresult
 using ReadOnlyArrays
 using StableHashTraits
 using SparseArrays
@@ -19,22 +18,22 @@ mutable struct CacheKey
 	f::String
 end
 
-Deduplicators.deduplicate_type(::Type{CacheKey}) = true
-Deduplicators.deduplication_pointer(key::CacheKey) = pointer_from_objref(key)
-Deduplicators.deduplicate_children!(d, key::CacheKey; transfer_ownership) = key
-function Deduplicators.deduplication_hash(d, key::CacheKey)
-	Deduplicators.compute_hash(d, (Deduplicators.TypeTag(:CacheKey), key.f))
+ReproducibleJobs.deduplicate_type(::Type{CacheKey}) = true
+ReproducibleJobs.deduplication_pointer(key::CacheKey) = pointer_from_objref(key)
+ReproducibleJobs.deduplicate_children!(d, key::CacheKey; transfer_ownership) = key
+function ReproducibleJobs.deduplication_hash(d, key::CacheKey)
+	ReproducibleJobs.compute_hash(d, (ReproducibleJobs.TypeTag(:CacheKey), key.f))
 end
-Deduplicators.deduplication_copy(key::CacheKey) = CacheKey(key.f)
+ReproducibleJobs.deduplication_copy(key::CacheKey) = CacheKey(key.f)
 
-function Deduplicators.cache_save(io, name, result::CacheKey)
+function ReproducibleJobs.cache_save(io, name, result::CacheKey)
 	# Save as a group
 	g = JLD2.Group(io, name)
 	g["type"] = "CacheKey"
 	g["value"] = result.f
 	nothing
 end
-function Deduplicators.cache_load(cache::Cache, ::Val{:CacheKey}, g)
+function ReproducibleJobs.cache_load(cache::Cache, ::Val{:CacheKey}, g)
 	deduplicate!(cache.deduplicator, CacheKey(g["value"]); transfer_ownership=true)
 end
 

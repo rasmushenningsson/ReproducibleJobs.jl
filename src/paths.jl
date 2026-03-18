@@ -9,11 +9,11 @@ function TimestampedFilePath(path)
 	TimestampedFilePath(path, mtime(st))
 end
 
-Deduplicators.deduplicate_type(::Type{TimestampedFilePath}) = false
-Deduplicators.deconstruct_weak_rec(x::TimestampedFilePath) = x
-Deduplicators.reconstruct_weak_rec(x::TimestampedFilePath) = x
+deduplicate_type(::Type{TimestampedFilePath}) = false
+deconstruct_weak_rec(x::TimestampedFilePath) = x
+reconstruct_weak_rec(x::TimestampedFilePath) = x
 
-function Deduplicators.cache_save(io, name, x::TimestampedFilePath)
+function cache_save(io, name, x::TimestampedFilePath)
 	io[name] = x # Rely on JLD2 standard handling for saving/loading
 	nothing
 end
@@ -47,11 +47,11 @@ StableHashTraits.transformer(::Type{<:ChecksummedFilePath}) = StableHashTraits.T
 Base.isequal(a::ChecksummedFilePath, b::ChecksummedFilePath) = isequal(a.checksum, b.checksum) # This allows us to compare with old specs saved to disk - even if the file moved change timestamp.
 
 
-Deduplicators.deduplicate_type(::Type{ChecksummedFilePath}) = false
-Deduplicators.deconstruct_weak_rec(x::ChecksummedFilePath) = x
-Deduplicators.reconstruct_weak_rec(x::ChecksummedFilePath) = x
+deduplicate_type(::Type{ChecksummedFilePath}) = false
+deconstruct_weak_rec(x::ChecksummedFilePath) = x
+reconstruct_weak_rec(x::ChecksummedFilePath) = x
 
-function Deduplicators.cache_save(io, name, x::ChecksummedFilePath)
+function cache_save(io, name, x::ChecksummedFilePath)
 	io[name] = x # Rely on JLD2 standard handling for saving/loading
 	nothing
 end

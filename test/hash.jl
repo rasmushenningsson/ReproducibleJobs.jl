@@ -1,7 +1,6 @@
 using Test
 using ReproducibleJobs
-using ReproducibleJobs.Deduplicators
-using ReproducibleJobs.Deduplicators: Hash, hash_string
+using ReproducibleJobs: Hash, hash_string
 using StableHashTraits
 
 function run_hash_tests()

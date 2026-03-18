@@ -12,8 +12,8 @@ Job(spec::Spec) = Job(spec, NotComputed())
 
 Base.Broadcast.broadcastable(job::Job) = Ref(job) # treat as scalar for broadcasting
 
-Deduplicators.deduplicate_type(::Type{Job}) = true
-Deduplicators.deduplication_preprocess(job::Job) = Spec(job.spec.sa) # Resets the op to default
+deduplicate_type(::Type{Job}) = true
+deduplication_preprocess(job::Job) = Spec(job.spec.sa) # Resets the op to default
 
 
 fetched(job::Job) = fetched(job.spec)

@@ -175,9 +175,9 @@ function _fetch_and_compute_sub!(scheduler, sa::SpecArgs, deps::Vector{Spec})
 		@assert cr isa CompoundResult
 		# sub === nothing && return get_keys(cr)
 		sub === nothing && return (@info "1 success $sub ($(cached_sa.args[1].sa.f))"; return get_keys(cr))
-		v = Deduplicators.reconstruct_weak_rec(get_subresult(cr, sub))
-		# v !== Deduplicators.NotValid() && return v
-		v !== Deduplicators.NotValid() && (@info "1 success $sub ($(cached_sa.args[1].sa.f))"; return v)
+		v = reconstruct_weak_rec(get_subresult(cr, sub))
+		# v !== NotValid() && return v
+		v !== NotValid() && (@info "1 success $sub ($(cached_sa.args[1].sa.f))"; return v)
 		@info "1 failed ($(cached_sa.args[1].sa.f))"
 	end
 
@@ -185,8 +185,8 @@ function _fetch_and_compute_sub!(scheduler, sa::SpecArgs, deps::Vector{Spec})
 	inner_sa = cached_sa.args[1].sa
 	@info "Attempting 2 ($(cached_sa.args[1].sa.f))"
 	v = cache_try_get_compoundresult(scheduler.cache, inner_sa; sub, return_keys=sub===nothing)
-	# v !== Deduplicators.NotValid() && return v
-	v !== Deduplicators.NotValid() && (@info "2 success $sub ($(cached_sa.args[1].sa.f))"; return v)
+	# v !== NotValid() && return v
+	v !== NotValid() && (@info "2 success $sub ($(cached_sa.args[1].sa.f))"; return v)
 	@info "2 failed ($(cached_sa.args[1].sa.f))"
 
 	# 3.
@@ -262,8 +262,8 @@ end
 
 
 # DEBUG
-let proccessing_counts = Dict{Deduplicators.Hash,Int}()
-	global function processing_count(h::Deduplicators.Hash)
+let proccessing_counts = Dict{Hash,Int}()
+	global function processing_count(h::Hash)
 		c = get(proccessing_counts, h, 0) + 1
 		proccessing_counts[h] = c
 		c
@@ -282,8 +282,8 @@ function process_once!(scheduler::Scheduler, sa::SpecArgs, op::T; parent_f) wher
 	end
 
 	# # DEBUG
-	# h = Deduplicators.lookup_hash(scheduler.deduplicator, sa)
-	# @info "Processing $(sa.f) ($(Deduplicators.hash_string(h)[1:6]), n=$(processing_count(h)))"
+	# h = lookup_hash(scheduler.deduplicator, sa)
+	# @info "Processing $(sa.f) ($(hash_string(h)[1:6]), n=$(processing_count(h)))"
 
 
 	deps = get_dependencies(sa)
