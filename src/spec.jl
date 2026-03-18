@@ -35,12 +35,12 @@ mutable struct SpecArgs # TODO: Add template parameters for args/kwargs? Or find
 	# next::Union{NotValid, Tuple{SpecArgs,Union{Call,Fetch,Prefetch,Forward}}, Some}
 
 	# Cache (result)
-	# NB: The result is stored weakly.
-	result::Any # NotValid means it is not computed
+	result::Any
+	weak_result::Any
 
 	function SpecArgs(f, args, kwargs)
 		@assert issorted(keys(kwargs))
-		new(f, args, kwargs, NotValid(), NotValid())
+		new(f, args, kwargs, NotValid(), NotValid(), NotValid())
 	end
 end
 
@@ -149,16 +149,22 @@ end
 
 # TODO: Make this code easier to read
 function get_result!(f, sa::SpecArgs)
-	if sa.result !== NotValid()
+	sa.result !== NotValid() && return sa.result
+
+	if sa.weak_result !== NotValid()
 		# Attempt to reconstruct from weakly stored reference
-		res = reconstruct_weak_rec(sa.result)
-		res !== NotValid() && return res
+		sa.result = reconstruct_weak_rec(sa.weak_result)
+		sa.result !== NotValid() && return sa.result
 	end
 
-	res = f()
-	sa.result = deconstruct_weak_rec(res)
-	return res
+	# Compute result
+	sa.result = f()
+	sa.weak_result = deconstruct_weak_rec(sa.result)
+	return sa.result
 end
+
+# NB: Any weak result will still be present and the result can thus still be reconstructed if it has not yet been GCed.
+empty_result!(sa::SpecArgs) = (sa.result = NotValid(); sa)
 
 
 

@@ -5,20 +5,29 @@
 struct Scheduler{H}
 	deduplicator::Deduplicator{H}
 
-	cache::Cache{SpecArgs,H} # spec -> forwarded spec or result
+	cache::Cache{SpecArgs,H} # spec -> result stored on disk
 
-	lru::LRUCache{SpecArgs,Any} # To prevent GC of most recently used results
+	lru::LRUCache{SpecArgs} # To prevent GC of most recently used results
 end
-Scheduler(cache::Cache{SpecArgs,H}) where H = Scheduler{H}(cache.deduplicator, cache, LRUCache{SpecArgs,Any}())
+Scheduler(cache::Cache{SpecArgs,H}) where H = Scheduler{H}(cache.deduplicator, cache, LRUCache{SpecArgs}())
 Scheduler(deduplicator::Deduplicator{H}; kwargs...) where H = Scheduler(Cache(SpecArgs, deduplicator; kwargs...))
 # Scheduler() = Scheduler(default_deduplicator())
 Scheduler(; kwargs...) = Scheduler(Deduplicator(); kwargs...)
 
+function evict_results!(scheduler::Scheduler; evict_all=true, max_n::Int=100)
+	length(scheduler.lru)>max_n && @info "Evicting $(length(scheduler.lru)-max_n) results."
+
+	while !isempty(scheduler.lru) && (evict_all || length(scheduler.lru)>max_n)
+		sa = lru_pop!(scheduler.lru)
+		sa !== nothing && empty_result!(sa)
+	end
+	scheduler
+end
 
 function Base.empty!(scheduler::Scheduler)
-	empty!(scheduler.deduplicator)
-	# empty!(scheduler.cache)
-	empty!(scheduler.lru)
+	evict_results!(scheduler)
+	force_empty!(scheduler.lru)
+	# empty!(scheduler.deduplicator) # Hmm. This is problematic, because the user can still have specs, and the deduplicator shouldn't lose track of those.
 	scheduler
 end
 
@@ -156,8 +165,9 @@ function _fetch_and_compute_sub!(scheduler, sa::SpecArgs, deps::Vector{Spec})
 	# TODO: Try in this order
 	# 0. (Already done) Is it cached and still valid in sa.result.
 	# 1. Is the cached_sa result still valid? Then return subresult from that.
-	# 2. Is the cached_sa cached to disk? Then load the subresult (only) from disk.
-	# 3. Compute compoundresult and return sub.
+	# 2. Can we reconstruct from the cached_sa weak_result?
+	# 3. Is the cached_sa cached to disk? Then load the subresult (only) from disk.
+	# 4. Compute compoundresult and return sub.
 
 	if sa.f == compoundresult_sub
 		sub = sa.args[2]::String
@@ -169,41 +179,43 @@ function _fetch_and_compute_sub!(scheduler, sa::SpecArgs, deps::Vector{Spec})
 	# TODO: Put part of this in a helper function, get_result?, in spec.jl?
 	# 1.
 	if cached_sa.result !== NotValid()
-		@info "Attempting 1 ($(cached_sa.args[1].sa.f))"
-		# Attempt to reconstruct from weakly stored reference
+		@info "Found cached CompoundResult ($(cached_sa.args[1].sa.f))"
 		cr = cached_sa.result
 		@assert cr isa CompoundResult "Expected CompoundResult, got $(typeof(cr))."
-		# sub === nothing && return get_keys(cr)
-		sub === nothing && return (@info "1 success $sub ($(cached_sa.args[1].sa.f))"; return get_keys(cr))
-		v = reconstruct_weak_rec(get_subresult(cr, sub))
-		# v !== NotValid() && return v
-		v !== NotValid() && (@info "1 success $sub ($(cached_sa.args[1].sa.f))"; return v)
-		@info "1 failed ($(cached_sa.args[1].sa.f))"
+		return sub === nothing ? get_keys(cr) : get_subresult(cr, sub)
 	end
 
-	# 2.
-	inner_sa = cached_sa.args[1].sa
-	@info "Attempting 2 ($(cached_sa.args[1].sa.f))"
-	v = cache_try_get_compoundresult(scheduler.cache, inner_sa; sub, return_keys=sub===nothing)
-	# v !== NotValid() && return v
-	v !== NotValid() && (@info "2 success $sub ($(cached_sa.args[1].sa.f))"; return v)
-	@info "2 failed ($(cached_sa.args[1].sa.f))"
+	w = cached_sa.weak_result
+	if w !== NotValid()
+		@info "Attempting 2 ($(cached_sa.args[1].sa.f))"
+
+		# Attempt to reconstruct from weakly stored CompoundResult
+		@assert w isa CompoundResult "Expected CompoundResult, got $(typeof(w))."
+		# sub === nothing && return get_keys(w)
+		sub === nothing && return (@info "2 success $sub ($(cached_sa.args[1].sa.f))"; return get_keys(w))
+		v = reconstruct_weak_rec(get_subresult(w, sub))
+		# v !== NotValid() && return v
+		v !== NotValid() && (@info "2 success $sub ($(cached_sa.args[1].sa.f))"; return v)
+		@info "2 failed ($(cached_sa.args[1].sa.f))"
+	end
 
 	# 3.
+	inner_sa = cached_sa.args[1].sa
 	@info "Attempting 3 ($(cached_sa.args[1].sa.f))"
+	v = cache_try_get_compoundresult(scheduler.cache, inner_sa; sub, return_keys=sub===nothing)
+	# v !== NotValid() && return v
+	v !== NotValid() && (@info "3 success $sub ($(cached_sa.args[1].sa.f))"; return v)
+	@info "3 failed ($(cached_sa.args[1].sa.f))"
+
+	# 4.
+	@info "Attempting 4 ($(cached_sa.args[1].sa.f))"
 	cr = get_result!(cached_sa) do # This is to ensure cached_sa.result gets set, maybe use set_result! instead? Because we should never reach here if cached_sa.result !== nothing.
 		_fetch_and_compute_cached!(scheduler, cached_sa, cached_deps)
 	end
 	cr isa Exception && return cr
 	cr isa CompoundResult || throw(ArgumentError("Tried to retrieve sub-result from result that was not a CompoundResult."))
 
-	lru_touch!(scheduler.lru, inner_sa, cr)
-
-	# # Experimental version - only insert in the LRU if it was deconstructed!
-	# # TODO: We want to improve this condition so that we check if the deconstructed result contains any weak refs, and if it does, put it in the LRU.
-	# if cr !== cached_sa.result
-	# 	lru_touch!(scheduler.lru, inner_sa, cr)
-	# end
+	lru_touch!(scheduler.lru, inner_sa)
 
 	return sub === nothing ? get_keys(cr) : get_subresult(cr, sub)
 end
@@ -281,10 +293,6 @@ function process_once!(scheduler::Scheduler, sa::SpecArgs, op::T; parent_f) wher
 		end
 	end
 
-	# # DEBUG
-	# h = lookup_hash(scheduler.deduplicator, sa)
-	# @info "Processing $(sa.f) ($(hash_string(h)[1:6]), n=$(processing_count(h)))"
-
 
 	deps = get_dependencies(sa)
 
@@ -298,6 +306,11 @@ function process_once!(scheduler::Scheduler, sa::SpecArgs, op::T; parent_f) wher
 		# New
 		# TODO: Simplify code
 		res = get_result!(sa) do
+			# # DEBUG
+			# h = lookup_hash(scheduler.deduplicator, sa)
+			# @info "Computing $(sa.f) ($(hash_string(h)[1:6]), n=$(processing_count(h)))"
+
+
 			if sa.f == compoundresult_sub || sa.f == compoundresult_keys
 				_fetch_and_compute_sub!(scheduler, sa, deps)
 			elseif sa.f == get_cached
@@ -309,19 +322,16 @@ function process_once!(scheduler::Scheduler, sa::SpecArgs, op::T; parent_f) wher
 		@assert !(res isa CompoundResult) # Is this a good place to check? Maybe should be ensured earlier.
 		@assert !(res isa Spec)
 
-		# lru
-		lru_touch!(scheduler.lru, sa, res)
-
-		# # Experimental version - only insert in the LRU if it was deconstructed!
-		# # TODO: We want to improve this condition so that we check if the deconstructed result contains any weak refs, and if it does, put it in the LRU.
-		# if res !== sa.result
-		# 	lru_touch!(scheduler.lru, sa, res)
-		# end
+		lru_touch!(scheduler.lru, sa)
 
 		return res, true
 	end
 
 	res = get_next!(sa) do
+		# # DEBUG
+		# h = lookup_hash(scheduler.deduplicator, sa)
+		# @info "Preprocessing $(sa.f) ($(hash_string(h)[1:6]), n=$(processing_count(h)))"
+
 		_process_once!(scheduler, sa, deps) # Should we add op back in?
 	end
 
@@ -334,6 +344,8 @@ end
 
 
 function process!(scheduler::Scheduler, sa::SpecArgs, op::T; parent_f=nothing) where T
+	evict_results!(scheduler; evict_all=false)
+
 	while true
 		res, done = process_once!(scheduler, sa, op; parent_f)
 		done && return res
