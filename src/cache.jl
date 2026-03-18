@@ -10,8 +10,6 @@ function Cache(::Type{K}, deduplicator::Deduplicator{H}; dir=get_cache_path()) w
 end
 
 
-struct NotValid end # we cannot use Nothing below, because that could be a real value
-
 struct DeconstructedWeak{R,T<:Union{<:Tuple,<:NamedTuple}} # TODO: Decide how to handle NamedTuple
 	value::T
 end
@@ -36,9 +34,7 @@ function deconstruct_weak_rec(cr::CompoundResult) # NB: This is never mean to be
 	CompoundResult(cr.keys, [deconstruct_weak_rec(v) for v in cr.values])
 end
 
-# deconstruct_weak_rec(x::Union{<:Number,String,Symbol,Char,DataType,Colon,Nothing,Missing,VersionNumber,Regex}) = x
-deconstruct_weak_rec(x::Union{<:Number,String,Symbol,Char,DataType,Colon,Missing,VersionNumber,Regex}) = x
-deconstruct_weak_rec(::Nothing) = Some(nothing) # In order to distinguish a value of nothing from the absence of a value
+deconstruct_weak_rec(x::Union{<:Number,String,Symbol,Char,DataType,Colon,Nothing,Missing,VersionNumber,Regex}) = x
 
 deconstruct_weak_rec(x::AbstractUnitRange{T}) where T<:Union{Number,Char} = x
 deconstruct_weak_rec(x::AbstractRange{T}) where T<:Union{Number,Char} = x
@@ -63,9 +59,7 @@ function reconstruct_weak_rec(w::WeakRef)
 	value = w.value
 	value !== nothing ? deduplication_postprocess(value) : NotValid() # deduplication_postprocess is used to wrap in ReadOnlyArray
 end
-# reconstruct_weak_rec(x::Union{<:Number,String,Symbol,Char,DataType,Colon,Nothing,Missing,VersionNumber,Regex}) = x
-reconstruct_weak_rec(x::Union{<:Number,String,Symbol,Char,DataType,Colon,Missing,VersionNumber,Regex}) = x
-reconstruct_weak_rec(::Some{Nothing}) = nothing
+reconstruct_weak_rec(x::Union{<:Number,String,Symbol,Char,DataType,Colon,Nothing,Missing,VersionNumber,Regex}) = x
 reconstruct_weak_rec(x::AbstractUnitRange{T}) where T<:Union{Number,Char} = x
 reconstruct_weak_rec(x::AbstractRange{T}) where T<:Union{Number,Char} = x
 reconstruct_weak_rec(x::SupportedFunctions) = x

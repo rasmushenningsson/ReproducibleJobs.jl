@@ -26,19 +26,24 @@ mutable struct SpecArgs # TODO: Add template parameters for args/kwargs? Or find
 	kwargs::NamedTuple
 
 	# Cache (forwarding)
-	# This is the result of `process_once`, when preprocessing. In the rare case it is forwarded to a value, the value is wrapped in Some.
+	# This is the result of `process_once`, when preprocessing.
+	# Later, we might want to make this a sumtype. (But then we need mutually recursive types, which is not yet supported by Julia.)
+	next::Any # NotValid means it is not computed. Most often a Spec. Can also be a value (in rare cases specs forwards to values).
+
+	# In the rare case it is forwarded to a value, the value is wrapped in Some.
 	# NB: The Tuple is just a way to store a `Spec` before Spec has been defined. When Julia supports mutually recursive types, we can use that instead.
-	next::Union{Nothing, Tuple{SpecArgs,Union{Call,Fetch,Prefetch,Forward}}, Some}
+	# next::Union{NotValid, Tuple{SpecArgs,Union{Call,Fetch,Prefetch,Forward}}, Some}
 
 	# Cache (result)
 	# NB: The result is stored weakly.
-	result::Any # Maybe use some other value to signal that it's not computed?
+	result::Any # NotValid means it is not computed
 
 	function SpecArgs(f, args, kwargs)
 		@assert issorted(keys(kwargs))
-		new(f, args, kwargs, nothing, nothing)
+		new(f, args, kwargs, NotValid(), NotValid())
 	end
 end
+
 
 
 deduplicate_type(::Type{SpecArgs}) = true
@@ -136,24 +141,15 @@ _get_kwarg(sa::SpecArgs, key::Symbol) = getindex(sa.kwargs, key)
 
 # TODO: Make this code easier to read
 function get_next!(f, sa::SpecArgs)
-	if sa.next === nothing
-		res = f()
-		if res isa Spec
-			sa.next = (res.sa, res.op)
-		else
-			sa.next = Some(res)
-		end
-		return res
-	elseif sa.next isa Tuple{SpecArgs,Union{Call,Fetch,Prefetch,Forward}}
-		Spec(sa.next...)
-	elseif sa.next isa Some
-		something(sa.next)
+	if sa.next === NotValid()
+		sa.next = f()
 	end
+	sa.next
 end
 
 # TODO: Make this code easier to read
 function get_result!(f, sa::SpecArgs)
-	if sa.result !== nothing
+	if sa.result !== NotValid()
 		# Attempt to reconstruct from weakly stored reference
 		res = reconstruct_weak_rec(sa.result)
 		res !== NotValid() && return res

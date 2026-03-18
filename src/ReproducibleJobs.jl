@@ -58,6 +58,9 @@ if VERSION >= v"1.11.0-DEV.469"
 	end
 end
 
+# Used throughout ReproducibleJobs.jl instead of Nothing, since Nothing can be an actual value sometimes
+struct NotValid end
+
 
 # ReadOnlyArray accepts any AbstractArray as the underlying object - these types enforce Array to be used
 const ROArray{T,N} = ReadOnlyArray{T,N,Array{T,N}}

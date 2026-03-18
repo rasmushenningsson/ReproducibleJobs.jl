@@ -168,11 +168,11 @@ function _fetch_and_compute_sub!(scheduler, sa::SpecArgs, deps::Vector{Spec})
 
 	# TODO: Put part of this in a helper function, get_result?, in spec.jl?
 	# 1.
-	if cached_sa.result !== nothing
+	if cached_sa.result !== NotValid()
 		@info "Attempting 1 ($(cached_sa.args[1].sa.f))"
 		# Attempt to reconstruct from weakly stored reference
 		cr = cached_sa.result
-		@assert cr isa CompoundResult
+		@assert cr isa CompoundResult "Expected CompoundResult, got $(typeof(cr))."
 		# sub === nothing && return get_keys(cr)
 		sub === nothing && return (@info "1 success $sub ($(cached_sa.args[1].sa.f))"; return get_keys(cr))
 		v = reconstruct_weak_rec(get_subresult(cr, sub))
