@@ -45,8 +45,8 @@ export
 	forward_once,
 	fetched,
 	prefetched,
-	ifelse_job,
-	error_job,
+	ifelse_spec,
+	error_spec,
 	checksummedfilepath_spec
 
 # Use public keyword in Julia versions where it is available
@@ -94,7 +94,6 @@ include("cache.jl")
 include("spec.jl")
 include("spec_meta.jl")
 include("preprocess.jl")
-# include("job.jl")
 include("processing_exception.jl")
 include("lru_cache.jl")
 include("scheduler.jl")
