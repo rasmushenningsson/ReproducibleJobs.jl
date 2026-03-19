@@ -269,6 +269,20 @@ function run_deduplicator_tests()
 			# @test @inferred(deduplicate!(d, y2)) === y2
 		end
 
+		@testset "$T" for T in (Adjoint, Transpose)
+			d = Deduplicator()
+			x = T([1 2 4; 2 3 1])
+			x2 = @inferred deduplicate!(d, x)
+			@test x2 == x
+			@test x2 !== x
+			@test x2 isa T{Int, ROMat{Int}}
+
+			@test @inferred(deduplicate!(d, x)) === x2
+			@test @inferred(deduplicate!(d, x2)) === x2
+
+			@test !isempty(d.pointer2obj)
+		end
+
 		@testset "SparseMatrixCSC" begin
 			d = Deduplicator()
 			x = sparse([2,5,3], [1,1,8], [5.0,4.0,3.1], 20, 10)

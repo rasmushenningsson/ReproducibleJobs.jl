@@ -768,6 +768,35 @@ function run_cache_storage_tests()
 		end
 	end
 
+	@testset "$T" for T in (Adjoint, Transpose)
+		x = T([1 2 4; 2 3 1])
+		cache = Cache(CacheKey, Deduplicator(); dir)
+		key = new_key(cache)
+		x2 = cache_get!(Returns(x), cache, key)
+		@test x2 == x
+		@test deduplicate!(cache.deduplicator, x2) === x2
+
+		empty!(cache.deduplicator)
+		key = create_test_key(cache, key.f)
+
+		x3 = cache_get!(error_fun, cache, key)
+		@test x3 == x
+		@test x3 isa T{Int, ROMat{Int}}
+		@test deduplicate!(cache.deduplicator, x3) === x3
+
+		# Test that the value was properly written using Groups and CustomStorage
+		h5open(key2path(cache, key), "r") do h5
+			root = h5["root"]
+			@test read(root, "type") == "$T"
+			@test read(root, "length") == 1
+			@test read(root, "1") == parent(x)
+
+			types, custom = extract_jld2_types(h5)
+			@test types == []
+			@test custom == []
+		end
+	end
+
 	@testset "SparseMatrixCSC" begin
 		x = sparse([2,5,3], [1,1,8], [5.0,4.0,3.1], 20, 10)
 		cache = Cache(CacheKey, Deduplicator(); dir)

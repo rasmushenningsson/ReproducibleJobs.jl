@@ -205,6 +205,18 @@ tag_to_type(::Val{:ComposedFunction}) = ComposedFunction
 deconstruct(c::ComposedFunction{F1,F2}) where {F1,F2} = (c.outer, c.inner)
 reconstruct(::Type{<:ComposedFunction}, (outer,inner)::Tuple{F1,F2}) where {F1,F2} = outer ∘ inner
 
+deconstruct_type(::Type{<:Adjoint}) = true
+type_to_tag(::Type{<:Adjoint}) = TypeTag(:Adjoint)
+tag_to_type(::Val{:Adjoint}) = Adjoint
+deconstruct(X::Adjoint{T,S}) where {T,S} = (parent(X),)
+reconstruct(::Type{<:Adjoint}, (X,)::Tuple{T}) where T = adjoint(X)
+
+deconstruct_type(::Type{<:Transpose}) = true
+type_to_tag(::Type{<:Transpose}) = TypeTag(:Transpose)
+tag_to_type(::Val{:Transpose}) = Transpose
+deconstruct(X::Transpose{T,S}) where {T,S} = (parent(X),)
+reconstruct(::Type{<:Transpose}, (X,)::Tuple{T}) where T = transpose(X)
+
 deconstruct_type(::Type{<:SparseMatrixCSC}) = true
 type_to_tag(::Type{<:SparseMatrixCSC}) = TypeTag(:SparseMatrixCSC)
 tag_to_type(::Val{:SparseMatrixCSC}) = SparseMatrixCSC
