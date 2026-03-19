@@ -1,26 +1,26 @@
-function is_preprocessing(sa::SpecArgs)
-	@assert sa.f !== nothing
-	is_preprocessing(sa.f, sa)
+function is_preprocessing(spec::Spec)
+	@assert spec.f !== nothing
+	is_preprocessing(spec.f, spec)
 end
 is_preprocessing(ws::WrappedSpec) = is_preprocessing(get_sa(ws))
 
 # One of these can be customized to tell that a function is preprocessing a spec
-is_preprocessing(f, ::SpecArgs) = is_preprocessing(f)
+is_preprocessing(f, ::Spec) = is_preprocessing(f)
 is_preprocessing(f) = false
 
-# function get_dependencies(f::F, sa::SpecArgs) where F
+# function get_dependencies(f::F, spec::Spec) where F
 # 	deps = SpecUnion[]
-# 	visit_dependencies(sa) do dep::SpecUnion
+# 	visit_dependencies(spec) do dep::SpecUnion
 # 		f(dep) && push!(deps, dep)
 # 	end
 # 	return unique!(deps)
 # end
 
-# get_dependencies(sa::SpecArgs) = get_dependencies(Returns(true), sa)
+# get_dependencies(spec::Spec) = get_dependencies(Returns(true), spec)
 
-function get_dependencies(sa::SpecArgs)
+function get_dependencies(spec::Spec)
 	deps = SpecUnion[]
-	visit_dependencies(sa) do dep::SpecUnion
+	visit_dependencies(spec) do dep::SpecUnion
 		push!(deps, dep)
 	end
 	return unique!(deps)

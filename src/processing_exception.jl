@@ -1,11 +1,11 @@
 struct ProcessingException{T} <: Exception
 	inner::T
 	inner_backtrace::Vector{Base.StackTraces.StackFrame}
-	stack::Vector{SpecArgs}
+	stack::Vector{Spec}
 end
-ProcessingException(sa::SpecArgs, inner::Exception, backtrace) = ProcessingException(inner, backtrace, [sa])
+ProcessingException(spec::Spec, inner::Exception, backtrace) = ProcessingException(inner, backtrace, [spec])
 
-function ProcessingException(sa::SpecArgs, causes::AbstractVector)
+function ProcessingException(spec::Spec, causes::AbstractVector)
 	# Somehow choose one of the exceptions in `causes` in a stable manner
 	chosen = first(causes)
 	depth = typemax(Int)
@@ -22,7 +22,7 @@ function ProcessingException(sa::SpecArgs, causes::AbstractVector)
 			end
 		end
 	end
-	ProcessingException(chosen.inner, chosen.inner_backtrace, vcat(chosen.stack, sa))
+	ProcessingException(chosen.inner, chosen.inner_backtrace, vcat(chosen.stack, spec))
 end
 
 

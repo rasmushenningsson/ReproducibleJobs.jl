@@ -312,51 +312,48 @@ _should_collapse(::Type{DataFrame}) = false
 should_collapse(::Type{T}) where T = _should_collapse(T; nested=false)
 
 
-function extend_print_node!(pn::PrintNode, spec::T) where T<:SpecUnion
+function extend_print_node!(pn::PrintNode, s::T) where T<:SpecUnion
 	# Special handling of `get_cached`, to make things more compact
 	suffix = ""
 
-	sa = get_sa(spec)
+	spec = get_sa(s)
 
-	if sa.f == compoundresult_sub
-		sub = only(sa.args[2:end])
+	if spec.f == compoundresult_sub
+		sub = only(spec.args[2:end])
 		suffix = styled"{green,light:(cached:$sub)}"
-		sa = sa.args[1]::SpecArgs # unwrap to `get_cached`
-		@assert sa.f == get_cached
-		sa = sa.args[1]::SpecArgs # unwrap fully
-	elseif sa.f == compoundresult_keys
+		spec = spec.args[1]::Spec # unwrap to `get_cached`
+		@assert spec.f == get_cached
+		spec = spec.args[1]::Spec # unwrap fully
+	elseif spec.f == compoundresult_keys
 		suffix = styled"{green,light:(cached keys)}"
-		sa = sa.args[1]::SpecArgs # unwrap to `get_cached`
-		@assert sa.f == get_cached
-		sa = sa.args[1]::SpecArgs # unwrap fully
-	elseif sa.f == get_cached
+		spec = spec.args[1]::Spec # unwrap to `get_cached`
+		@assert spec.f == get_cached
+		spec = spec.args[1]::Spec # unwrap fully
+	elseif spec.f == get_cached
 		suffix = styled"{green,light:(cached)}"
-		sa = sa.args[1]::SpecArgs # unwrap the spec
+		spec = spec.args[1]::Spec # unwrap the spec
 	end
 
 	# Standard handling
 
-	extend_title!(pn, styled_function_name(sa.f))
-	# if spec.op !== default_spec_op()
-	# 	extend_title!(pn, styled"{bright_black,light:($(spec.op))}")
-	# end
-	if T !== SpecArgs
+	extend_title!(pn, styled_function_name(spec.f))
+	if T !== Spec
 		extend_title!(pn, styled"{bright_black,light:($T)}")
 	end
 
 	isempty(suffix) || extend_title!(pn, suffix)
 
-	p = _get_pointer(sa)
+	p = _get_pointer(spec)
 	@assert p !== C_NULL
 	extend_title!(pn, PointerOridinal(pn.context, p))
 
 	if !add_pointer!(pn.context, p)
 		# First time we see this item
 		context2 = descend(pn.context)
-		for a in sa.args
+		for a in spec.args
 			push!(pn.children, build_print_node(context2, a))
 		end
-		for (k,v) in pairs(sa.kwargs)
+		for (k,v) in pairs(spec.kwargs)
 			startswith(string(k), "__") && continue
 			push!(pn.children, build_print_node(context2, v; prefix=styled"{blue:$k:}"))
 		end
@@ -507,8 +504,8 @@ function build_print_node(context, value; prefix="")
 end
 
 
-function print_spec(io::IO, spec::SpecUnion; kwargs...)
+function print_spec(io::IO, s::SpecUnion; kwargs...)
 	context = PrintContext(; line_length=displaysize(io)[2])
-	tree = build_print_node(context, spec)
+	tree = build_print_node(context, s)
 	AbstractTrees.print_tree(io, tree; kwargs...)
 end

@@ -24,7 +24,7 @@ export
 	Deduplicator,
 	Cache,
 	Scheduler,
-	SpecArgs, # To be renamed to Spec
+	Spec,
 	SpecUnion, # or make public?
 	WrappedSpec, # or make public?
 	Call, # or make public?

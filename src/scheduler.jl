@@ -5,12 +5,12 @@
 struct Scheduler{H}
 	deduplicator::Deduplicator{H}
 
-	cache::Cache{SpecArgs,H} # spec -> result stored on disk
+	cache::Cache{Spec,H} # spec -> result stored on disk
 
-	lru::LRUCache{SpecArgs} # To prevent GC of most recently used results
+	lru::LRUCache{Spec} # To prevent GC of most recently used results
 end
-Scheduler(cache::Cache{SpecArgs,H}) where H = Scheduler{H}(cache.deduplicator, cache, LRUCache{SpecArgs}())
-Scheduler(deduplicator::Deduplicator{H}; kwargs...) where H = Scheduler(Cache(SpecArgs, deduplicator; kwargs...))
+Scheduler(cache::Cache{Spec,H}) where H = Scheduler{H}(cache.deduplicator, cache, LRUCache{Spec}())
+Scheduler(deduplicator::Deduplicator{H}; kwargs...) where H = Scheduler(Cache(Spec, deduplicator; kwargs...))
 # Scheduler() = Scheduler(default_deduplicator())
 Scheduler(; kwargs...) = Scheduler(Deduplicator(); kwargs...)
 
@@ -18,8 +18,8 @@ function evict_results!(scheduler::Scheduler; evict_all=true, max_n::Int=100)
 	length(scheduler.lru)>max_n && @info "Evicting $(length(scheduler.lru)-max_n) results."
 
 	while !isempty(scheduler.lru) && (evict_all || length(scheduler.lru)>max_n)
-		sa = lru_pop!(scheduler.lru)
-		sa !== nothing && empty_result!(sa)
+		spec = lru_pop!(scheduler.lru)
+		spec !== nothing && empty_result!(spec)
 	end
 	scheduler
 end
@@ -46,10 +46,10 @@ process_dependencies!(scheduler, deps; parent_f) =
 
 
 
-function propagate_error(sa, vals)::Union{Nothing, ProcessingException}
+function propagate_error(spec, vals)::Union{Nothing, ProcessingException}
 	if any(x->x isa ProcessingException, vals)
 		causes = filter!(x->x isa ProcessingException, collect(vals))
-		return ProcessingException(sa, causes)
+		return ProcessingException(spec, causes)
 	else
 		return nothing
 	end
@@ -58,12 +58,12 @@ end
 
 preprocess(::Scheduler, err::ProcessingException) = err
 
-function preprocess(scheduler::Scheduler, sa::SpecArgs)
-	f = sa.f
+function preprocess(scheduler::Scheduler, spec::Spec)
+	f = spec.f
 	try
 		@info "Preprocessing $f"
 
-		res = f(sa.args...; sa.kwargs...)
+		res = f(spec.args...; spec.kwargs...)
 		@assert res !== nothing "Preprocessing of $f returned nothing"
 
 		res = deduplicate!(scheduler.deduplicator, res) # needed because forwarding can return a value
@@ -82,28 +82,28 @@ function preprocess(scheduler::Scheduler, sa::SpecArgs)
 		message = String(take!(io))
 		@warn message
 
-		return ProcessingException(sa, e, stacktrace(bt))
+		return ProcessingException(spec, e, stacktrace(bt))
 	end
 end
 
-function replace_forwarded(sa::SpecArgs, upstream::IdDict{<:SpecUnion,Any})
-	err = propagate_error(sa, values(upstream))
+function replace_forwarded(spec::Spec, upstream::IdDict{<:SpecUnion,Any})
+	err = propagate_error(spec, values(upstream))
 	err !== nothing && return err
-	return map_args(x->get(upstream,x,nothing), sa)
+	return map_args(x->get(upstream,x,nothing), spec)
 end
 
 
-function compute(scheduler::Scheduler, sa::SpecArgs, upstream::IdDict{<:SpecUnion,Any})
-	f = sa.f
+function compute(scheduler::Scheduler, spec::Spec, upstream::IdDict{<:SpecUnion,Any})
+	f = spec.f
 	try
 		@info "Running $f"
-		err = propagate_error(sa, values(upstream))
+		err = propagate_error(spec, values(upstream))
 		err !== nothing && return err
 
-		v = _get_kwarg(sa, :__version, nothing)
+		v = _get_kwarg(spec, :__version, nothing)
 		@assert v !== nothing "__version kwarg must be provided for all (non-preprocessing) specs."
 
-		sa_replaced = map_args(x->get(upstream,x,nothing), sa)
+		sa_replaced = map_args(x->get(upstream,x,nothing), spec)
 		args = sa_replaced.args
 		kwargs = sa_replaced.kwargs
 
@@ -129,21 +129,21 @@ function compute(scheduler::Scheduler, sa::SpecArgs, upstream::IdDict{<:SpecUnio
 		@warn message
 
 		# println()
-		return ProcessingException(sa, e, stacktrace(bt))
+		return ProcessingException(spec, e, stacktrace(bt))
 	end
 end
 
 
-function _fetch_and_compute!(scheduler, sa::SpecArgs, deps::Vector{<:SpecUnion})
+function _fetch_and_compute!(scheduler, spec::Spec, deps::Vector{<:SpecUnion})
 	deps = fetch_dependencies!(scheduler, deps)
-	res = compute(scheduler, sa, deps)
+	res = compute(scheduler, spec, deps)
 	@assert !(res isa SpecUnion)
 	res
 end
 
 
-function _fetch_and_compute_cached!(scheduler, sa::SpecArgs, deps::Vector{<:SpecUnion})
-	inner_spec = sa.args[1]::SpecUnion
+function _fetch_and_compute_cached!(scheduler, spec::Spec, deps::Vector{<:SpecUnion})
+	inner_spec = spec.args[1]::SpecUnion
 	inner_sa = get_sa(inner_spec)
 	inner_deps = get_dependencies(inner_sa)
 	@assert all(s->s isa Call, inner_deps) # The outer Call has enforced all inner specs to be Calls has well.
@@ -154,89 +154,88 @@ function _fetch_and_compute_cached!(scheduler, sa::SpecArgs, deps::Vector{<:Spec
 end
 
 # TODO: Simplify code
-function _fetch_and_compute_sub!(scheduler, sa::SpecArgs, deps::Vector{<:SpecUnion})
-	@assert sa.f in (compoundresult_sub, compoundresult_keys)
+function _fetch_and_compute_sub!(scheduler, spec::Spec, deps::Vector{<:SpecUnion})
+	@assert spec.f in (compoundresult_sub, compoundresult_keys)
 
-	cached_spec = sa.args[1]::SpecUnion
-	cached_sa = get_sa(cached_spec)
-	@assert cached_sa.f == get_cached
-	cached_deps = get_dependencies(cached_sa)
+	cached_spec = get_sa(spec.args[1]::SpecUnion)
+	@assert cached_spec.f == get_cached
+	cached_deps = get_dependencies(cached_spec)
 	@assert all(s->s isa Call, cached_deps) # The outer Call has enforced all sub specs to be Calls has well.
 
 	# Try in this order
-	# 0. (Already done) Is it cached and still valid in sa.result.
-	# 1. Is the cached_sa result still valid? Then return subresult from that.
-	# 2. Can we reconstruct from the cached_sa weak_result?
-	# 3. Is the cached_sa cached to disk? Then load the subresult (only) from disk.
+	# 0. (Already done) Is it cached and still valid in spec.result.
+	# 1. Is the cached_spec result still valid? Then return subresult from that.
+	# 2. Can we reconstruct from the cached_spec weak_result?
+	# 3. Is the cached_spec cached to disk? Then load the subresult (only) from disk.
 	# 4. Compute compoundresult and return sub.
 
-	if sa.f == compoundresult_sub
-		sub = sa.args[2]::String
-	else #if sa.f == compoundresult_keys
+	if spec.f == compoundresult_sub
+		sub = spec.args[2]::String
+	else #if spec.f == compoundresult_keys
 		sub = nothing
 	end
 
 
 	# TODO: Put part of this in a helper function, get_result?, in spec.jl?
 	# 1.
-	if cached_sa.result !== NotValid()
-		@info "Found cached CompoundResult ($(cached_sa.args[1].sa.f))"
-		cr = cached_sa.result
+	if cached_spec.result !== NotValid()
+		@info "Found cached CompoundResult ($(get_sa(cached_spec.args[1]).f))"
+		cr = cached_spec.result
 		@assert cr isa CompoundResult "Expected CompoundResult, got $(typeof(cr))."
 		return sub === nothing ? get_keys(cr) : get_subresult(cr, sub)
 	end
 
-	w = cached_sa.weak_result
+	w = cached_spec.weak_result
 	if w !== NotValid()
-		@info "Attempting 2 ($(cached_sa.args[1].sa.f))"
+		@info "Attempting 2 ($(get_sa(cached_spec.args[1]).f))"
 
 		# Attempt to reconstruct from weakly stored CompoundResult
 		@assert w isa CompoundResult "Expected CompoundResult, got $(typeof(w))."
 		# sub === nothing && return get_keys(w)
-		sub === nothing && return (@info "2 success $sub ($(cached_sa.args[1].sa.f))"; return get_keys(w))
+		sub === nothing && return (@info "2 success $sub ($(get_sa(cached_spec.args[1]).f))"; return get_keys(w))
 		v = reconstruct_weak_rec(get_subresult(w, sub))
 		# v !== NotValid() && return v
-		v !== NotValid() && (@info "2 success $sub ($(cached_sa.args[1].sa.f))"; return v)
-		@info "2 failed ($(cached_sa.args[1].sa.f))"
+		v !== NotValid() && (@info "2 success $sub ($(get_sa(cached_spec.args[1]).f))"; return v)
+		@info "2 failed ($(get_sa(cached_spec.args[1]).f))"
 	end
 
 	# 3.
-	inner_sa = cached_sa.args[1].sa
-	@info "Attempting 3 ($(cached_sa.args[1].sa.f))"
-	v = cache_try_get_compoundresult(scheduler.cache, inner_sa; sub, return_keys=sub===nothing)
+	inner_spec = get_sa(cached_spec.args[1])
+	@info "Attempting 3 ($(get_sa(cached_spec.args[1]).f))"
+	v = cache_try_get_compoundresult(scheduler.cache, inner_spec; sub, return_keys=sub===nothing)
 	# v !== NotValid() && return v
-	v !== NotValid() && (@info "3 success $sub ($(cached_sa.args[1].sa.f))"; return v)
-	@info "3 failed ($(cached_sa.args[1].sa.f))"
+	v !== NotValid() && (@info "3 success $sub ($(get_sa(cached_spec.args[1]).f))"; return v)
+	@info "3 failed ($(get_sa(cached_spec.args[1]).f))"
 
 	# 4.
-	@info "Attempting 4 ($(cached_sa.args[1].sa.f))"
-	cr = get_result!(cached_sa) do # This is to ensure cached_sa.result gets set, maybe use set_result! instead? Because we should never reach here if cached_sa.result !== nothing.
-		_fetch_and_compute_cached!(scheduler, cached_sa, cached_deps)
+	@info "Attempting 4 ($(get_sa(cached_spec.args[1]).f))"
+	cr = get_result!(cached_spec) do # This is to ensure cached_spec.result gets set, maybe use set_result! instead? Because we should never reach here if cached_spec.result !== nothing.
+		_fetch_and_compute_cached!(scheduler, cached_spec, cached_deps)
 	end
 	cr isa Exception && return cr
 	cr isa CompoundResult || throw(ArgumentError("Tried to retrieve sub-result from result that was not a CompoundResult."))
 
-	lru_touch!(scheduler.lru, inner_sa)
+	lru_touch!(scheduler.lru, inner_spec)
 
 	return sub === nothing ? get_keys(cr) : get_subresult(cr, sub)
 end
 
 
 
-function _process_once!(scheduler::Scheduler, sa::SpecArgs, deps::Vector{<:SpecUnion})
-	forwarded_deps = process_dependencies!(scheduler, deps; parent_f=sa.f)
+function _process_once!(scheduler::Scheduler, spec::Spec, deps::Vector{<:SpecUnion})
+	forwarded_deps = process_dependencies!(scheduler, deps; parent_f=spec.f)
 
 	if !isempty(forwarded_deps)
-		sa = replace_forwarded(sa, forwarded_deps)::Union{SpecArgs,ProcessingException}
+		spec = replace_forwarded(spec, forwarded_deps)::Union{Spec,ProcessingException}
 	end
 
-	if is_preprocessing(sa)
-		preprocess(scheduler, sa)
+	if is_preprocessing(spec)
+		preprocess(scheduler, spec)
 	else
-		sa isa ProcessingException && return sa
+		spec isa ProcessingException && return spec
 
-		sa = deduplicate!(scheduler.deduplicator, sa)
-		Call(sa)
+		spec = deduplicate!(scheduler.deduplicator, spec)
+		Call(spec)
 	end
 end
 
@@ -287,53 +286,53 @@ end
 
 
 # Return tuple with result and Bool telling if it's done (TODO: Make code more clear)
-function process_once!(scheduler::Scheduler, spec::T; parent_f) where T<:SpecUnion
+function process_once!(scheduler::Scheduler, s::T; parent_f) where T<:SpecUnion
 	# Early out, we don't need to consider dependencies for this
-	if parent_f !== nothing && T <: Union{SpecArgs,Prefetch}
-		if !should_forward_child(parent_f, spec.f)
-			return spec, true
+	if parent_f !== nothing && T <: Union{Spec,Prefetch}
+		if !should_forward_child(parent_f, s.f)
+			return s, true
 		end
 	end
 
-	sa = get_sa(spec)
+	spec = get_sa(s)
 
-	deps = get_dependencies(sa)
+	deps = get_dependencies(spec)
 
-	if !is_preprocessing(sa) && all(s->s isa Call, deps)
+	if !is_preprocessing(spec) && all(x->x isa Call, deps)
 		# ready to call
 
 		# Stop if we are forwarding, nothing left to do
-		T===SpecArgs && return (Call(sa), true)
+		T===Spec && return (Call(spec), true)
 
 
-		res = get_result!(sa) do
+		res = get_result!(spec) do
 			# # DEBUG
-			# h = lookup_hash(scheduler.deduplicator, sa)
-			# @info "Computing $(sa.f) ($(hash_string(h)[1:6]), n=$(processing_count(h)))"
+			# h = lookup_hash(scheduler.deduplicator, spec)
+			# @info "Computing $(spec.f) ($(hash_string(h)[1:6]), n=$(processing_count(h)))"
 
 
-			if sa.f == compoundresult_sub || sa.f == compoundresult_keys
-				_fetch_and_compute_sub!(scheduler, sa, deps)
-			elseif sa.f == get_cached
-				_fetch_and_compute_cached!(scheduler, sa, deps)
+			if spec.f == compoundresult_sub || spec.f == compoundresult_keys
+				_fetch_and_compute_sub!(scheduler, spec, deps)
+			elseif spec.f == get_cached
+				_fetch_and_compute_cached!(scheduler, spec, deps)
 			else
-				_fetch_and_compute!(scheduler, sa, deps)
+				_fetch_and_compute!(scheduler, spec, deps)
 			end
 		end
 		@assert !(res isa CompoundResult) # Is this a good place to check? Maybe should be ensured earlier.
 		@assert !(res isa SpecUnion)
 
-		lru_touch!(scheduler.lru, sa)
+		lru_touch!(scheduler.lru, spec)
 
 		return res, true
 	end
 
-	res = get_next!(sa) do
+	res = get_next!(spec) do
 		# # DEBUG
-		# h = lookup_hash(scheduler.deduplicator, sa)
-		# @info "Preprocessing $(sa.f) ($(hash_string(h)[1:6]), n=$(processing_count(h)))"
+		# h = lookup_hash(scheduler.deduplicator, spec)
+		# @info "Preprocessing $(spec.f) ($(hash_string(h)[1:6]), n=$(processing_count(h)))"
 
-		_process_once!(scheduler, sa, deps)
+		_process_once!(scheduler, spec, deps)
 	end
 
 	if res isa SpecUnion
@@ -344,14 +343,14 @@ function process_once!(scheduler::Scheduler, spec::T; parent_f) where T<:SpecUni
 end
 
 
-function process!(scheduler::Scheduler, spec::T; parent_f=nothing) where T<:SpecUnion
+function process!(scheduler::Scheduler, s::T; parent_f=nothing) where T<:SpecUnion
 	evict_results!(scheduler; evict_all=false)
 
 	while true
-		res, done = process_once!(scheduler, spec; parent_f)
+		res, done = process_once!(scheduler, s; parent_f)
 		done && return res
 		res::SpecUnion
-		spec = transfer_op(spec, res)
+		s = transfer_op(s, res)
 	end
 end
 

@@ -1,6 +1,6 @@
 using Test
 using ReproducibleJobs
-using ReproducibleJobs: create_spec, with_scheduler, SpecArgs, SpecUnion, Fetch, Prefetch, ROVec
+using ReproducibleJobs: create_spec, with_scheduler, SpecUnion, Fetch, Prefetch, ROVec
 
 
 function run_spec_tests()
@@ -97,59 +97,59 @@ function _run_spec_tests()
 		@testset "$f" for (f,T) in ((fetched,Fetch), (prefetched,Prefetch))
 			let s = f(spec)
 				@test s isa T
-				@test s.sa === spec
+				@test s.spec === spec
 			end
 
 			let t = f((1,spec))
 				@test t[2] isa T
-				@test t[2].sa === spec
+				@test t[2].spec === spec
 			end
 
 			let t2 = f((spec,spec))
 				@test t2[1] isa T
-				@test t2[1].sa === spec
+				@test t2[1].spec === spec
 				@test t2[2] isa T
-				@test t2[2].sa === spec
+				@test t2[2].spec === spec
 			end
 
 			let nt = f((; a=1, b=spec))
 				@test nt.a === 1
 				@test nt.b isa T
-				@test nt.b.sa === spec
+				@test nt.b.spec === spec
 			end
 
 			let p = f(1=>spec)
 				@test p[1] === 1
 				@test p[2] isa T
-				@test p[2].sa === spec
+				@test p[2].spec === spec
 			end
 			let p2 = f(spec=>2)
 				@test p2[1] isa T
-				@test p2[1].sa === spec
+				@test p2[1].spec === spec
 				@test p2[2] === 2
 			end
 			let p3 = f(spec=>spec)
 				@test p3[1] isa T
-				@test p3[1].sa === spec
+				@test p3[1].spec === spec
 				@test p3[2] isa T
-				@test p3[2].sa === spec
+				@test p3[2].spec === spec
 			end
 
 			let a = f([1,spec])
 				@test a[1] === 1
 				@test a[2] isa T
-				@test a[2].sa === spec
+				@test a[2].spec === spec
 			end
 
 			let dict = f(Dict("key"=>spec))
 				@test only(keys(dict)) == "key"
 				@test dict["key"] isa T
-				@test dict["key"].sa === spec
+				@test dict["key"].spec === spec
 			end
 
 			let dict2 = f(Dict(spec=>"value"))
 				@test only(keys(dict2)) isa T
-				@test only(keys(dict2)).sa === spec
+				@test only(keys(dict2)).spec === spec
 				@test only(values(dict2)) == "value"
 			end
 
@@ -157,26 +157,26 @@ function _run_spec_tests()
 				(v1,v2) = set
 				v1 isa SpecUnion || ((v1,v2) = (v2,v1)) # handle that order is not guaranteed
 				@test v1 isa T
-				@test v1.sa === spec
+				@test v1.spec === spec
 				@test v2 == 2
 			end
 
 			let r = f(Returns(spec))
 				@test r.value isa T
-				@test r.value.sa === spec
+				@test r.value.spec === spec
 			end
 
 			let fix = f(isequal(spec))
 				@test fix.f === isequal
 				@test fix.x isa T
-				@test fix.x.sa === spec
+				@test fix.x.spec === spec
 			end
 
 			let c = f(sin∘isequal(spec))
 				@test c.outer === sin
 				@test c.inner.f === isequal
 				@test c.inner.x isa T
-				@test c.inner.x.sa === spec
+				@test c.inner.x.spec === spec
 			end
 
 			let nested = f(Set([Dict("k"=>[1=>(;a=(spec,))])]))
@@ -193,7 +193,7 @@ function _run_spec_tests()
 				@test t isa Tuple
 				s = only(t)
 				@test s isa T
-				@test s.sa === spec
+				@test s.spec === spec
 			end
 		end
 	end
