@@ -172,23 +172,6 @@ empty_result!(sa::SpecArgs) = (sa.result = NotValid(); sa)
 
 
 
-function try_get_result_rec(spec::SpecUnion)
-	sa = get_sa(spec)
-	if sa.result !== NotValid() || sa.weak_result !== NotValid()
-		sa.result, sa.weak_result
-	elseif sa.next !== NotValid()
-		if sa.next isa SpecUnion
-			try_get_result_rec(sa.next) # recurse
-		else
-			sa.next, NotValid() # it forwarded to a value
-		end
-	else
-		NotValid(), NotValid()
-	end
-end
-
-
-
 
 Base.Broadcast.broadcastable(sa::SpecArgs) = Ref(sa) # treat as scalar for broadcasting
 
@@ -243,13 +226,28 @@ get_sa(ws::WrappedSpec) = ws.sa
 SpecArgs(ws::WrappedSpec) = get_sa(ws)
 
 
-
-
 function transfer_op(::S, dest::D) where {D<:SpecUnion, S<:SpecUnion}
 	if S === Call
 		D === Call ? dest : get_sa(dest) # We can keep Call, but never transfer it (so fallback to standard forwarding)
 	else
 		S(get_sa(dest)) # Transfer
+	end
+end
+
+
+
+function try_get_result_rec(spec::SpecUnion)
+	sa = get_sa(spec)
+	if sa.result !== NotValid() || sa.weak_result !== NotValid()
+		sa.result, sa.weak_result
+	elseif sa.next !== NotValid()
+		if sa.next isa SpecUnion
+			try_get_result_rec(sa.next) # recurse
+		else
+			sa.next, NotValid() # it forwarded to a value
+		end
+	else
+		NotValid(), NotValid()
 	end
 end
 

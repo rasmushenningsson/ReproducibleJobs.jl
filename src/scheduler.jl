@@ -32,18 +32,6 @@ function Base.empty!(scheduler::Scheduler)
 end
 
 
-forward_op(sa::SpecArgs) = sa
-call_op(sa::SpecArgs) = Call(sa)
-fetch_op(sa::SpecArgs) = Fetch(sa)
-prefetch_op(sa::SpecArgs) = Prefetch(sa)
-
-_get_op(::Type{SpecArgs}) = forward_op
-_get_op(::Type{Call}) = call_op
-_get_op(::Type{Fetch}) = fetch_op
-_get_op(::Type{Prefetch}) = prefetch_op
-
-
-
 fetch_dependencies!(scheduler, deps) = IdDict{SpecUnion,Any}(dep=>fetch!(scheduler, dep) for dep in deps)
 
 
@@ -164,6 +152,8 @@ function _fetch_and_compute_cached!(scheduler, sa::SpecArgs, deps::Vector{<:Spec
 		_fetch_and_compute!(scheduler, inner_sa, inner_deps)
 	end
 end
+
+# TODO: Simplify code
 function _fetch_and_compute_sub!(scheduler, sa::SpecArgs, deps::Vector{<:SpecUnion})
 	@assert sa.f in (compoundresult_sub, compoundresult_keys)
 
@@ -173,7 +163,7 @@ function _fetch_and_compute_sub!(scheduler, sa::SpecArgs, deps::Vector{<:SpecUni
 	cached_deps = get_dependencies(cached_sa)
 	@assert all(s->s isa Call, cached_deps) # The outer Call has enforced all sub specs to be Calls has well.
 
-	# TODO: Try in this order
+	# Try in this order
 	# 0. (Already done) Is it cached and still valid in sa.result.
 	# 1. Is the cached_sa result still valid? Then return subresult from that.
 	# 2. Can we reconstruct from the cached_sa weak_result?
@@ -297,29 +287,25 @@ end
 
 
 # Return tuple with result and Bool telling if it's done (TODO: Make code more clear)
-function process_once!(scheduler::Scheduler, sa::SpecArgs, op::T; parent_f) where T
+function process_once!(scheduler::Scheduler, spec::T; parent_f) where T<:SpecUnion
 	# Early out, we don't need to consider dependencies for this
-	# if parent_f !== nothing && T <: Union{Forward,Prefetch}
-	if parent_f !== nothing && (op === forward_op || op === prefetch_op)
-		if !should_forward_child(parent_f, sa.f)
-			# TODO: Use transfer_op instead
-			return op(sa), true # Keep forwarding/prefetching
+	if parent_f !== nothing && T <: Union{SpecArgs,Prefetch}
+		if !should_forward_child(parent_f, spec.f)
+			return spec, true
 		end
 	end
 
+	sa = get_sa(spec)
+
 	deps = get_dependencies(sa)
 
-	# if !is_preprocessing(sa) && all(s->s.op === Call(), deps)
 	if !is_preprocessing(sa) && all(s->s isa Call, deps)
 		# ready to call
 
 		# Stop if we are forwarding, nothing left to do
-		# T <: Forward && return (Spec(sa, Call()), true)
-		op === forward_op && return (Call(sa), true)
+		T===SpecArgs && return (Call(sa), true)
 
 
-		# New
-		# TODO: Simplify code
 		res = get_result!(sa) do
 			# # DEBUG
 			# h = lookup_hash(scheduler.deduplicator, sa)
@@ -347,7 +333,7 @@ function process_once!(scheduler::Scheduler, sa::SpecArgs, op::T; parent_f) wher
 		# h = lookup_hash(scheduler.deduplicator, sa)
 		# @info "Preprocessing $(sa.f) ($(hash_string(h)[1:6]), n=$(processing_count(h)))"
 
-		_process_once!(scheduler, sa, deps) # TODO: Should we add op back in???
+		_process_once!(scheduler, sa, deps)
 	end
 
 	if res isa SpecUnion
@@ -358,27 +344,25 @@ function process_once!(scheduler::Scheduler, sa::SpecArgs, op::T; parent_f) wher
 end
 
 
-function process!(scheduler::Scheduler, sa::SpecArgs, op::T; parent_f=nothing) where T
+function process!(scheduler::Scheduler, spec::T; parent_f=nothing) where T<:SpecUnion
 	evict_results!(scheduler; evict_all=false)
 
 	while true
-		res, done = process_once!(scheduler, sa, op; parent_f)
+		res, done = process_once!(scheduler, spec; parent_f)
 		done && return res
 		res::SpecUnion
-		sa = get_sa(res)
+		spec = transfer_op(spec, res)
 	end
 end
 
 
-fetch!(scheduler::Scheduler, s::SpecUnion; kwargs...) = process!(scheduler, get_sa(s), fetch_op; kwargs...)
-forward!(scheduler::Scheduler, s::SpecUnion; kwargs...) = process!(scheduler, get_sa(s), forward_op; kwargs...)
+fetch!(scheduler::Scheduler, s::SpecUnion; kwargs...) = process!(scheduler, fetched(s); kwargs...)
+forward!(scheduler::Scheduler, s::SpecUnion; kwargs...) = process!(scheduler, get_sa(s); kwargs...) # strip Wrapper to get forwarding
 
 function forward_once!(scheduler::Scheduler, s::SpecUnion; parent_f=nothing)
-	res, _ = process_once!(scheduler, get_sa(s), forward_op; parent_f)
+	res, _ = process_once!(scheduler, get_sa(s); parent_f) # strip Wrapper to get forwarding
 	res
 end
-
-process!(scheduler::Scheduler, s::T; kwargs...) where T<:SpecUnion = process!(scheduler, get_sa(s), _get_op(T); kwargs...)
 
 
 fetch!(s::SpecUnion; kwargs...) = fetch!(get_scheduler(), s; kwargs...)
