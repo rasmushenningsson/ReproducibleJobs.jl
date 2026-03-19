@@ -1,6 +1,6 @@
 using Test
 using ReproducibleJobs
-using ReproducibleJobs: create_spec, with_scheduler, SpecArgs, Fetch, Prefetch, ROVec
+using ReproducibleJobs: create_spec, with_scheduler, SpecArgs, SpecUnion, Fetch, Prefetch, ROVec
 
 
 function run_spec_tests()
@@ -96,87 +96,87 @@ function _run_spec_tests()
 
 		@testset "$f" for (f,T) in ((fetched,Fetch), (prefetched,Prefetch))
 			let s = f(spec)
-				@test s.op === T()
-				@test s.sa === spec.sa
+				@test s isa T
+				@test s.sa === spec
 			end
 
 			let t = f((1,spec))
-				@test t[2].op === T()
-				@test t[2].sa === spec.sa
+				@test t[2] isa T
+				@test t[2].sa === spec
 			end
 
 			let t2 = f((spec,spec))
-				@test t2[1].op === T()
-				@test t2[1].sa === spec.sa
-				@test t2[2].op === T()
-				@test t2[2].sa === spec.sa
+				@test t2[1] isa T
+				@test t2[1].sa === spec
+				@test t2[2] isa T
+				@test t2[2].sa === spec
 			end
 
 			let nt = f((; a=1, b=spec))
 				@test nt.a === 1
-				@test nt.b.op === T()
-				@test nt.b.sa === spec.sa
+				@test nt.b isa T
+				@test nt.b.sa === spec
 			end
 
 			let p = f(1=>spec)
 				@test p[1] === 1
-				@test p[2].op === T()
-				@test p[2].sa === spec.sa
+				@test p[2] isa T
+				@test p[2].sa === spec
 			end
 			let p2 = f(spec=>2)
-				@test p2[1].op === T()
-				@test p2[1].sa === spec.sa
+				@test p2[1] isa T
+				@test p2[1].sa === spec
 				@test p2[2] === 2
 			end
 			let p3 = f(spec=>spec)
-				@test p3[1].op === T()
-				@test p3[1].sa === spec.sa
-				@test p3[2].op === T()
-				@test p3[2].sa === spec.sa
+				@test p3[1] isa T
+				@test p3[1].sa === spec
+				@test p3[2] isa T
+				@test p3[2].sa === spec
 			end
 
 			let a = f([1,spec])
 				@test a[1] === 1
-				@test a[2].op === T()
-				@test a[2].sa === spec.sa
+				@test a[2] isa T
+				@test a[2].sa === spec
 			end
 
 			let dict = f(Dict("key"=>spec))
 				@test only(keys(dict)) == "key"
-				@test dict["key"].op === T()
-				@test dict["key"].sa === spec.sa
+				@test dict["key"] isa T
+				@test dict["key"].sa === spec
 			end
 
 			let dict2 = f(Dict(spec=>"value"))
-				@test only(keys(dict2)).op === T()
-				@test only(keys(dict2)).sa === spec.sa
+				@test only(keys(dict2)) isa T
+				@test only(keys(dict2)).sa === spec
 				@test only(values(dict2)) == "value"
 			end
 
 			let set = f(Set((spec,2)))
 				(v1,v2) = set
-				v1 isa Spec || ((v1,v2) = (v2,v1)) # handle that order is not guaranteed
-				@test v1.op === T()
-				@test v1.sa === spec.sa
+				v1 isa SpecUnion || ((v1,v2) = (v2,v1)) # handle that order is not guaranteed
+				@test v1 isa T
+				@test v1.sa === spec
 				@test v2 == 2
 			end
 
 			let r = f(Returns(spec))
-				@test r.value.op === T()
-				@test r.value.sa === spec.sa
+				@test r.value isa T
+				@test r.value.sa === spec
 			end
 
 			let fix = f(isequal(spec))
 				@test fix.f === isequal
-				@test fix.x.op === T()
-				@test fix.x.sa === spec.sa
+				@test fix.x isa T
+				@test fix.x.sa === spec
 			end
 
 			let c = f(sin∘isequal(spec))
 				@test c.outer === sin
 				@test c.inner.f === isequal
-				@test c.inner.x.op === T()
-				@test c.inner.x.sa === spec.sa
+				@test c.inner.x isa T
+				@test c.inner.x.sa === spec
 			end
 
 			let nested = f(Set([Dict("k"=>[1=>(;a=(spec,))])]))
@@ -192,9 +192,8 @@ function _run_spec_tests()
 				t = nt.a
 				@test t isa Tuple
 				s = only(t)
-				@test s isa Spec
-				@test s.op === T()
-				@test s.sa === spec.sa
+				@test s isa T
+				@test s.sa === spec
 			end
 		end
 	end

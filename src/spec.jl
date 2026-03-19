@@ -1,21 +1,21 @@
-abstract type AbstractSpecOp end
+# abstract type AbstractSpecOp end
 
-struct Call <: AbstractSpecOp end
-struct Fetch <: AbstractSpecOp end # Means fetch immediately (e.g. get as value during preprocessing)
-struct Prefetch <: AbstractSpecOp end # Replace spec by result just before computing - useful to collapse multiple specs that yield the same result onto the same spec.
-struct Forward <: AbstractSpecOp end
+# struct Call <: AbstractSpecOp end
+# struct Fetch <: AbstractSpecOp end # Means fetch immediately (e.g. get as value during preprocessing)
+# struct Prefetch <: AbstractSpecOp end # Replace spec by result just before computing - useful to collapse multiple specs that yield the same result onto the same spec.
+# struct Forward <: AbstractSpecOp end
 
-deduplicate_type(::Type{<:AbstractSpecOp}) = false
-deconstruct_weak_rec(x::T) where T<:AbstractSpecOp = x
-reconstruct_weak_rec(x::T) where T<:AbstractSpecOp = x
+# deduplicate_type(::Type{<:AbstractSpecOp}) = false
+# deconstruct_weak_rec(x::T) where T<:AbstractSpecOp = x
+# reconstruct_weak_rec(x::T) where T<:AbstractSpecOp = x
 
-function cache_save(io, name, x::AbstractSpecOp)
-	io[name] = x # Rely on JLD2 standard handling for saving/loading
-	nothing
-end
+# function cache_save(io, name, x::AbstractSpecOp)
+# 	io[name] = x # Rely on JLD2 standard handling for saving/loading
+# 	nothing
+# end
 
 
-default_spec_op() = Forward()
+# default_spec_op() = Forward()
 
 
 
@@ -43,6 +43,9 @@ mutable struct SpecArgs # TODO: Add template parameters for args/kwargs? Or find
 		new(f, args, kwargs, NotValid(), NotValid(), NotValid())
 	end
 end
+
+Base.propertynames(::SpecArgs, private::Bool=false) =
+	private ? fieldnames(SpecArgs) : (:f, :args, :kwargs)
 
 
 
@@ -168,41 +171,67 @@ empty_result!(sa::SpecArgs) = (sa.result = NotValid(); sa)
 
 
 
-
-
-struct Spec
-	sa::SpecArgs
-	op::Union{Call,Fetch,Prefetch,Forward}
-end
-Spec(sa::SpecArgs) = Spec(sa, default_spec_op())
-
-Base.Broadcast.broadcastable(spec::Spec) = Ref(spec) # treat as scalar for broadcasting
 Base.Broadcast.broadcastable(sa::SpecArgs) = Ref(sa) # treat as scalar for broadcasting
 
+
+
+abstract type WrappedSpec end
+
+struct Call <: WrappedSpec
+	sa::SpecArgs
+end
+struct Fetch <: WrappedSpec
+	sa::SpecArgs
+end
+struct Prefetch <: WrappedSpec
+	sa::SpecArgs
+end
+
+Base.Broadcast.broadcastable(ws::WrappedSpec) = Ref(ws) # treat as scalar for broadcasting
+
+
+const SpecUnion = Union{SpecArgs, Call, Fetch, Prefetch}
+
+
+
+# # struct Spec
+# # 	sa::SpecArgs
+# # 	op::Union{Call,Fetch,Prefetch,Forward}
+# # end
+# # Spec(sa::SpecArgs) = Spec(sa, default_spec_op())
+
+# Base.Broadcast.broadcastable(spec::Spec) = Ref(spec) # treat as scalar for broadcasting
+
 # Usually accessed through getproperty
-get_function(spec::Spec) = spec.sa.f
-get_args(spec::Spec) = spec.sa.args
-get_kwargs(spec::Spec) = spec.sa.kwargs
+get_function(ws::WrappedSpec) = ws.sa.f
+get_args(ws::WrappedSpec) = ws.sa.args
+get_kwargs(ws::WrappedSpec) = ws.sa.kwargs
 
-
-function Base.getproperty(spec::Spec, s::Symbol)
-	s === :f && return get_function(spec)
-	s === :args && return get_args(spec)
-	s === :kwargs && return get_kwargs(spec)
-	getfield(spec, s)
+function Base.getproperty(ws::WrappedSpec, s::Symbol)
+	s === :f && return get_function(ws)
+	s === :args && return get_args(ws)
+	s === :kwargs && return get_kwargs(ws)
+	getfield(ws, s)
 end
-function Base.propertynames(s::Spec, private::Bool=false)
-	n = (:f, :args, :kwargs)
-	private ? (n..., fieldnames(Spec)...) : n
-end
+Base.propertynames(::WrappedSpec, private::Bool=false) =
+	private ? (:f, :args, :kwargs, :sa) : (:f, :args, :kwargs)
 
 
-deduplicate_type(::Type{Spec}) = true
-deconstruct_type(::Type{Spec}) = true
-type_to_tag(::Type{Spec}) = TypeTag(:Spec)
-tag_to_type(::Val{:Spec}) = Spec
-deconstruct(spec::Spec) = (spec.sa, spec.op)
-reconstruct(::Type{Spec}, (sa,op)::Tuple{SpecArgs,<:Any}) = Spec(sa, op)
+# TODO: Rename to get_spec?
+get_sa(sa::SpecArgs) = sa
+get_sa(ws::WrappedSpec) = ws.sa
+
+
+deduplicate_type(::Type{<:WrappedSpec}) = true
+deconstruct_type(::Type{<:WrappedSpec}) = true
+type_to_tag(::Type{Call}) = TypeTag(:Call)
+type_to_tag(::Type{Fetch}) = TypeTag(:Fetch)
+type_to_tag(::Type{Prefetch}) = TypeTag(:Prefetch)
+tag_to_type(::Val{:Call}) = Call
+tag_to_type(::Val{:Fetch}) = Fetch
+tag_to_type(::Val{:Prefetch}) = Prefetch
+deconstruct(ws::WrappedSpec) = (ws.sa,)
+reconstruct(::Type{T}, (sa,)::Tuple{SpecArgs}) where T<:WrappedSpec = T(sa)
 
 
 
@@ -212,23 +241,35 @@ function create_spec(f, args...; scheduler=get_scheduler(), deduplicator=schedul
 	kw = sort_namedtuple_by_keys(kw)
 	sa = SpecArgs(f, args, kw)
 	deduplicator !== nothing && (sa = deduplicate!(deduplicator, sa))
-	spec = Spec(sa)
+	sa
+	# spec = Spec(sa)
 end
 
 
-Base.isequal(a::Spec, b::Spec) = isequal(a.op, b.op) && isequal(a.sa, b.sa)
+# Base.isequal(a::Spec, b::Spec) = isequal(a.op, b.op) && isequal(a.sa, b.sa)
+Base.isequal(::WrappedSpec, ::WrappedSpec) = false # different wrappers
+Base.isequal(a::T, b::T) where T<:WrappedSpec = isequal(a.sa, b.sa)
 
 
-_get_spec_args(spec::Spec) = spec.sa
+_get_spec_args(ws::WrappedSpec) = ws.sa
 
 
-# NB: To visit all dependencies of a spec, call visit_specs on spec.sa.
-visit_specs(f, spec::Spec) = f(spec)
 
-function visit_specs(f, sa::SpecArgs)
+function visit_dependencies(f, sa::SpecArgs)
 	visit_specs(f, sa.args)
 	visit_specs(f, sa.kwargs)
 end
+# visit_dependencies(f, ws::WrappedSpec) = visit_dependencies(f, ws.sa)
+
+
+# NB: To visit all dependencies of a spec, call visit_dependencies on sa.
+visit_specs(f, sa::SpecArgs) = f(sa)
+visit_specs(f, ws::WrappedSpec) = f(ws)
+
+# function visit_specs(f, sa::SpecArgs)
+# 	visit_specs(f, sa.args)
+# 	visit_specs(f, sa.kwargs)
+# end
 
 function visit_specs(f, v::AbstractVector{T}) where T
 	# The eltype check gives some false positives, but it prevents some unnecessary traversal and mostly gets the job done
@@ -260,16 +301,18 @@ function visit_specs(f, x::T) where T
 end
 
 
-
-# NB: To map all dependencies of a spec, call map_specs on spec.sa.
-map_specs(f::F, spec::Spec) where F = @something f(spec) spec
-
-function _map_specs(f::F, sa::SpecArgs) where F
+# Find a better name?
+function map_args(f::F, sa::SpecArgs) where F
 	a = map_specs(f, sa.args)
 	kw = map_specs(f, sa.kwargs)
 	SpecArgs(sa.f, a, kw)
 end
-map_specs(f::F, sa::SpecArgs) where F = @something f(sa) _map_specs(f, sa)
+
+
+# Find a better name?
+# NB: To map all args/dependencies of a spec, call map_args on sa.
+map_specs(f::F, sa::SpecArgs) where F = @something f(sa) sa
+map_specs(f::F, ws::WrappedSpec) where F = @something f(ws) ws
 
 function _map_specs(f::F, v::AbstractVector{T}) where {F,T}
 	# The eltype check gives some false positives, but it prevents some unnecessary traversal and mostly gets the job done
@@ -320,11 +363,22 @@ end
 map_specs(f::F, x::T) where {F,T} = @something f(x) _map_specs(f, x)
 
 
+# _fetched(::Any) = nothing
+# _fetched(spec::Spec) = Spec(spec.sa, Fetch())
+
+# _prefetched(::Any) = nothing
+# _prefetched(spec::Spec) = Spec(spec.sa, Prefetch())
+
+# fetched(x) = map_specs(_fetched, x)
+# prefetched(x) = map_specs(_prefetched, x)
+
 _fetched(::Any) = nothing
-_fetched(spec::Spec) = Spec(spec.sa, Fetch())
+_fetched(ws::WrappedSpec) = Fetch(ws.sa)
+_fetched(sa::SpecArgs) = Fetch(sa)
 
 _prefetched(::Any) = nothing
-_prefetched(spec::Spec) = Spec(spec.sa, Prefetch())
+_prefetched(ws::WrappedSpec) = Prefetch(ws.sa)
+_prefetched(sa::SpecArgs) = Prefetch(sa)
 
 fetched(x) = map_specs(_fetched, x)
 prefetched(x) = map_specs(_prefetched, x)
@@ -332,7 +386,7 @@ prefetched(x) = map_specs(_prefetched, x)
 
 
 # --- printing ---
-function Base.show(io::IO, spec::Spec)
+function Base.show(io::IO, spec::SpecUnion)
 	if get(io,:compact,false)
 		show(io, spec.f)
 	else
@@ -340,7 +394,7 @@ function Base.show(io::IO, spec::Spec)
 	end
 end
 
-Base.show(io::IO, ::Call) = print(io, "call")
-Base.show(io::IO, ::Fetch) = print(io, "fetched")
-Base.show(io::IO, ::Prefetch) = print(io, "prefetched")
-Base.show(io::IO, ::Forward) = print(io, "forwarded")
+# Base.show(io::IO, ::Call) = print(io, "call")
+# Base.show(io::IO, ::Fetch) = print(io, "fetched")
+# Base.show(io::IO, ::Prefetch) = print(io, "prefetched")
+# Base.show(io::IO, ::Forward) = print(io, "forwarded")

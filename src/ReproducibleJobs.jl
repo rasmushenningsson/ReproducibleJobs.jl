@@ -24,8 +24,12 @@ export
 	Deduplicator,
 	Cache,
 	Scheduler,
-	Spec,
-	Job,
+	SpecArgs, # To be renamed to Spec
+	WrappedSpec, # or make public?
+	Call, # or make public?
+	Fetch, # or make public?
+	Prefetch, # or make public?
+	# Job,
 	CompoundResult,
 	AbstractPreprocess,
 	Preprocess,
@@ -89,7 +93,7 @@ include("cache.jl")
 include("spec.jl")
 include("spec_meta.jl")
 include("preprocess.jl")
-include("job.jl")
+# include("job.jl")
 include("processing_exception.jl")
 include("lru_cache.jl")
 include("scheduler.jl")
