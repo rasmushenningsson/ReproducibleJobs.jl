@@ -11,7 +11,6 @@ struct Scheduler{H}
 end
 Scheduler(cache::Cache{Spec,H}) where H = Scheduler{H}(cache.deduplicator, cache, LRUCache{Spec}())
 Scheduler(deduplicator::Deduplicator{H}; kwargs...) where H = Scheduler(Cache(Spec, deduplicator; kwargs...))
-# Scheduler() = Scheduler(default_deduplicator())
 Scheduler(; kwargs...) = Scheduler(Deduplicator(); kwargs...)
 
 function evict_results!(scheduler::Scheduler; evict_all=true, max_n::Int=100)
@@ -38,7 +37,7 @@ fetch_dependencies!(scheduler, deps) = IdDict{SpecUnion,Any}(dep=>fetch!(schedul
 
 function process_dependency!(scheduler, dep; parent_f)
 	dep isa Call && return dep # Already preprocessed as far as it gets
-	process!(scheduler, dep; parent_f)
+	process!(scheduler, dep; parent_f, processing_errors_throw=false)
 end
 process_dependencies!(scheduler, deps; parent_f) =
 	IdDict{SpecUnion,Any}(dep=>process_dependency!(scheduler, dep; parent_f) for dep in deps)
@@ -181,6 +180,7 @@ function _fetch_and_compute_sub!(scheduler, spec::Spec, deps::Vector{<:SpecUnion
 	if cached_spec.result !== NotValid()
 		@info "Found cached CompoundResult ($(get_sa(cached_spec.args[1]).f))"
 		cr = cached_spec.result
+		cr isa Exception && return cr
 		@assert cr isa CompoundResult "Expected CompoundResult, got $(typeof(cr))."
 		return sub === nothing ? get_keys(cr) : get_subresult(cr, sub)
 	end
@@ -343,12 +343,16 @@ function process_once!(scheduler::Scheduler, s::T; parent_f) where T<:SpecUnion
 end
 
 
-function process!(scheduler::Scheduler, s::T; parent_f=nothing) where T<:SpecUnion
+function process!(scheduler::Scheduler, s::T; parent_f=nothing, processing_errors_throw=true) where T<:SpecUnion
 	evict_results!(scheduler; evict_all=false)
 
 	while true
 		res, done = process_once!(scheduler, s; parent_f)
-		done && return res
+		# done && return res
+		if done
+			processing_errors_throw && res isa Exception && throw(res)
+			return res
+		end
 		res::SpecUnion
 		s = transfer_op(s, res)
 	end
@@ -358,8 +362,9 @@ end
 fetch!(scheduler::Scheduler, s::SpecUnion; kwargs...) = process!(scheduler, fetched(s); kwargs...)
 forward!(scheduler::Scheduler, s::SpecUnion; kwargs...) = process!(scheduler, get_sa(s); kwargs...) # strip Wrapper to get forwarding
 
-function forward_once!(scheduler::Scheduler, s::SpecUnion; parent_f=nothing)
+function forward_once!(scheduler::Scheduler, s::SpecUnion; parent_f=nothing, processing_errors_throw=true)
 	res, _ = process_once!(scheduler, get_sa(s); parent_f) # strip Wrapper to get forwarding
+	processing_errors_throw && res isa Exception && throw(res)
 	res
 end
 

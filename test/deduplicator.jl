@@ -275,7 +275,7 @@ function run_deduplicator_tests()
 			x2 = @inferred deduplicate!(d, x)
 			@test x2 == x
 			@test x2 !== x
-			@test x2 isa T{Int, ROMat{Int}}
+			@test x2 isa T{Int, Matrix{Int}}
 
 			@test @inferred(deduplicate!(d, x)) === x2
 			@test @inferred(deduplicate!(d, x2)) === x2

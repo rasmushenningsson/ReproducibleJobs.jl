@@ -781,7 +781,7 @@ function run_cache_storage_tests()
 
 		x3 = cache_get!(error_fun, cache, key)
 		@test x3 == x
-		@test x3 isa T{Int, ROMat{Int}}
+		@test x3 isa T{Int, Matrix{Int}}
 		@test deduplicate!(cache.deduplicator, x3) === x3
 
 		# Test that the value was properly written using Groups and CustomStorage
