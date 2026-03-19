@@ -315,12 +315,20 @@ should_collapse(::Type{T}) where T = _should_collapse(T; nested=false)
 function extend_print_node!(pn::PrintNode, spec::Spec)
 	# Special handling of `get_cached`, to make things more compact
 	suffix = ""
-	if spec.f == get_cached
-		suffix = "(cached"
-		length(spec.args)>=2 && (suffix = suffix*':'*only(spec.args[2:end]))
-		suffix *= ')'
-		suffix = styled"{green,light:$suffix}"
 
+	if spec.f == compoundresult_sub
+		sub = only(spec.args[2:end])
+		suffix = styled"{green,light:(cached:$sub)}"
+		spec = spec.args[1]::Spec # unwrap to `get_cached`
+		@assert spec.f == get_cached
+		spec = spec.args[1]::Spec # unwrap fully
+	elseif spec.f == compoundresult_keys
+		suffix = styled"{green,light:(cached keys)}"
+		spec = spec.args[1]::Spec # unwrap to `get_cached`
+		@assert spec.f == get_cached
+		spec = spec.args[1]::Spec # unwrap fully
+	elseif spec.f == get_cached
+		suffix = styled"{green,light:(cached)}"
 		spec = spec.args[1]::Spec # unwrap the spec
 	end
 
