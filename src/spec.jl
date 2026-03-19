@@ -43,6 +43,7 @@ mutable struct SpecArgs # TODO: Add template parameters for args/kwargs? Or find
 		new(f, args, kwargs, NotValid(), NotValid(), NotValid())
 	end
 end
+SpecArgs(sa::SpecArgs) = sa
 
 Base.propertynames(::SpecArgs, private::Bool=false) =
 	private ? fieldnames(SpecArgs) : (:f, :args, :kwargs)
@@ -220,6 +221,21 @@ Base.propertynames(::WrappedSpec, private::Bool=false) =
 # TODO: Rename to get_spec?
 get_sa(sa::SpecArgs) = sa
 get_sa(ws::WrappedSpec) = ws.sa
+
+SpecArgs(ws::WrappedSpec) = get_sa(ws)
+
+
+
+
+function transfer_op(::S, dest::D) where {D<:SpecUnion, S<:SpecUnion}
+	if S === Call
+		D === Call ? dest : get_sa(dest) # We can keep Call, but never transfer it (so fallback to standard forwarding)
+	else
+		S(get_sa(dest)) # Transfer
+	end
+end
+
+
 
 
 deduplicate_type(::Type{<:WrappedSpec}) = true

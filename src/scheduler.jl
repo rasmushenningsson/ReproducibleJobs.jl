@@ -32,7 +32,6 @@ function Base.empty!(scheduler::Scheduler)
 end
 
 
-# Testing
 forward_op(sa::SpecArgs) = sa
 call_op(sa::SpecArgs) = Call(sa)
 fetch_op(sa::SpecArgs) = Fetch(sa)
@@ -172,7 +171,7 @@ function _fetch_and_compute_sub!(scheduler, sa::SpecArgs, deps::Vector{<:SpecUni
 	cached_sa = get_sa(cached_spec)
 	@assert cached_sa.f == get_cached
 	cached_deps = get_dependencies(cached_sa)
-	@assert all(s->s isa Call(), cached_deps) # The outer Call has enforced all sub specs to be Calls has well.
+	@assert all(s->s isa Call, cached_deps) # The outer Call has enforced all sub specs to be Calls has well.
 
 	# TODO: Try in this order
 	# 0. (Already done) Is it cached and still valid in sa.result.
@@ -303,6 +302,7 @@ function process_once!(scheduler::Scheduler, sa::SpecArgs, op::T; parent_f) wher
 	# if parent_f !== nothing && T <: Union{Forward,Prefetch}
 	if parent_f !== nothing && (op === forward_op || op === prefetch_op)
 		if !should_forward_child(parent_f, sa.f)
+			# TODO: Use transfer_op instead
 			return op(sa), true # Keep forwarding/prefetching
 		end
 	end
