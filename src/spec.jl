@@ -172,6 +172,24 @@ empty_result!(sa::SpecArgs) = (sa.result = NotValid(); sa)
 
 
 
+function try_get_result_rec(spec::SpecUnion)
+	sa = get_sa(spec)
+	if sa.result !== NotValid() || sa.weak_result !== NotValid()
+		sa.result, sa.weak_result
+	elseif sa.next !== NotValid()
+		if sa.next isa SpecUnion
+			try_get_result_rec(sa.next) # recurse
+		else
+			sa.next, NotValid() # it forwarded to a value
+		end
+	else
+		NotValid(), NotValid()
+	end
+end
+
+
+
+
 Base.Broadcast.broadcastable(sa::SpecArgs) = Ref(sa) # treat as scalar for broadcasting
 
 
@@ -407,6 +425,15 @@ function Base.show(io::IO, spec::SpecUnion)
 		show(io, spec.f)
 	else
 		print_spec(io, spec; maxdepth=20)
+		result, weak_result = try_get_result_rec(spec)
+
+		if result !== NotValid()
+			print(io, "Result: ")
+			show(IOContext(io, :compact => true), result)
+		elseif weak_result !== NotValid()
+			print(io, "Result: ")
+			show(IOContext(io, :compact => true), weak_result)
+		end
 	end
 end
 
