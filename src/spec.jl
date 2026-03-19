@@ -28,11 +28,7 @@ mutable struct SpecArgs # TODO: Add template parameters for args/kwargs? Or find
 	# Cache (forwarding)
 	# This is the result of `process_once`, when preprocessing.
 	# Later, we might want to make this a sumtype. (But then we need mutually recursive types, which is not yet supported by Julia.)
-	next::Any # NotValid means it is not computed. Most often a Spec. Can also be a value (in rare cases specs forwards to values).
-
-	# In the rare case it is forwarded to a value, the value is wrapped in Some.
-	# NB: The Tuple is just a way to store a `Spec` before Spec has been defined. When Julia supports mutually recursive types, we can use that instead.
-	# next::Union{NotValid, Tuple{SpecArgs,Union{Call,Fetch,Prefetch,Forward}}, Some}
+	next::Any # NotValid means it is not computed. Most often a SpecUnion. Can also be a value (in rare cases specs forwards to values).
 
 	# Cache (result)
 	result::Any
@@ -196,13 +192,6 @@ const SpecUnion = Union{SpecArgs, Call, Fetch, Prefetch}
 
 
 
-# # struct Spec
-# # 	sa::SpecArgs
-# # 	op::Union{Call,Fetch,Prefetch,Forward}
-# # end
-# # Spec(sa::SpecArgs) = Spec(sa, default_spec_op())
-
-# Base.Broadcast.broadcastable(spec::Spec) = Ref(spec) # treat as scalar for broadcasting
 
 # Usually accessed through getproperty
 get_function(ws::WrappedSpec) = ws.sa.f
@@ -274,11 +263,9 @@ function create_spec(f, args...; scheduler=get_scheduler(), deduplicator=schedul
 	sa = SpecArgs(f, args, kw)
 	deduplicator !== nothing && (sa = deduplicate!(deduplicator, sa))
 	sa
-	# spec = Spec(sa)
 end
 
 
-# Base.isequal(a::Spec, b::Spec) = isequal(a.op, b.op) && isequal(a.sa, b.sa)
 Base.isequal(::WrappedSpec, ::WrappedSpec) = false # different wrappers
 Base.isequal(a::T, b::T) where T<:WrappedSpec = isequal(a.sa, b.sa)
 
@@ -395,14 +382,6 @@ end
 map_specs(f::F, x::T) where {F,T} = @something f(x) _map_specs(f, x)
 
 
-# _fetched(::Any) = nothing
-# _fetched(spec::Spec) = Spec(spec.sa, Fetch())
-
-# _prefetched(::Any) = nothing
-# _prefetched(spec::Spec) = Spec(spec.sa, Prefetch())
-
-# fetched(x) = map_specs(_fetched, x)
-# prefetched(x) = map_specs(_prefetched, x)
 
 _fetched(::Any) = nothing
 _fetched(ws::WrappedSpec) = Fetch(ws.sa)

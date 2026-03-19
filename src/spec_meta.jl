@@ -2,7 +2,6 @@ function is_preprocessing(sa::SpecArgs)
 	@assert sa.f !== nothing
 	is_preprocessing(sa.f, sa)
 end
-# is_preprocessing(spec::Spec) = is_preprocessing(_get_spec_args(spec))
 is_preprocessing(ws::WrappedSpec) = is_preprocessing(get_sa(ws))
 
 # One of these can be customized to tell that a function is preprocessing a spec

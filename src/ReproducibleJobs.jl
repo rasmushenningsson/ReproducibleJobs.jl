@@ -30,7 +30,6 @@ export
 	Call, # or make public?
 	Fetch, # or make public?
 	Prefetch, # or make public?
-	# Job,
 	CompoundResult,
 	AbstractPreprocess,
 	Preprocess,
