@@ -370,6 +370,29 @@ prefetched(x) = map_specs(_prefetched, x)
 
 
 # --- printing ---
+
+_show_result(io::IO, x) = show(IOContext(io, :compact => true), x)
+function _show_result(io::IO, df::DataFrame)
+	print(io, summary(df))
+	n = names(df)
+	if !isempty(n)
+		print(io, ": ")
+		M = 10
+		print(io, join(n[1:min(M,end)], ", "))
+		length(n) > M && print(io, ", ...")
+	end
+end
+function _show_result(io::IO, w::WeakRef)
+	v = w.value
+	if v !== nothing
+		print(io, "WeakRef(")
+		_show_result(io, v)
+		print(io, ")")
+	else
+		print(io, styled"{red:Evicted}")
+	end
+end
+
 function Base.show(io::IO, spec::SpecUnion)
 	if get(io,:compact,false)
 		show(io, spec.f)
@@ -379,15 +402,10 @@ function Base.show(io::IO, spec::SpecUnion)
 
 		if result !== NotValid()
 			print(io, "Result: ")
-			show(IOContext(io, :compact => true), result)
+			_show_result(io, result)
 		elseif weak_result !== NotValid()
 			print(io, "Result: ")
-			show(IOContext(io, :compact => true), weak_result)
+			_show_result(io, weak_result)
 		end
 	end
 end
-
-# Base.show(io::IO, ::Call) = print(io, "call")
-# Base.show(io::IO, ::Fetch) = print(io, "fetched")
-# Base.show(io::IO, ::Prefetch) = print(io, "prefetched")
-# Base.show(io::IO, ::Forward) = print(io, "forwarded")
