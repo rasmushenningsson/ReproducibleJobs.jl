@@ -7,16 +7,26 @@ struct Scheduler{H}
 
 	cache::Cache{Spec,H} # spec -> result stored on disk
 
+	lru_capacity::Base.RefValue{Int}
 	lru::LRUCache{Spec} # To prevent GC of most recently used results
 end
-Scheduler(cache::Cache{Spec,H}) where H = Scheduler{H}(cache.deduplicator, cache, LRUCache{Spec}())
-Scheduler(deduplicator::Deduplicator{H}; kwargs...) where H = Scheduler(Cache(Spec, deduplicator; kwargs...))
+Scheduler(cache::Cache{Spec,H}; lru_capacity=100) where H = Scheduler{H}(cache.deduplicator, cache, Ref(lru_capacity), LRUCache{Spec}())
+Scheduler(deduplicator::Deduplicator{H}; lru_capacity=100, kwargs...) where H = Scheduler(Cache(Spec, deduplicator; kwargs...); lru_capacity)
 Scheduler(; kwargs...) = Scheduler(Deduplicator(); kwargs...)
 
-function evict_results!(scheduler::Scheduler; evict_all=true, max_n::Int=100)
-	length(scheduler.lru)>max_n && @info "Evicting $(length(scheduler.lru)-max_n) results."
 
-	while !isempty(scheduler.lru) && (evict_all || length(scheduler.lru)>max_n)
+set_lru_capacity!(scheduler::Scheduler, capacity) = scheduler.lru_capacity[] = capacity
+set_lru_capacity!(capacity) = set_lru_capacity!(get_scheduler(), capacity)
+
+get_lru_capacity(scheduler::Scheduler) = scheduler.lru_capacity[]
+get_lru_capacity() = get_lru_capacity(get_scheduler())
+
+
+function evict_results!(scheduler::Scheduler; evict_all=true)
+	capacity = scheduler.lru_capacity[]
+	length(scheduler.lru)>capacity && @info "Evicting $(length(scheduler.lru)-capacity) result(s)."
+
+	while !isempty(scheduler.lru) && (evict_all || length(scheduler.lru)>capacity)
 		spec = lru_pop!(scheduler.lru)
 		spec !== nothing && empty_result!(spec)
 	end
