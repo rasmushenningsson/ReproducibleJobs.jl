@@ -10,8 +10,8 @@ struct Scheduler{H}
 	lru_capacity::Base.RefValue{Int}
 	lru::LRUCache{Spec} # To prevent GC of most recently used results
 end
-Scheduler(cache::Cache{Spec,H}; lru_capacity=100) where H = Scheduler{H}(cache.deduplicator, cache, Ref(lru_capacity), LRUCache{Spec}())
-Scheduler(deduplicator::Deduplicator{H}; lru_capacity=100, kwargs...) where H = Scheduler(Cache(Spec, deduplicator; kwargs...); lru_capacity)
+Scheduler(cache::Cache{Spec,H}; lru_capacity=200) where H = Scheduler{H}(cache.deduplicator, cache, Ref(lru_capacity), LRUCache{Spec}())
+Scheduler(deduplicator::Deduplicator{H}; lru_capacity=200, kwargs...) where H = Scheduler(Cache(Spec, deduplicator; kwargs...); lru_capacity)
 Scheduler(; kwargs...) = Scheduler(Deduplicator(); kwargs...)
 
 
