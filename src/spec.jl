@@ -372,6 +372,7 @@ prefetched(x) = map_specs(_prefetched, x)
 # --- printing ---
 
 _show_result(io::IO, x) = show(IOContext(io, :compact => true), x)
+_show_result(io::IO, e::Exception) = show(io, typeof(e))
 function _show_result(io::IO, df::DataFrame)
 	print(io, summary(df))
 	n = names(df)
