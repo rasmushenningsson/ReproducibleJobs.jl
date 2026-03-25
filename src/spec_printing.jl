@@ -321,17 +321,17 @@ function extend_print_node!(pn::PrintNode, s::T) where T<:SpecUnion
 	if spec.f == compoundresult_sub
 		sub = only(spec.args[2:end])
 		suffix = styled"{green,light:(cached:$sub)}"
-		spec = spec.args[1]::Spec # unwrap to `get_cached`
+		spec = get_sa(spec.args[1]) # unwrap to `get_cached`
 		@assert spec.f == get_cached
-		spec = spec.args[1]::Spec # unwrap fully
+		spec = get_sa(spec.args[1]) # unwrap fully
 	elseif spec.f == compoundresult_keys
 		suffix = styled"{green,light:(cached keys)}"
-		spec = spec.args[1]::Spec # unwrap to `get_cached`
+		spec = get_sa(spec.args[1]) # unwrap to `get_cached`
 		@assert spec.f == get_cached
-		spec = spec.args[1]::Spec # unwrap fully
+		spec = get_sa(spec.args[1]) # unwrap fully
 	elseif spec.f == get_cached
 		suffix = styled"{green,light:(cached)}"
-		spec = spec.args[1]::Spec # unwrap the spec
+		spec = get_sa(spec.args[1]) # unwrap the spec
 	end
 
 	# Standard handling
