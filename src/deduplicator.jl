@@ -590,4 +590,5 @@ function deduplication_hash(d, df::DataFrame)
 	compute_hash(d, (TypeTag(:DataFrame), n, h))
 end
 
+# Never actually called (because deduplicate_children always creates a copy) - should we remove it?
 deduplication_copy(df::DataFrame) = copy(df; copycols=false)

@@ -15,7 +15,10 @@ Scheduler(deduplicator::Deduplicator{H}; lru_capacity=200, kwargs...) where H = 
 Scheduler(; kwargs...) = Scheduler(Deduplicator(); kwargs...)
 
 
-set_lru_capacity!(scheduler::Scheduler, capacity) = scheduler.lru_capacity[] = capacity
+function set_lru_capacity!(scheduler::Scheduler, capacity)
+	scheduler.lru_capacity[] = capacity
+	scheduler
+end
 set_lru_capacity!(capacity) = set_lru_capacity!(get_scheduler(), capacity)
 
 get_lru_capacity(scheduler::Scheduler) = scheduler.lru_capacity[]
