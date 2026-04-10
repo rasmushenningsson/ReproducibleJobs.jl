@@ -46,7 +46,7 @@ end
 deduplication_copy(spec::Spec) = spec
 
 
-
+# TODO: THIS ISN'T GOOD ENOUGH! WE NEED TO ENSURE WE ONLY STORE EACH SPEC ONCE, EVEN IF IT'S REFERENCED MULTIPLE TIMES
 function cache_save(io, name, spec::Spec)
 	# Save as a group
 	g = JLD2.Group(io, name)
@@ -398,7 +398,7 @@ function Base.show(io::IO, spec::SpecUnion)
 	if get(io,:compact,false)
 		show(io, spec.f)
 	else
-		print_spec(io, spec; maxdepth=20)
+		print_spec(io, spec; maxdepth=5)
 		result, weak_result = try_get_result_rec(spec)
 
 		if result !== NotValid()

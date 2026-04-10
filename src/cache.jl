@@ -421,8 +421,8 @@ end
 
 function _load_file(cache::Cache{K}, key::K, fp) where K
 	jldopen(fp, "r") do io
-		original_key = cache_load(cache, io, "key")
-		@assert isequal(key, original_key) "Spec doesn't match cached spec, even though hashes are equal."
+		# original_key = cache_load(cache, io, "key")
+		# @assert isequal(key, original_key) "Spec doesn't match cached spec, even though hashes are equal."
 		x = cache_load(cache, io, "root")
 		deduplicate!(cache.deduplicator, x; transfer_ownership=true)
 	end
@@ -431,9 +431,9 @@ end
 # Experimental CompoundResult support.
 function _load_compoundresult!(cache, key, fp; sub, return_keys)
 	jldopen(fp, "r") do io
-		# TODO: Avoid comparing with the original key everytime we load a subresult
-		original_key = cache_load(cache, io, "key")
-		@assert isequal(key, original_key) "Spec doesn't match cached spec, even though hashes are equal."
+		# # TODO: Avoid comparing with the original key everytime we load a subresult
+		# original_key = cache_load(cache, io, "key")
+		# @assert isequal(key, original_key) "Spec doesn't match cached spec, even though hashes are equal."
 
 		if return_keys
 			x = cache_load_compoundresult_keys!(cache, io["root"])
@@ -449,7 +449,7 @@ end
 function _save_file(cache::Cache{K}, key::K, fp, result) where K
 	isdir(cache.dir) || mkdir(cache.dir)
 	jldopen(fp, "w"; compress=ZstdFilter()) do io # should we set compression level?
-		cache_save(io, "key", key)
+		# cache_save(io, "key", key)
 		cache_save(io, "root", result)
 	end
 end

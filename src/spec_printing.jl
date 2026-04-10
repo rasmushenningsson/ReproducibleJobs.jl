@@ -509,3 +509,4 @@ function print_spec(io::IO, s::SpecUnion; kwargs...)
 	tree = build_print_node(context, s)
 	AbstractTrees.print_tree(io, tree; kwargs...)
 end
+print_spec(s::SpecUnion; kwargs...) = print_spec(stdout, s; kwargs...)
