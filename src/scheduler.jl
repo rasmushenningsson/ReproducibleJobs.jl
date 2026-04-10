@@ -7,32 +7,56 @@ struct Scheduler{H}
 
 	cache::Cache{Spec,H} # spec -> result stored on disk
 
-	lru_capacity::Base.RefValue{Int}
+	lru_item_capacity::Base.RefValue{Int} # How many items the LRU is allowed to store
+	lru_mem_capacity::Base.RefValue{Int} # How many bytes the LRU is allowed to store (if not low on memory)
+	lru_mem_fraction::Base.RefValue{Float64} # How many bytes the LRU is allowed to store as a fraction of system memory available
 	lru::LRUCache{Spec} # To prevent GC of most recently used results
 end
-Scheduler(cache::Cache{Spec,H}; lru_capacity=200) where H = Scheduler{H}(cache.deduplicator, cache, Ref(lru_capacity), LRUCache{Spec}())
-Scheduler(deduplicator::Deduplicator{H}; lru_capacity=200, kwargs...) where H = Scheduler(Cache(Spec, deduplicator; kwargs...); lru_capacity)
+function Scheduler(cache::Cache{Spec,H};
+	               lru_item_capacity = nothing,
+	               lru_mem_capacity = nothing,
+	               lru_mem_fraction = nothing) where H
+
+	lru_item_capacity = @something lru_item_capacity 200
+	lru_mem_capacity = @something lru_mem_capacity div(Int(Sys.total_memory()), 20)
+	lru_mem_fraction = @something lru_mem_fraction 0.1
+
+	Scheduler{H}(cache.deduplicator, cache, Ref(lru_item_capacity), Ref(lru_mem_capacity), Ref(lru_mem_fraction), LRUCache{Spec}())
+end
+Scheduler(deduplicator::Deduplicator{H}; lru_item_capacity=nothing, lru_mem_capacity=nothing, lru_mem_fraction=nothing, kwargs...) where H =
+	Scheduler(Cache(Spec, deduplicator; kwargs...); lru_item_capacity, lru_mem_capacity, lru_mem_fraction)
 Scheduler(; kwargs...) = Scheduler(Deduplicator(); kwargs...)
 
 
-function set_lru_capacity!(scheduler::Scheduler, capacity)
-	scheduler.lru_capacity[] = capacity
+function set_lru_item_capacity!(scheduler::Scheduler, capacity)
+	scheduler.lru_item_capacity[] = capacity
 	scheduler
 end
-set_lru_capacity!(capacity) = set_lru_capacity!(get_scheduler(), capacity)
+set_lru_item_capacity!(capacity) = set_lru_item_capacity!(get_scheduler(), capacity)
 
-get_lru_capacity(scheduler::Scheduler) = scheduler.lru_capacity[]
-get_lru_capacity() = get_lru_capacity(get_scheduler())
+get_lru_item_capacity(scheduler::Scheduler) = scheduler.lru_item_capacity[]
+get_lru_item_capacity() = get_lru_item_capacity(get_scheduler())
 
 
 function evict_results!(scheduler::Scheduler; evict_all=true)
-	capacity = scheduler.lru_capacity[]
-	length(scheduler.lru)>capacity && @info "Evicting $(length(scheduler.lru)-capacity) result(s)."
+	lru = scheduler.lru
+	item_capacity = scheduler.lru_item_capacity[]
+	mem_capacity = min(scheduler.lru_mem_capacity[], round(Int, scheduler.lru_mem_fraction[]*Sys.free_memory()))
 
-	while !isempty(scheduler.lru) && (evict_all || length(scheduler.lru)>capacity)
-		spec = lru_pop!(scheduler.lru)
+	initial_items = length(lru)
+	initial_size = lru.total_size
+	while !isempty(lru) && (evict_all || length(lru)>item_capacity || lru.total_size>mem_capacity)
+		spec = lru_pop!(lru)
 		spec !== nothing && empty_result!(spec)
 	end
+
+	if length(lru) < initial_items
+		e_sz_str = _byte_size_string(initial_size - lru.total_size)
+		r_sz_str = _byte_size_string(lru.total_size)
+		c_sz_str = _byte_size_string(mem_capacity)
+		@info "Evicted: $(initial_items-length(lru)) items ($e_sz_str). Remaining: $(length(lru)) items ($r_sz_str). Capacity: $item_capacity items ($c_sz_str)."
+	end
+
 	scheduler
 end
 
@@ -148,7 +172,12 @@ end
 
 function _fetch_and_compute!(scheduler, spec::Spec, deps::Vector{<:SpecUnion})
 	deps = fetch_dependencies!(scheduler, deps)
-	res = compute(scheduler, spec, deps)
+	# res = compute(scheduler, spec, deps)
+
+	# DEBUG
+	t = @elapsed res = compute(scheduler, spec, deps)
+	@info "compute $(spec.f) $(t)s"
+
 	@assert !(res isa SpecUnion)
 	res
 end
@@ -228,7 +257,9 @@ function _fetch_and_compute_sub!(scheduler, spec::Spec, deps::Vector{<:SpecUnion
 	cr isa Exception && return cr
 	cr isa CompoundResult || throw(ArgumentError("Tried to retrieve sub-result from result that was not a CompoundResult."))
 
-	lru_touch!(scheduler.lru, inner_spec)
+	lru_touch!(scheduler.lru, inner_spec) do
+		Base.summarysize(cr)
+	end
 
 	return sub === nothing ? get_keys(cr) : get_subresult(cr, sub)
 end
@@ -243,7 +274,12 @@ function _process_once!(scheduler::Scheduler, spec::Spec, deps::Vector{<:SpecUni
 	end
 
 	if is_preprocessing(spec)
-		preprocess(scheduler, spec)
+		# preprocess(scheduler, spec)
+
+		# DEBUG
+		t = @elapsed res = preprocess(scheduler, spec)
+		@info "preprocess $(spec.f) $(t)s"
+		res
 	else
 		spec isa ProcessingException && return spec
 
@@ -335,7 +371,10 @@ function process_once!(scheduler::Scheduler, s::T; parent_f) where T<:SpecUnion
 		@assert !(res isa CompoundResult) # Is this a good place to check? Maybe should be ensured earlier.
 		@assert !(res isa SpecUnion)
 
-		lru_touch!(scheduler.lru, spec)
+		lru_touch!(scheduler.lru, spec) do
+			Base.summarysize(res)
+		end
+
 
 		return res, true
 	end
@@ -392,13 +431,6 @@ process!(s::SpecUnion; kwargs...) = process!(get_scheduler(), s; kwargs...)
 # --- printing ---
 function Base.show(io::IO, ::MIME"text/plain", scheduler::Scheduler)
 	print(io, "Scheduler(")
-	# println("Results: ")
-	# compact_io = IOContext(io, :compact=>true)
-	# for (k,v) in scheduler.cache
-	# 	show(compact_io, k)
-	# 	print(compact_io, " => ")
-	# 	show(compact_io, v)
-	# 	println(io)
-	# end
+	print(io, scheduler.lru)
 	print(io,')')
 end

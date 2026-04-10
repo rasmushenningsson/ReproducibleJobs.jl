@@ -1,12 +1,14 @@
 mutable struct LRUCache{K}
 	wkd::WeakKeyDict{K, Int}                        # key => heap handle
-	heap::MutableBinaryMinHeap{Tuple{Int, WeakRef}} # (counter, weakref(key))
+	heap::MutableBinaryMinHeap{Tuple{Int, WeakRef, Int}} # (counter, weakref(key), size_in_bytes)
 	counter::Int
+	total_size::Int # This is an upper bound for the size in bytes currently kept by the LRU cache
 end
 
-LRUCache{K}() where K = LRUCache{K}(WeakKeyDict{K, Int}(), MutableBinaryMinHeap{Tuple{Int,WeakRef}}(), 0)
+LRUCache{K}() where K = LRUCache{K}(WeakKeyDict{K, Int}(), MutableBinaryMinHeap{Tuple{Int,WeakRef,Int}}(), 0, 0)
 
-function lru_touch!(lru::LRUCache{K}, key::K) where K
+
+function lru_touch!(f, lru::LRUCache{K}, key::K) where K
 	lru.counter += 1
 
 	# if haskey(lru.wkd, key)
@@ -22,18 +24,22 @@ function lru_touch!(lru::LRUCache{K}, key::K) where K
 	# Attempt to rewrite using `get!` in order to avoid one lookup.
 	n_items = length(lru.heap)
 	handle = get!(lru.wkd, key) do
-		push!(lru.heap, (lru.counter, WeakRef(key)))
+		sz = f()
+		lru.total_size += sz
+		push!(lru.heap, (lru.counter, WeakRef(key), sz))
 	end
 	if n_items == length(lru.heap)
 		# No item was inserted, so we must update the prio of the old entry
-		DataStructures.update!(lru.heap, handle, (lru.counter, WeakRef(key)))
+		_, _, sz = lru.heap[handle]
+		DataStructures.update!(lru.heap, handle, (lru.counter, WeakRef(key), sz))
 	end
 
 	lru
 end
 
 function lru_pop!(lru::LRUCache{K}) where {K}
-	_,w = pop!(lru.heap)
+	_,w,sz = pop!(lru.heap)
+	lru.total_size -= sz
 	key = w.value
 	key === nothing && return nothing
 	key::K
@@ -51,4 +57,16 @@ function force_empty!(lru::LRUCache)
 	empty!(lru.heap)
 	lru.counter = 0
 	lru
+end
+
+function _byte_size(n::Int)
+	n < 1000   && return (n, " bytes")
+	n < 1000^2 && return (round(n/1000,   digits=1), " kB")
+	n < 1000^3 && return (round(n/1000^2, digits=1), " MB")
+	              return (round(n/1000^3, digits=1), " GB")
+end
+_byte_size_string(n) = string(_byte_size(n)...)
+
+function Base.show(io::IO, lru::LRUCache)
+	print(io, "LRUCache($(length(lru)) items, ", _byte_size(lru.total_size)..., ")")
 end
