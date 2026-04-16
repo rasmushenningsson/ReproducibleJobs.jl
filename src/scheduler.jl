@@ -11,6 +11,12 @@ struct Scheduler{H}
 	lru_mem_capacity::Base.RefValue{Int} # How many bytes the LRU is allowed to store (if not low on memory)
 	lru_mem_fraction::Base.RefValue{Float64} # How many bytes the LRU is allowed to store as a fraction of system memory available
 	lru::LRUCache{SpecArgs} # To prevent GC of most recently used results
+
+	# Progress display and related
+	progress_display::ProgressDisplay
+	lru_display_item::Base.RefValue{Union{ProgressItem,Nothing}}
+	# preprocess_display_item::Base.RefValue{Union{ProgressItem,Nothing}} # We reuse a single display item for preprocessing, to avoid flooding the terminal
+	# deduplication_display_item::Base.RefValue{Union{ProgressItem,Nothing}} # We reuse a single display item for deduplication, to avoid flooding the terminal
 end
 function Scheduler(cache::Cache{SpecArgs,H};
 	               lru_item_capacity = nothing,
@@ -21,7 +27,7 @@ function Scheduler(cache::Cache{SpecArgs,H};
 	lru_mem_capacity = @something lru_mem_capacity div(Int(Sys.total_memory()), 20)
 	lru_mem_fraction = @something lru_mem_fraction 0.1
 
-	Scheduler{H}(cache.deduplicator, cache, Ref(lru_item_capacity), Ref(lru_mem_capacity), Ref(lru_mem_fraction), LRUCache{SpecArgs}())
+	Scheduler{H}(cache.deduplicator, cache, Ref(lru_item_capacity), Ref(lru_mem_capacity), Ref(lru_mem_fraction), LRUCache{SpecArgs}(), ProgressDisplay(), Ref{Union{ProgressItem,Nothing}}(nothing))
 end
 Scheduler(deduplicator::Deduplicator{H}; lru_item_capacity=nothing, lru_mem_capacity=nothing, lru_mem_fraction=nothing, kwargs...) where H =
 	Scheduler(Cache(SpecArgs, deduplicator; kwargs...); lru_item_capacity, lru_mem_capacity, lru_mem_fraction)
@@ -50,12 +56,16 @@ function evict_results!(scheduler::Scheduler; evict_all=true)
 		sa !== nothing && empty_result!(sa)
 	end
 
-	if length(lru) < initial_items
-		e_sz_str = _byte_size_string(initial_size - lru.total_size)
-		r_sz_str = _byte_size_string(lru.total_size)
-		c_sz_str = _byte_size_string(mem_capacity)
-		@info "Evicted: $(initial_items-length(lru)) items ($e_sz_str). Remaining: $(length(lru)) items ($r_sz_str). Capacity: $item_capacity items ($c_sz_str)."
-	end
+	# if length(lru) < initial_items
+	# 	e_sz_str = _byte_size_string(initial_size - lru.total_size)
+	# 	r_sz_str = _byte_size_string(lru.total_size)
+	# 	c_sz_str = _byte_size_string(mem_capacity)
+	# 	@info "Evicted: $(initial_items-length(lru)) items ($e_sz_str). Remaining: $(length(lru)) items ($r_sz_str). Capacity: $item_capacity items ($c_sz_str)."
+	# end
+
+	r_sz_str = _byte_size_string(lru.total_size)
+	c_sz_str = _byte_size_string(mem_capacity)
+	set_text!(scheduler.lru_display_item[], "⋅ LRU: $(length(lru))/$item_capacity items ($r_sz_str/$c_sz_str)")
 
 	scheduler
 end
@@ -68,13 +78,12 @@ function Base.empty!(scheduler::Scheduler)
 end
 
 
-fetch_dependencies!(scheduler, deps) = IdDict{Spec,Any}(dep=>fetch!(scheduler, dep) for dep in deps)
-
+fetch_dependencies!(scheduler, deps) = IdDict{Spec,Any}(dep=>fetch!(scheduler, dep; external_call=false) for dep in deps)
 
 
 function process_dependency!(scheduler, dep; @nospecialize(parent_f))
 	dep.op === :call && return dep # Already preprocessed as far as it gets
-	process!(scheduler, dep; parent_f, processing_errors_throw=false)
+	process!(scheduler, dep; parent_f, processing_errors_throw=false, external_call=false)
 end
 process_dependencies!(scheduler, deps; @nospecialize(parent_f)) =
 	IdDict{Spec,Any}(dep=>process_dependency!(scheduler, dep; parent_f) for dep in deps)
@@ -98,15 +107,24 @@ preprocess(::Scheduler, err::ProcessingException) = err
 
 function preprocess(scheduler::Scheduler, sa::SpecArgs)
 	f = sa.f
+
+	# preprocess_display_item = add_item!(scheduler.progress_display, ProgressItem(styled"{green,light:⋅ Preprocessing} $f"; show_time=false))
+	# add_item!(scheduler.progress_display, ProgressItem(styled"{green,light:⋅ Preprocessing} $f"; finished=true))
+	preprocess_display_item = add_item!(scheduler.progress_display, ProgressItem(styled"{green,light:⋅ Preprocessing} $f"; finished=true))
+	print_display(scheduler.progress_display)
+
+	# set_text!(scheduler.preprocess_display_item[], styled"{green,light:⋅ Preprocessing} $f")
+	# print_display(scheduler.progress_display)
+
+	local res
+
 	try
-		@info "Preprocessing $f"
+		# @info "Preprocessing $f"
 
 		res = f(sa.args...; sa.kwargs...)
 		@assert res !== nothing "Preprocessing of $f returned nothing"
 
 		res = deduplicate!(scheduler.deduplicator, res) # needed because forwarding can return a value
-
-		return res
 	catch e
 		# TODO: Do not show anything/much here, it will be shown later instead
 		@warn "Error preprocessing $f"
@@ -120,8 +138,14 @@ function preprocess(scheduler::Scheduler, sa::SpecArgs)
 		message = String(take!(io))
 		@warn message
 
-		return ProcessingException(sa, e, stacktrace(bt))
+		res = ProcessingException(sa, e, stacktrace(bt))
 	end
+
+	set_text!(preprocess_display_item; finished=true)
+	print_display(scheduler.progress_display)
+	# set_text!(preprocess_display_item, ""; disappear_duration=0.0)
+
+	res
 end
 
 function replace_forwarded(sa::SpecArgs, upstream::IdDict{Spec,Any})
@@ -131,59 +155,86 @@ function replace_forwarded(sa::SpecArgs, upstream::IdDict{Spec,Any})
 end
 
 
+
 function compute(scheduler::Scheduler, sa::SpecArgs, upstream::IdDict{Spec,Any})
 	f = sa.f
-	try
-		@info "Running $f"
-		err = propagate_error(sa, values(upstream))
-		err !== nothing && return err
 
-		v = _get_kwarg(sa, :__version, nothing)
-		@assert v !== nothing "__version kwarg must be provided for all (non-preprocessing) specs."
+	progress_display = scheduler.progress_display
 
-		sa_replaced = map_args(x->get(upstream,x,nothing), sa)
-		args = sa_replaced.args
-		kwargs = sa_replaced.kwargs
+	done = Threads.Atomic{Bool}(false)
+	ev = Base.Event(true)
 
-		# Get rid of kwargs where the key starts with __
-		# kwargs = NamedTuple{filter(k->!startswith(string(k),"__"), keys(kwargs))}(kwargs)
 
-		kwargs = filter(p->!startswith(string(p[1]),"__"), kwargs) # TODO: we can probably avoid allocations here, if we can assume that __ kwargs are at always at the beginning/end of the sorted kwargs
+	# Worker
+	task = Threads.@spawn begin # TODO: Keep a task alive instead
+		try
+			# @info "Running $f"
+			# progress_item = add_item!(progress_display, ProgressItem("Running $f"))
+			progress_item = add_item!(progress_display, ProgressItem(styled"{green:⋅ Running} $f"))
 
-		res = f(args...; kwargs...)
-		@assert res !== nothing "Computation of $f returned nothing"
+			err = propagate_error(sa, values(upstream))
+			err !== nothing && return err
 
-		res = deduplicate!(scheduler.deduplicator, res)
+			v = _get_kwarg(sa, :__version, nothing)
+			@assert v !== nothing "__version kwarg must be provided for all (non-preprocessing) specs."
 
-		return res
-	catch e
-		e isa InterruptException && return e
+			sa_replaced = map_args(x->get(upstream,x,nothing), sa)
+			args = sa_replaced.args
+			kwargs = sa_replaced.kwargs
 
-		# TODO: Do not show anything/much here, it will be shown later instead
-		@warn "Error computing $f"
-		bt = Base.catch_backtrace()
-		# Base.showerror(stdout, e, bt)
-		# Base.showerror(stdout, e)
+			# Get rid of kwargs where the key starts with __
+			# kwargs = NamedTuple{filter(k->!startswith(string(k),"__"), keys(kwargs))}(kwargs)
 
-		io = IOBuffer()
-		Base.showerror(IOContext(io, :color=>true), e)
-		message = String(take!(io))
-		@warn message
+			kwargs = filter(p->!startswith(string(p[1]),"__"), kwargs) # TODO: we can probably avoid allocations here, if we can assume that __ kwargs are at always at the beginning/end of the sorted kwargs
 
-		# println()
-		return ProcessingException(sa, e, stacktrace(bt))
+			res = f(args...; kwargs...)
+			@assert res !== nothing "Computation of $f returned nothing"
+			set_text!(progress_item; finished=true)
+
+		catch e
+			if e isa InterruptException
+				res = e
+			else
+				# TODO: Do not show anything/much here, it will be shown later instead
+				@warn "Error computing $f"
+				bt = Base.catch_backtrace()
+				# Base.showerror(stdout, e, bt)
+				# Base.showerror(stdout, e)
+
+				io = IOBuffer()
+				Base.showerror(IOContext(io, :color=>true), e)
+				message = String(take!(io))
+				@warn message
+
+				# println()
+				res = ProcessingException(sa, e, stacktrace(bt))
+			end
+		end
+		done[] = true
+		notify(ev)
+		res
 	end
+
+
+	periodic_wait(done, ev) do
+		print_display(progress_display)
+	end
+
+
+	res = fetch(task)
+
+	add_item!(scheduler.progress_display, ProgressItem(styled"{green,light:⋅ Deduplicating} $f"; finished=true))
+	print_display(progress_display)
+	res = deduplicate!(scheduler.deduplicator, res) # TODO: Use periodic_wait and show time used
+
+	res
 end
+
 
 
 function _fetch_and_compute!(scheduler, sa::SpecArgs, deps::Vector{Spec})
 	deps = fetch_dependencies!(scheduler, deps)
-	# res = compute(scheduler, sa, deps)
-
-	# DEBUG
-	t = @elapsed res = compute(scheduler, sa, deps)
-	@info "compute $(sa.f) $(t)s"
-
+	res = compute(scheduler, sa, deps)
 	@assert !(res isa Spec)
 	res
 end
@@ -226,7 +277,7 @@ function _fetch_and_compute_sub!(scheduler, sa::SpecArgs, deps::Vector{Spec})
 	# TODO: Put part of this in a helper function, get_result?, in spec.jl?
 	# 1.
 	if cached_sa.result !== NotValid()
-		@info "Found cached CompoundResult ($(get_sa(cached_sa.args[1]).f))"
+		# @info "Found cached CompoundResult ($(get_sa(cached_sa.args[1]).f))"
 		cr = cached_sa.result
 		cr isa Exception && return cr
 		@assert cr isa CompoundResult "Expected CompoundResult, got $(typeof(cr))."
@@ -235,28 +286,31 @@ function _fetch_and_compute_sub!(scheduler, sa::SpecArgs, deps::Vector{Spec})
 
 	w = cached_sa.weak_result
 	if w !== NotValid()
-		@info "Attempting 2 ($(get_sa(cached_sa.args[1]).f))"
+		# @info "Attempting 2 ($(get_sa(cached_sa.args[1]).f))"
 
 		# Attempt to reconstruct from weakly stored CompoundResult
 		@assert w isa CompoundResult "Expected CompoundResult, got $(typeof(w))."
-		# sub === nothing && return get_keys(w)
-		sub === nothing && return (@info "2 success $sub ($(get_sa(cached_sa.args[1]).f))"; return get_keys(w))
+		sub === nothing && return get_keys(w)
+		# sub === nothing && return (@info "2 success $sub ($(get_sa(cached_sa.args[1]).f))"; return get_keys(w))
 		v = reconstruct_weak_rec(get_subresult(w, sub))
-		# v !== NotValid() && return v
-		v !== NotValid() && (@info "2 success $sub ($(get_sa(cached_sa.args[1]).f))"; return v)
-		@info "2 failed ($(get_sa(cached_sa.args[1]).f))"
+		v !== NotValid() && return v
+		# v !== NotValid() && (@info "2 success $sub ($(get_sa(cached_sa.args[1]).f))"; return v)
+		# @info "2 failed ($(get_sa(cached_sa.args[1]).f))"
+		v !== NotValid() && return v
+		# v !== NotValid() && (@info "2 success $sub ($(get_sa(cached_spec.args[1]).f))"; return v)
+		# @info "2 failed ($(get_sa(cached_spec.args[1]).f))"
 	end
 
 	# 3.
 	inner_sa = get_sa(cached_sa.args[1])
-	@info "Attempting 3 ($(get_sa(cached_sa.args[1]).f))"
+	# @info "Attempting 3 ($(get_sa(cached_sa.args[1]).f))"
 	v = cache_try_get_compoundresult(scheduler.cache, inner_sa; sub, return_keys=sub===nothing)
-	# v !== NotValid() && return v
-	v !== NotValid() && (@info "3 success $sub ($(get_sa(cached_sa.args[1]).f))"; return v)
-	@info "3 failed ($(get_sa(cached_sa.args[1]).f))"
+	v !== NotValid() && return v
+	# v !== NotValid() && (@info "3 success $sub ($(get_sa(cached_sa.args[1]).f))"; return v)
+	# @info "3 failed ($(get_sa(cached_sa.args[1]).f))"
 
 	# 4.
-	@info "Attempting 4 ($(get_sa(cached_sa.args[1]).f))"
+	# @info "Attempting 4 ($(get_sa(cached_sa.args[1]).f))"
 	cr = get_result!(cached_sa) do # This is to ensure cached_sa.result gets set, maybe use set_result! instead? Because we should never reach here if cached_sa.result !== nothing.
 		_fetch_and_compute_cached!(scheduler, cached_sa, cached_deps)
 	end
@@ -280,12 +334,7 @@ function _process_once!(scheduler::Scheduler, sa::SpecArgs, deps::Vector{Spec})
 	end
 
 	if is_preprocessing(sa)
-		# preprocess(scheduler, sa)
-
-		# DEBUG
-		t = @elapsed res = preprocess(scheduler, sa)
-		@info "preprocess $(sa.f) $(t)s"
-		res
+		preprocess(scheduler, sa)
 	else
 		sa isa ProcessingException && return sa
 
@@ -396,7 +445,17 @@ function process_once!(scheduler::Scheduler, sa::SpecArgs, op::Symbol; @nospecia
 end
 
 
-function process!(scheduler::Scheduler, sa::SpecArgs, op::Symbol; @nospecialize(parent_f=nothing), processing_errors_throw=true)
+function _reset_progress_display!(scheduler, sa::SpecArgs)
+	empty!(scheduler.progress_display)
+	add_item!(scheduler.progress_display, ProgressItem(styled"{blue:Scheduler ($(sa.f))}"))
+	scheduler.lru_display_item[] = add_item!(scheduler.progress_display, ProgressItem("LRU Status"; show_time=false))
+	# scheduler.preprocess_display_item[] = add_item!(scheduler.progress_display, ProgressItem(; show_time=false))
+	# scheduler.deduplication_display_item[] = add_item!(scheduler.progress_display, ProgressItem(; show_time=false))
+end
+
+
+function process!(scheduler::Scheduler, sa::SpecArgs, op::Symbol; @nospecialize(parent_f=nothing), processing_errors_throw=true, external_call=true)
+	external_call && _reset_progress_display!(scheduler, sa)
 	evict_results!(scheduler; evict_all=false)
 
 	while true
@@ -417,7 +476,10 @@ fetch!(scheduler::Scheduler, spec::Spec; kwargs...) = process!(scheduler, get_sa
 forward!(scheduler::Scheduler, spec::Spec; kwargs...) = process!(scheduler, get_sa(spec), :forward; kwargs...)
 process!(scheduler::Scheduler, spec::Spec; kwargs...) = process!(scheduler, get_sa(spec), spec.op; kwargs...)
 
-function forward_once!(scheduler::Scheduler, spec::Spec; @nospecialize(parent_f=nothing), processing_errors_throw=true)
+
+function forward_once!(scheduler::Scheduler, spec::Spec; @nospecialize(parent_f=nothing), processing_errors_throw=true, external_call=true)
+	external_call && _reset_progress_display!(scheduler, s)
+	evict_results!(scheduler; evict_all=false)
 	res, _ = process_once!(scheduler, get_sa(spec), :forward; parent_f)
 	processing_errors_throw && res isa Exception && throw(res)
 	res

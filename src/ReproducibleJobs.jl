@@ -76,6 +76,9 @@ const ROBitMat = ROBitArray{2}
 persist_cache_path!(path::String) = @set_preferences!("cache_path"=>expanduser(path))
 get_cache_path() = @something @load_preference("cache_path") ".cache"
 
+# Threading
+include("threading_utils.jl")
+
 
 # Deduplicator and cache
 include("utils.jl")
@@ -84,6 +87,9 @@ include("compound_result.jl")
 include("deduplicator.jl")
 include("cache.jl")
 
+
+# Progress utils
+include("progress.jl")
 
 
 # Specs and scheduling
