@@ -82,8 +82,10 @@ process_dependencies!(scheduler, deps; parent_f) =
 
 
 
-function propagate_error(spec, vals)::Union{Nothing, ProcessingException}
-	if any(x->x isa ProcessingException, vals)
+function propagate_error(spec, vals)::Union{Nothing, ProcessingException, InterruptException}
+	if any(x->x isa InterruptException, vals)
+		return InterruptException()
+	elseif any(x->x isa ProcessingException, vals)
 		causes = filter!(x->x isa ProcessingException, collect(vals))
 		return ProcessingException(spec, causes)
 	else
@@ -153,6 +155,8 @@ function compute(scheduler::Scheduler, spec::Spec, upstream::IdDict{<:SpecUnion,
 
 		return res
 	catch e
+		e isa InterruptException && return e
+
 		# TODO: Do not show anything/much here, it will be shown later instead
 		@warn "Error computing $f"
 		bt = Base.catch_backtrace()

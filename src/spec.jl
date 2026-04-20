@@ -133,12 +133,16 @@ function get_result!(f, spec::Spec)
 		# Attempt to reconstruct from weakly stored reference
 		spec.result = reconstruct_weak_rec(spec.weak_result)
 		spec.result !== NotValid() && return spec.result
+		spec.weak_result = NotValid()
 	end
 
 	# Compute result
-	spec.result = f()
-	spec.weak_result = deconstruct_weak_rec(spec.result)
-	return spec.result
+	result = f()
+	if !(result isa InterruptException)
+		spec.result = result
+		spec.weak_result = deconstruct_weak_rec(spec.result)
+	end
+	return result
 end
 
 # NB: Any weak result will still be present and the result can thus still be reconstructed if it has not yet been GCed.
