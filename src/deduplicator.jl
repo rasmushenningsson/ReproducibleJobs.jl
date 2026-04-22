@@ -3,7 +3,7 @@ deduplicate_type(::Type{T}) where T<:Union{<:Number,String,Symbol,Char,DataType,
 deduplicate_type(::Type{<:AbstractRange{T}}) where T<:Union{Number,Char} = false
 
 # Simple temporary(?) solution for allowing some functions to be used as arguments
-const SupportedFunctions = Union{typeof(identity), typeof(!), typeof(iszero), typeof(ismissing), typeof(isequal), typeof(startswith), typeof(only), typeof(in), typeof(<), typeof(<=), typeof(>), typeof(>=), typeof(==), typeof(!=), typeof(maximum), typeof(minimum)}
+const SupportedFunctions = Union{typeof(identity), typeof(!), typeof(iszero), typeof(ismissing), typeof(isequal), typeof(startswith), typeof(only), typeof(in), typeof(<), typeof(<=), typeof(>), typeof(>=), typeof(==), typeof(!=), typeof(maximum), typeof(minimum), typeof(mean)}
 deduplicate_type(::Type{T}) where T<:SupportedFunctions = false
 
 deduplicate_type(::Type{<:Exception}) = false

@@ -20,6 +20,8 @@ import AbstractTrees # for pretty printing
 using StyledStrings # For Spec printing
 import Dates # for printing of timestamped paths
 
+using Statistics # just to be able to put `mean` in `SupportedFunctions`...
+
 export
 	Deduplicator,
 	Cache,
