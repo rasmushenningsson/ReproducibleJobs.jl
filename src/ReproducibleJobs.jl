@@ -27,11 +27,6 @@ export
 	Cache,
 	Scheduler,
 	Spec,
-	SpecUnion, # or make public?
-	WrappedSpec, # or make public?
-	Call, # or make public?
-	Fetch, # or make public?
-	Prefetch, # or make public?
 	CompoundResult,
 	AbstractPreprocess,
 	Preprocess,
