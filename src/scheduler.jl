@@ -72,11 +72,11 @@ fetch_dependencies!(scheduler, deps) = IdDict{Spec,Any}(dep=>fetch!(scheduler, d
 
 
 
-function process_dependency!(scheduler, dep; parent_f)
+function process_dependency!(scheduler, dep; @nospecialize(parent_f))
 	dep.op === :call && return dep # Already preprocessed as far as it gets
 	process!(scheduler, dep; parent_f, processing_errors_throw=false)
 end
-process_dependencies!(scheduler, deps; parent_f) =
+process_dependencies!(scheduler, deps; @nospecialize(parent_f)) =
 	IdDict{Spec,Any}(dep=>process_dependency!(scheduler, dep; parent_f) for dep in deps)
 
 
@@ -341,9 +341,9 @@ end
 
 
 # Return tuple with result and Bool telling if it's done (TODO: Make code more clear)
-function process_once!(scheduler::Scheduler, sa::SpecArgs, op::Symbol; parent_f)
+function process_once!(scheduler::Scheduler, sa::SpecArgs, op::Symbol; @nospecialize(parent_f))
 	if parent_f !== nothing && op in (:forward,:prefetch)
-		if !should_forward_child(parent_f, sa.f)
+		if !should_forward_child(parent_f, sa.f) # TODO: Avoid passing parent_f which can have many different types and just pass sufficient info to make this decision? Then we can get rid of @nospecialize...
 			return (Spec(sa, op), true)
 		end
 	end
@@ -396,7 +396,7 @@ function process_once!(scheduler::Scheduler, sa::SpecArgs, op::Symbol; parent_f)
 end
 
 
-function process!(scheduler::Scheduler, sa::SpecArgs, op::Symbol; parent_f=nothing, processing_errors_throw=true)
+function process!(scheduler::Scheduler, sa::SpecArgs, op::Symbol; @nospecialize(parent_f=nothing), processing_errors_throw=true)
 	evict_results!(scheduler; evict_all=false)
 
 	while true
@@ -417,7 +417,7 @@ fetch!(scheduler::Scheduler, spec::Spec; kwargs...) = process!(scheduler, get_sa
 forward!(scheduler::Scheduler, spec::Spec; kwargs...) = process!(scheduler, get_sa(spec), :forward; kwargs...)
 process!(scheduler::Scheduler, spec::Spec; kwargs...) = process!(scheduler, get_sa(spec), spec.op; kwargs...)
 
-function forward_once!(scheduler::Scheduler, spec::Spec; parent_f=nothing, processing_errors_throw=true)
+function forward_once!(scheduler::Scheduler, spec::Spec; @nospecialize(parent_f=nothing), processing_errors_throw=true)
 	res, _ = process_once!(scheduler, get_sa(spec), :forward; parent_f)
 	processing_errors_throw && res isa Exception && throw(res)
 	res
