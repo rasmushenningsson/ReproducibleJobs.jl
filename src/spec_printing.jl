@@ -353,7 +353,8 @@ function extend_print_node!(pn::PrintNode, s::T) where T<:SpecUnion
 		for a in spec.args
 			push!(pn.children, build_print_node(context2, a))
 		end
-		for (k,v) in pairs(spec.kwargs)
+		# for (k,v) in pairs(spec.kwargs) # NamedTuple version
+		for (k,v) in spec.kwargs # Vector{Pair{Symbol,Any}}
 			startswith(string(k), "__") && continue
 			push!(pn.children, build_print_node(context2, v; prefix=styled"{blue:$k:}"))
 		end

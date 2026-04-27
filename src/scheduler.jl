@@ -146,7 +146,9 @@ function compute(scheduler::Scheduler, spec::Spec, upstream::IdDict{<:SpecUnion,
 		kwargs = sa_replaced.kwargs
 
 		# Get rid of kwargs where the key starts with __
-		kwargs = NamedTuple{filter(k->!startswith(string(k),"__"), keys(kwargs))}(kwargs)
+		# kwargs = NamedTuple{filter(k->!startswith(string(k),"__"), keys(kwargs))}(kwargs)
+
+		kwargs = filter(p->!startswith(string(p[1]),"__"), kwargs) # TODO: we can probably avoid allocations here, if we can assume that __ kwargs are at always at the beginning/end of the sorted kwargs
 
 		res = f(args...; kwargs...)
 		@assert res !== nothing "Computation of $f returned nothing"

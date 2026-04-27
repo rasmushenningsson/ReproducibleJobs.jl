@@ -1,7 +1,9 @@
 mutable struct Spec # TODO: Add template parameters for args/kwargs? Or find a another way to handle types better?
 	f::Any
-	args::Tuple
-	kwargs::NamedTuple
+	# args::Tuple
+	# kwargs::NamedTuple
+	args::Vector{Any}
+	kwargs::Vector{Pair{Symbol,Any}}
 
 	# Cache (forwarding)
 	# This is the result of `process_once`, when preprocessing.
@@ -13,7 +15,8 @@ mutable struct Spec # TODO: Add template parameters for args/kwargs? Or find a a
 	weak_result::Any
 
 	function Spec(f, args, kwargs)
-		@assert issorted(keys(kwargs))
+		# @assert issorted(keys(kwargs))
+		@assert issorted(kwargs; by=first) # TODO: Also check that we don't have duplicate keys?
 		new(f, args, kwargs, NotValid(), NotValid(), NotValid())
 	end
 end
@@ -23,13 +26,43 @@ Base.propertynames(::Spec, private::Bool=false) =
 	private ? fieldnames(Spec) : (:f, :args, :kwargs)
 
 
+# Doesn't create a new vector unless any child changed during deduplication
+function _map_arg_vec(f, a::Vector{T}) where T
+	out = a
+	for (i,x) in enumerate(a)
+		fx = f(x)
+		if fx !== x
+			if out === a
+				out = copy(a)
+			end
+			out[i] = fx
+		end
+	end
+	out
+end
+
+
+
 
 deduplicate_type(::Type{Spec}) = true
 deduplication_pointer(spec::Spec) = pointer_from_objref(spec)
 function deduplicate_children!(d, spec::Spec; kwargs...)
 	f = spec.f # TODO: Should this be processed somehow? Probably not.
-	a = deduplicate!(d, spec.args; kwargs...)
-	kw = deduplicate!(d, spec.kwargs; kwargs...)
+
+	# Tuple/NamedTuple version
+	# a = deduplicate!(d, spec.args; kwargs...)
+	# kw = deduplicate!(d, spec.kwargs; kwargs...)
+
+	# Vector{Any}/Vector{Pair{Symbol,Any}} version
+	# a = _deduplicate_args(d, spec.args; kwargs...)
+	# kw = _deduplicate_args(d, spec.kwargs; kwargs...)
+	a = _map_arg_vec(spec.args) do x
+		deduplicate!(d, x; kwargs...)
+	end
+	kw = _map_arg_vec(spec.kwargs) do p
+		p[1]=>deduplicate!(d, p[2]; kwargs...)
+	end
+
 	if f === spec.f && a === spec.args && kw === spec.kwargs
 		spec # Not changed
 	else
@@ -38,10 +71,21 @@ function deduplicate_children!(d, spec::Spec; kwargs...)
 end
 function deduplication_hash(d, spec::Spec)
 	# TODO: Could we make this more efficient? (Is it a problem? Probably not.)
-	f = spec.f
-	a = deduplication_hash(d, spec.args)
-	kw = deduplication_hash(d, spec.kwargs)
-	compute_hash(d, (TypeTag(:Spec), f, a, kw))
+
+	# Tuple/NamedTuple version
+	# f = spec.f
+	# a = deduplication_hash(d, spec.args)
+	# kw = deduplication_hash(d, spec.kwargs)
+	# compute_hash(d, (TypeTag(:Spec), f, a, kw))
+
+	# Vector{Any}/Vector{Pair{Symbol,Any}} version
+	a = _map_arg_vec(spec.args) do x
+		hash_or_value(d, x)
+	end
+	kw = _map_arg_vec(spec.kwargs) do p
+		p[1]=>hash_or_value(d, p[2])
+	end
+	compute_hash(d, (TypeTag(:Spec), spec.f, a, kw))
 end
 deduplication_copy(spec::Spec) = spec
 
@@ -52,14 +96,14 @@ function cache_save(io, name, spec::Spec)
 	g = JLD2.Group(io, name)
 	g["type"] = "Spec"
 	g["f"] = spec.f # Is this the best I can do?
-	cache_save(g, "args", spec.args)
-	cache_save(g, "kwargs", spec.kwargs)
+	cache_save(g, "args", spec.args) # TODO: Must be fixed now that we use Vector{Any}
+	cache_save(g, "kwargs", spec.kwargs) # TODO: Must be fixed now that we use Vector{Pair{Symbol,Any}}
 	nothing
 end
 function cache_load(cache::Cache, ::Val{:Spec}, g)
 	f = g["f"]
-	args = cache_load(cache, g, "args")
-	kwargs = cache_load(cache, g, "kwargs")
+	args = cache_load(cache, g, "args") # TODO: Must be fixed now that we use Vector{Any}
+	kwargs = cache_load(cache, g, "kwargs") # TODO: Must be fixed now that we use Vector{Pair{Symbol,Any}}
 	spec = Spec(f, args, kwargs)
 	deduplicate!(cache.deduplicator, spec; transfer_ownership=true)
 end
@@ -112,9 +156,24 @@ Base.isequal(a::Spec, b::Spec) = sa_isequal(a, b)
 
 
 
-_get_kwarg(spec::Spec, key::Symbol, default) = get(spec.kwargs, key, default)
-_get_kwarg(f, spec::Spec, key::Symbol) = get(f, spec.kwargs, key)
-_get_kwarg(spec::Spec, key::Symbol) = getindex(spec.kwargs, key)
+# Tuple/NamedTuple version
+# _get_kwarg(spec::Spec, key::Symbol, default) = get(spec.kwargs, key, default)
+# _get_kwarg(f, spec::Spec, key::Symbol) = get(f, spec.kwargs, key)
+# _get_kwarg(spec::Spec, key::Symbol) = getindex(spec.kwargs, key)
+
+# Vector{Any}/Vector{Pair{Symbol,Any}} version
+function _find_kwarg(key::Symbol, kw::Vector{Pair{Symbol,Any}})
+	for (i,(k,_)) in enumerate(kw)
+		k == key && return i
+	end
+	return nothing
+end
+function _get_kwarg(f, spec::Spec, key::Symbol)
+	i = _find_kwarg(key, spec.kwargs)
+	i === nothing ? f() : spec.kwargs[i].second
+end
+_get_kwarg(spec::Spec, key::Symbol, default) = _get_kwarg(()->default, spec, key)
+_get_kwarg(spec::Spec, key::Symbol) = _get_kwarg(()->throw(KeyError(key)), spec, key)
 
 
 # TODO: Make this code easier to read
@@ -240,9 +299,17 @@ reconstruct(::Type{T}, (spec,)::Tuple{Spec}) where T<:WrappedSpec = T(spec)
 
 
 function create_spec(f, args...; scheduler=get_scheduler(), deduplicator=scheduler.deduplicator, kwargs...)
-	kw = values(kwargs)
-	kw = sort_namedtuple_by_keys(kw)
-	spec = Spec(f, args, kw)
+	# Tuple/NamedTuple version
+	# kw = values(kwargs)
+	# kw = sort_namedtuple_by_keys(kw)
+	# spec = Spec(f, args, kw)
+
+	# Vector{Any}/Vector{Pair{Symbol,Any}} version
+	a = collect(Any, args)
+	kw = collect(Pair{Symbol,Any}, kwargs)
+	sort!(kw; by=first)
+	spec = Spec(f, a, kw)
+
 	deduplicator !== nothing && (spec = deduplicate!(deduplicator, spec))
 	spec
 end
@@ -257,8 +324,18 @@ _get_spec_args(ws::WrappedSpec) = ws.spec
 
 
 function visit_dependencies(f, spec::Spec)
-	visit_specs(f, spec.args)
-	visit_specs(f, spec.kwargs)
+	# Tuple/NamedTuple version
+	# visit_specs(f, spec.args)
+	# visit_specs(f, spec.kwargs)
+
+	# Vector{Any}/Vector{Pair{Symbol,Any}} version
+	# visit_specs.(Ref(f), spec.args)
+	foreach(spec.args) do x
+		visit_specs(f, x)
+	end
+	foreach(spec.kwargs) do p
+		visit_specs(f, p[2])
+	end
 end
 # visit_dependencies(f, ws::WrappedSpec) = visit_dependencies(f, ws.spec)
 
@@ -299,8 +376,18 @@ end
 
 # Find a better name?
 function map_args(f::F, spec::Spec) where F
-	a = map_specs(f, spec.args)
-	kw = map_specs(f, spec.kwargs)
+	# Tuple/NamedTuple version
+	# a = map_specs(f, spec.args)
+	# kw = map_specs(f, spec.kwargs)
+
+	# Vector{Any}/Vector{Pair{Symbol,Any}} version
+	a = _map_arg_vec(spec.args) do x
+		map_specs(f, x)
+	end
+	kw = _map_arg_vec(spec.kwargs) do p
+		p[1]=>map_specs(f, p[2])
+	end
+
 	Spec(spec.f, a, kw)
 end
 
