@@ -283,7 +283,6 @@ function _should_collapse(::Type{T}; nested::Bool) where T
 	return false
 end
 
-# _should_collapse(::Type{<:SpecUnion}; nested) = false
 _should_collapse(::Type{WrappedSpec}; nested) = false
 
 _should_collapse(::Type{AbstractRange}; nested) = true
@@ -338,9 +337,6 @@ function extend_print_node!(pn::PrintNode, ws::WrappedSpec)
 	# Standard handling
 
 	extend_title!(pn, styled_function_name(spec.f))
-	# if T !== Spec
-	# 	extend_title!(pn, styled"{bright_black,light:($T)}")
-	# end
 	if ws.op !== :forward
 		extend_title!(pn, styled"{bright_black,light:($(ws.op))}")
 	end

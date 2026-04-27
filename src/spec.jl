@@ -8,7 +8,7 @@ mutable struct Spec # TODO: Add template parameters for args/kwargs? Or find a a
 	# Cache (forwarding)
 	# This is the result of `process_once`, when preprocessing.
 	# Later, we might want to make this a sumtype. (But then we need mutually recursive types, which is not yet supported by Julia.)
-	next::Any # NotValid means it is not computed. Most often a SpecUnion. Can also be a value (in rare cases specs forwards to values).
+	next::Any # NotValid means it is not computed. Most often a WrappedSpec. Can also be a value (in rare cases specs forwards to values).
 
 	# Cache (result)
 	result::Any
@@ -214,23 +214,6 @@ Base.Broadcast.broadcastable(spec::Spec) = Ref(spec) # treat as scalar for broad
 
 
 
-# abstract type WrappedSpec end
-
-# struct Call <: WrappedSpec
-# 	spec::Spec
-# end
-# struct Fetch <: WrappedSpec
-# 	spec::Spec
-# end
-# struct Prefetch <: WrappedSpec
-# 	spec::Spec
-# end
-
-# Base.Broadcast.broadcastable(ws::WrappedSpec) = Ref(ws) # treat as scalar for broadcasting
-
-
-# const SpecUnion = Union{Spec, Call, Fetch, Prefetch}
-
 struct WrappedSpec
 	spec::Spec
 	op::Symbol # :forward, :call, :fetch or :prefetch
@@ -264,14 +247,6 @@ get_sa(ws::WrappedSpec) = ws.spec
 Spec(ws::WrappedSpec) = get_sa(ws)
 
 
-# function transfer_op(::S, dest::D) where {D<:SpecUnion, S<:SpecUnion}
-# 	if S === Call
-# 		D === Call ? dest : get_sa(dest) # We can keep Call, but never transfer it (so fallback to standard forwarding)
-# 	else
-# 		S(get_sa(dest)) # Transfer
-# 	end
-# end
-
 function transfer_op(src::WrappedSpec, dest::Union{Spec,WrappedSpec})
 	if src.op == :call
 		dest.op === :call ? dest : WrappedSpec(get_sa(dest), :forward) # We can keep Call, but never transfer it (so fallback to standard forwarding)
@@ -282,13 +257,10 @@ end
 
 
 
-# function try_get_result_rec(s::SpecUnion)
-# 	spec = get_sa(s)
 function try_get_result_rec(spec::Spec)
 	if spec.result !== NotValid() || spec.weak_result !== NotValid()
 		spec.result, spec.weak_result
 	elseif spec.next !== NotValid()
-		# if spec.next isa SpecUnion
 		if spec.next isa WrappedSpec
 			try_get_result_rec(spec.next) # recurse
 		else
@@ -302,17 +274,6 @@ try_get_result_rec(ws::WrappedSpec) = try_get_result_rec(get_sa(ws))
 
 
 
-
-# deduplicate_type(::Type{<:WrappedSpec}) = true
-# deconstruct_type(::Type{<:WrappedSpec}) = true
-# type_to_tag(::Type{Call}) = TypeTag(:Call)
-# type_to_tag(::Type{Fetch}) = TypeTag(:Fetch)
-# type_to_tag(::Type{Prefetch}) = TypeTag(:Prefetch)
-# tag_to_type(::Val{:Call}) = Call
-# tag_to_type(::Val{:Fetch}) = Fetch
-# tag_to_type(::Val{:Prefetch}) = Prefetch
-# deconstruct(ws::WrappedSpec) = (ws.spec,)
-# reconstruct(::Type{T}, (spec,)::Tuple{Spec}) where T<:WrappedSpec = T(spec)
 
 deduplicate_type(::Type{<:WrappedSpec}) = true
 deconstruct_type(::Type{<:WrappedSpec}) = true
@@ -337,17 +298,12 @@ function create_spec(f, args...; scheduler=get_scheduler(), deduplicator=schedul
 	spec = Spec(f, a, kw)
 
 	deduplicator !== nothing && (spec = deduplicate!(deduplicator, spec))
-	# spec
 	WrappedSpec(spec)
 end
 
 
-# Base.isequal(::WrappedSpec, ::WrappedSpec) = false # different wrappers
-# Base.isequal(a::T, b::T) where T<:WrappedSpec = isequal(a.spec, b.spec)
 Base.isequal(a::WrappedSpec, b::WrappedSpec) = isequal(a.op, b.op) && isequal(a.spec, b.spec)
 
-
-# _get_spec_args(ws::WrappedSpec) = ws.spec
 
 
 
@@ -474,14 +430,6 @@ end
 map_specs(f::F, x::T) where {F,T} = @something f(x) _map_specs(f, x)
 
 
-
-# _fetched(::Any) = nothing
-# _fetched(ws::WrappedSpec) = Fetch(ws.spec)
-# _fetched(spec::Spec) = Fetch(spec)
-
-# _prefetched(::Any) = nothing
-# _prefetched(ws::WrappedSpec) = Prefetch(ws.spec)
-# _prefetched(spec::Spec) = Prefetch(spec)
 
 _fetched(::Any) = nothing
 _fetched(ws::WrappedSpec) = WrappedSpec(ws.spec, :fetch)

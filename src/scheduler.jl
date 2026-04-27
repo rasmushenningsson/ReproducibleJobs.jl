@@ -73,7 +73,6 @@ fetch_dependencies!(scheduler, deps) = IdDict{WrappedSpec,Any}(dep=>fetch!(sched
 
 
 function process_dependency!(scheduler, dep; parent_f)
-	# dep isa Call && return dep # Already preprocessed as far as it gets
 	dep.op === :call && return dep # Already preprocessed as far as it gets
 	process!(scheduler, dep; parent_f, processing_errors_throw=false)
 end
@@ -194,8 +193,7 @@ function _fetch_and_compute_cached!(scheduler, spec::Spec, deps::Vector{WrappedS
 	inner_spec = spec.args[1]::WrappedSpec
 	inner_sa = get_sa(inner_spec)
 	inner_deps = get_dependencies(inner_sa)
-	# @assert all(s->s isa Call, inner_deps) # The outer Call has enforced all inner specs to be Calls has well.
-	@assert all(s->s.op === :call, inner_deps) # The outer Call has enforced all inner specs to be Calls has well.
+	@assert all(s->s.op === :call, inner_deps) # The outer call has enforced all inner specs to be calls has well.
 
 	cache_get!(scheduler.cache, inner_sa) do
 		_fetch_and_compute!(scheduler, inner_sa, inner_deps)
@@ -209,8 +207,7 @@ function _fetch_and_compute_sub!(scheduler, spec::Spec, deps::Vector{WrappedSpec
 	cached_spec = get_sa(spec.args[1]::WrappedSpec)
 	@assert cached_spec.f == get_cached
 	cached_deps = get_dependencies(cached_spec)
-	# @assert all(s->s isa Call, cached_deps) # The outer Call has enforced all sub specs to be Calls has well.
-	@assert all(s->s.op === :call, cached_deps) # The outer Call has enforced all sub specs to be Calls has well.
+	@assert all(s->s.op === :call, cached_deps) # The outer call has enforced all sub specs to be calls has well.
 
 	# Try in this order
 	# 0. (Already done) Is it cached and still valid in spec.result.
@@ -279,10 +276,7 @@ function _process_once!(scheduler::Scheduler, spec::Spec, deps::Vector{WrappedSp
 	forwarded_deps = process_dependencies!(scheduler, deps; parent_f=spec.f)
 
 	if !isempty(forwarded_deps)
-		# @show typeof.(keys(forwarded_deps))
-		# @show typeof.(values(forwarded_deps))
 		spec = replace_forwarded(spec, forwarded_deps)::Union{Spec,ProcessingException}
-		# @show spec
 	end
 
 	if is_preprocessing(spec)
@@ -296,7 +290,6 @@ function _process_once!(scheduler::Scheduler, spec::Spec, deps::Vector{WrappedSp
 		spec isa ProcessingException && return spec
 
 		spec = deduplicate!(scheduler.deduplicator, spec)
-		# Call(spec)
 		WrappedSpec(spec, :call)
 	end
 end
@@ -348,30 +341,19 @@ end
 
 
 # Return tuple with result and Bool telling if it's done (TODO: Make code more clear)
-# function process_once!(scheduler::Scheduler, s::T; parent_f) where T<:SpecUnion
 function process_once!(scheduler::Scheduler, spec::Spec, op::Symbol; parent_f)
-	# Early out, we don't need to consider dependencies for this
-	# if parent_f !== nothing && T <: Union{Spec,Prefetch}
-	# 	if !should_forward_child(parent_f, s.f)
-	# 		return s, true
-	# 	end
-	# end
 	if parent_f !== nothing && op in (:forward,:prefetch)
 		if !should_forward_child(parent_f, spec.f)
 			return (WrappedSpec(spec, op), true)
 		end
 	end
 
-	# spec = get_sa(s)
-
 	deps = get_dependencies(spec)
 
-	# if !is_preprocessing(spec) && all(x->x isa Call, deps)
 	if !is_preprocessing(spec) && all(x->x.op === :call, deps)
 		# ready to call
 
 		# Stop if we are forwarding, nothing left to do
-		# T===Spec && return (Call(spec), true)
 		op === :forward && return (WrappedSpec(spec, :call), true)
 
 		res = get_result!(spec) do
@@ -388,7 +370,6 @@ function process_once!(scheduler::Scheduler, spec::Spec, op::Symbol; parent_f)
 			end
 		end
 		@assert !(res isa CompoundResult) # Is this a good place to check? Maybe should be ensured earlier.
-		# @assert !(res isa SpecUnion)
 		@assert !(res isa WrappedSpec)
 
 		lru_touch!(scheduler.lru, spec) do
@@ -407,7 +388,6 @@ function process_once!(scheduler::Scheduler, spec::Spec, op::Symbol; parent_f)
 		_process_once!(scheduler, spec, deps)
 	end
 
-	# if res isa SpecUnion
 	if res isa WrappedSpec
 		return res, false
 	else
@@ -416,7 +396,6 @@ function process_once!(scheduler::Scheduler, spec::Spec, op::Symbol; parent_f)
 end
 
 
-# function process!(scheduler::Scheduler, s::T; parent_f=nothing, processing_errors_throw=true) where T<:SpecUnion
 function process!(scheduler::Scheduler, spec::Spec, op::Symbol; parent_f=nothing, processing_errors_throw=true)
 	evict_results!(scheduler; evict_all=false)
 
@@ -427,29 +406,11 @@ function process!(scheduler::Scheduler, spec::Spec, op::Symbol; parent_f=nothing
 			processing_errors_throw && res isa Exception && throw(res)
 			return res
 		end
-		# res::SpecUnion
 		res::WrappedSpec
-		# spec = transfer_op(spec, res)
 		spec = get_sa(res)
-		# Keep the op
+		# NB: Keep the op
 	end
 end
-
-
-# fetch!(scheduler::Scheduler, s::SpecUnion; kwargs...) = process!(scheduler, fetched(s); kwargs...)
-# forward!(scheduler::Scheduler, s::SpecUnion; kwargs...) = process!(scheduler, get_sa(s); kwargs...) # strip Wrapper to get forwarding
-
-# function forward_once!(scheduler::Scheduler, s::SpecUnion; parent_f=nothing, processing_errors_throw=true)
-# 	res, _ = process_once!(scheduler, get_sa(s); parent_f) # strip Wrapper to get forwarding
-# 	processing_errors_throw && res isa Exception && throw(res)
-# 	res
-# end
-
-
-# fetch!(s::SpecUnion; kwargs...) = fetch!(get_scheduler(), s; kwargs...)
-# forward!(s::SpecUnion; kwargs...) = forward!(get_scheduler(), s; kwargs...)
-# forward_once!(s::SpecUnion; kwargs...) = forward_once!(get_scheduler(), s; kwargs...)
-# process!(s::SpecUnion; kwargs...) = process!(get_scheduler(), s; kwargs...)
 
 
 fetch!(scheduler::Scheduler, ws::WrappedSpec; kwargs...) = process!(scheduler, get_sa(ws), :fetch; kwargs...)

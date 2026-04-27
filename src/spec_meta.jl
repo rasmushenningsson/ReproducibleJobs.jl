@@ -9,8 +9,8 @@ is_preprocessing(f, ::Spec) = is_preprocessing(f)
 is_preprocessing(f) = false
 
 # function get_dependencies(f::F, spec::Spec) where F
-# 	deps = SpecUnion[]
-# 	visit_dependencies(spec) do dep::SpecUnion
+# 	deps = WrappedSpec[]
+# 	visit_dependencies(spec) do dep::WrappedSpec
 # 		f(dep) && push!(deps, dep)
 # 	end
 # 	return unique!(deps)
