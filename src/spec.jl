@@ -1,4 +1,5 @@
-mutable struct Spec # TODO: Add template parameters for args/kwargs? Or find a another way to handle types better?
+# TODO: Can we find a better name for this struct?
+mutable struct SpecArgs # TODO: Add template parameters for args/kwargs? Or find a another way to handle types better?
 	f::Any
 	# args::Tuple
 	# kwargs::NamedTuple
@@ -14,16 +15,16 @@ mutable struct Spec # TODO: Add template parameters for args/kwargs? Or find a a
 	result::Any
 	weak_result::Any
 
-	function Spec(f, args, kwargs)
+	function SpecArgs(f, args, kwargs)
 		# @assert issorted(keys(kwargs))
 		@assert issorted(kwargs; by=first) # TODO: Also check that we don't have duplicate keys?
 		new(f, args, kwargs, NotValid(), NotValid(), NotValid())
 	end
 end
-Spec(spec::Spec) = spec
+SpecArgs(sa::SpecArgs) = sa
 
-Base.propertynames(::Spec, private::Bool=false) =
-	private ? fieldnames(Spec) : (:f, :args, :kwargs)
+Base.propertynames(::SpecArgs, private::Bool=false) =
+	private ? fieldnames(SpecArgs) : (:f, :args, :kwargs)
 
 
 # Doesn't create a new vector unless any child changed during deduplication
@@ -44,74 +45,74 @@ end
 
 
 
-deduplicate_type(::Type{Spec}) = true
-deduplication_pointer(spec::Spec) = pointer_from_objref(spec)
-function deduplicate_children!(d, spec::Spec; kwargs...)
-	f = spec.f # TODO: Should this be processed somehow? Probably not.
+deduplicate_type(::Type{SpecArgs}) = true
+deduplication_pointer(sa::SpecArgs) = pointer_from_objref(sa)
+function deduplicate_children!(d, sa::SpecArgs; kwargs...)
+	f = sa.f # TODO: Should this be processed somehow? Probably not.
 
 	# Tuple/NamedTuple version
-	# a = deduplicate!(d, spec.args; kwargs...)
-	# kw = deduplicate!(d, spec.kwargs; kwargs...)
+	# a = deduplicate!(d, sa.args; kwargs...)
+	# kw = deduplicate!(d, sa.kwargs; kwargs...)
 
 	# Vector{Any}/Vector{Pair{Symbol,Any}} version
-	# a = _deduplicate_args(d, spec.args; kwargs...)
-	# kw = _deduplicate_args(d, spec.kwargs; kwargs...)
-	a = _map_arg_vec(spec.args) do x
+	# a = _deduplicate_args(d, sa.args; kwargs...)
+	# kw = _deduplicate_args(d, sa.kwargs; kwargs...)
+	a = _map_arg_vec(sa.args) do x
 		deduplicate!(d, x; kwargs...)
 	end
-	kw = _map_arg_vec(spec.kwargs) do p
+	kw = _map_arg_vec(sa.kwargs) do p
 		p[1]=>deduplicate!(d, p[2]; kwargs...)
 	end
 
-	if f === spec.f && a === spec.args && kw === spec.kwargs
-		spec # Not changed
+	if f === sa.f && a === sa.args && kw === sa.kwargs
+		sa # Not changed
 	else
-		Spec(f, a, kw)
+		SpecArgs(f, a, kw)
 	end
 end
-function deduplication_hash(d, spec::Spec)
+function deduplication_hash(d, sa::SpecArgs)
 	# TODO: Could we make this more efficient? (Is it a problem? Probably not.)
 
 	# Tuple/NamedTuple version
-	# f = spec.f
-	# a = deduplication_hash(d, spec.args)
-	# kw = deduplication_hash(d, spec.kwargs)
-	# compute_hash(d, (TypeTag(:Spec), f, a, kw))
+	# f = sa.f
+	# a = deduplication_hash(d, sa.args)
+	# kw = deduplication_hash(d, sa.kwargs)
+	# compute_hash(d, (TypeTag(:SpecArgs), f, a, kw))
 
 	# Vector{Any}/Vector{Pair{Symbol,Any}} version
-	a = _map_arg_vec(spec.args) do x
+	a = _map_arg_vec(sa.args) do x
 		hash_or_value(d, x)
 	end
-	kw = _map_arg_vec(spec.kwargs) do p
+	kw = _map_arg_vec(sa.kwargs) do p
 		p[1]=>hash_or_value(d, p[2])
 	end
-	compute_hash(d, (TypeTag(:Spec), spec.f, a, kw))
+	compute_hash(d, (TypeTag(:SpecArgs), sa.f, a, kw))
 end
-deduplication_copy(spec::Spec) = spec
+deduplication_copy(sa::SpecArgs) = sa
 
 
 # TODO: THIS ISN'T GOOD ENOUGH! WE NEED TO ENSURE WE ONLY STORE EACH SPEC ONCE, EVEN IF IT'S REFERENCED MULTIPLE TIMES
-function cache_save(io, name, spec::Spec)
+function cache_save(io, name, sa::SpecArgs)
 	# Save as a group
 	g = JLD2.Group(io, name)
-	g["type"] = "Spec"
-	g["f"] = spec.f # Is this the best I can do?
-	cache_save(g, "args", spec.args) # TODO: Must be fixed now that we use Vector{Any}
-	cache_save(g, "kwargs", spec.kwargs) # TODO: Must be fixed now that we use Vector{Pair{Symbol,Any}}
+	g["type"] = "SpecArgs"
+	g["f"] = sa.f # Is this the best I can do?
+	cache_save(g, "args", sa.args) # TODO: Must be fixed now that we use Vector{Any}
+	cache_save(g, "kwargs", sa.kwargs) # TODO: Must be fixed now that we use Vector{Pair{Symbol,Any}}
 	nothing
 end
-function cache_load(cache::Cache, ::Val{:Spec}, g)
+function cache_load(cache::Cache, ::Val{:SpecArgs}, g)
 	f = g["f"]
 	args = cache_load(cache, g, "args") # TODO: Must be fixed now that we use Vector{Any}
 	kwargs = cache_load(cache, g, "kwargs") # TODO: Must be fixed now that we use Vector{Pair{Symbol,Any}}
-	spec = Spec(f, args, kwargs)
-	deduplicate!(cache.deduplicator, spec; transfer_ownership=true)
+	sa = SpecArgs(f, args, kwargs)
+	deduplicate!(cache.deduplicator, sa; transfer_ownership=true)
 end
 
 
 
 
-function sa_isequal(a::Spec, b::Spec)
+function sa_isequal(a::SpecArgs, b::SpecArgs)
 	a === b && return true # early out
 	isequal(a.f, b.f) && sa_isequal(a.args, b.args) && sa_isequal(a.kwargs, b.kwargs)
 end
@@ -151,15 +152,15 @@ function sa_isequal(a::T1, b::T2) where {T1,T2}
 	end
 end
 
-Base.isequal(a::Spec, b::Spec) = sa_isequal(a, b)
+Base.isequal(a::SpecArgs, b::SpecArgs) = sa_isequal(a, b)
 
 
 
 
 # Tuple/NamedTuple version
-# _get_kwarg(spec::Spec, key::Symbol, default) = get(spec.kwargs, key, default)
-# _get_kwarg(f, spec::Spec, key::Symbol) = get(f, spec.kwargs, key)
-# _get_kwarg(spec::Spec, key::Symbol) = getindex(spec.kwargs, key)
+# _get_kwarg(sa::SpecArgs, key::Symbol, default) = get(sa.kwargs, key, default)
+# _get_kwarg(f, sa::SpecArgs, key::Symbol) = get(f, sa.kwargs, key)
+# _get_kwarg(sa::SpecArgs, key::Symbol) = getindex(sa.kwargs, key)
 
 # Vector{Any}/Vector{Pair{Symbol,Any}} version
 function _find_kwarg(key::Symbol, kw::Vector{Pair{Symbol,Any}})
@@ -168,57 +169,61 @@ function _find_kwarg(key::Symbol, kw::Vector{Pair{Symbol,Any}})
 	end
 	return nothing
 end
-function _get_kwarg(f, spec::Spec, key::Symbol)
-	i = _find_kwarg(key, spec.kwargs)
-	i === nothing ? f() : spec.kwargs[i].second
+function _get_kwarg(f, sa::SpecArgs, key::Symbol)
+	i = _find_kwarg(key, sa.kwargs)
+	i === nothing ? f() : sa.kwargs[i].second
 end
-_get_kwarg(spec::Spec, key::Symbol, default) = _get_kwarg(()->default, spec, key)
-_get_kwarg(spec::Spec, key::Symbol) = _get_kwarg(()->throw(KeyError(key)), spec, key)
+_get_kwarg(sa::SpecArgs, key::Symbol, default) = _get_kwarg(()->default, sa, key)
+_get_kwarg(sa::SpecArgs, key::Symbol) = _get_kwarg(()->throw(KeyError(key)), sa, key)
 
 
 # TODO: Make this code easier to read
-function get_next!(f, spec::Spec)
-	if spec.next === NotValid()
-		spec.next = f()
+function get_next!(f, sa::SpecArgs)
+	if sa.next === NotValid()
+		sa.next = f()
 	end
-	spec.next
+	sa.next
 end
 
 # TODO: Make this code easier to read
-function get_result!(f, spec::Spec)
-	spec.result !== NotValid() && return spec.result
+function get_result!(f, sa::SpecArgs)
+	sa.result !== NotValid() && return sa.result
 
-	if spec.weak_result !== NotValid()
+	if sa.weak_result !== NotValid()
 		# Attempt to reconstruct from weakly stored reference
-		spec.result = reconstruct_weak_rec(spec.weak_result)
-		spec.result !== NotValid() && return spec.result
-		spec.weak_result = NotValid()
+		sa.result = reconstruct_weak_rec(sa.weak_result)
+		sa.result !== NotValid() && return sa.result
+		sa.weak_result = NotValid()
 	end
 
 	# Compute result
 	result = f()
 	if !(result isa InterruptException)
-		spec.result = result
-		spec.weak_result = deconstruct_weak_rec(spec.result)
+		sa.result = result
+		sa.weak_result = deconstruct_weak_rec(sa.result)
 	end
 	return result
 end
 
 # NB: Any weak result will still be present and the result can thus still be reconstructed if it has not yet been GCed.
-empty_result!(spec::Spec) = (spec.result = NotValid(); spec)
+empty_result!(sa::SpecArgs) = (sa.result = NotValid(); sa)
 
 
 
 
-Base.Broadcast.broadcastable(spec::Spec) = Ref(spec) # treat as scalar for broadcasting
+Base.Broadcast.broadcastable(sa::SpecArgs) = Ref(sa) # treat as scalar for broadcasting
 
 
 
 struct WrappedSpec
-	spec::Spec
+	sa::SpecArgs
 	op::Symbol # :forward, :call, :fetch or :prefetch
+	function WrappedSpec(sa::SpecArgs, op::Symbol)
+		@assert op in (:forward, :call, :fetch, :prefetch)
+		new(sa, op)
+	end
 end
-WrappedSpec(spec) = WrappedSpec(spec, :forward)
+WrappedSpec(sa) = WrappedSpec(sa, :forward)
 
 Base.Broadcast.broadcastable(ws::WrappedSpec) = Ref(ws) # treat as scalar for broadcasting
 
@@ -226,9 +231,9 @@ Base.Broadcast.broadcastable(ws::WrappedSpec) = Ref(ws) # treat as scalar for br
 
 
 # Usually accessed through getproperty
-get_function(ws::WrappedSpec) = ws.spec.f
-get_args(ws::WrappedSpec) = ws.spec.args
-get_kwargs(ws::WrappedSpec) = ws.spec.kwargs
+get_function(ws::WrappedSpec) = ws.sa.f
+get_args(ws::WrappedSpec) = ws.sa.args
+get_kwargs(ws::WrappedSpec) = ws.sa.kwargs
 
 function Base.getproperty(ws::WrappedSpec, s::Symbol)
 	s === :f && return get_function(ws)
@@ -240,14 +245,16 @@ Base.propertynames(::WrappedSpec, private::Bool=false) =
 	private ? (:f, :args, :kwargs, :spec) : (:f, :args, :kwargs)
 
 
-# TODO: Rename to get_spec?
-get_sa(spec::Spec) = spec
-get_sa(ws::WrappedSpec) = ws.spec
+# # TODO: Rename to get_spec?
+# get_sa(spec::Spec) = spec
+# get_sa(ws::WrappedSpec) = ws.spec
+get_sa(ws::WrappedSpec) = ws.sa
 
-Spec(ws::WrappedSpec) = get_sa(ws)
+SpecArgs(ws::WrappedSpec) = get_sa(ws)
 
 
-function transfer_op(src::WrappedSpec, dest::Union{Spec,WrappedSpec})
+# function transfer_op(src::WrappedSpec, dest::Union{Spec,WrappedSpec})
+function transfer_op(src::WrappedSpec, dest::WrappedSpec)
 	if src.op == :call
 		dest.op === :call ? dest : WrappedSpec(get_sa(dest), :forward) # We can keep Call, but never transfer it (so fallback to standard forwarding)
 	else
@@ -257,14 +264,14 @@ end
 
 
 
-function try_get_result_rec(spec::Spec)
-	if spec.result !== NotValid() || spec.weak_result !== NotValid()
-		spec.result, spec.weak_result
-	elseif spec.next !== NotValid()
-		if spec.next isa WrappedSpec
-			try_get_result_rec(spec.next) # recurse
+function try_get_result_rec(sa::SpecArgs)
+	if sa.result !== NotValid() || sa.weak_result !== NotValid()
+		sa.result, sa.weak_result
+	elseif sa.next !== NotValid()
+		if sa.next isa WrappedSpec
+			try_get_result_rec(sa.next) # recurse
 		else
-			spec.next, NotValid() # it forwarded to a value
+			sa.next, NotValid() # it forwarded to a value
 		end
 	else
 		NotValid(), NotValid()
@@ -279,8 +286,8 @@ deduplicate_type(::Type{<:WrappedSpec}) = true
 deconstruct_type(::Type{<:WrappedSpec}) = true
 type_to_tag(::Type{WrappedSpec}) = TypeTag(:WrappedSpec)
 tag_to_type(::Val{:WrappedSpec}) = WrappedSpec
-deconstruct(ws::WrappedSpec) = (ws.spec,ws.op)
-reconstruct(::Type{WrappedSpec}, (spec,op)::Tuple{Spec,Symbol}) = WrappedSpec(spec, op)
+deconstruct(ws::WrappedSpec) = (ws.sa,ws.op)
+reconstruct(::Type{WrappedSpec}, (sa,op)::Tuple{SpecArgs,Symbol}) = WrappedSpec(sa, op)
 
 
 
@@ -289,43 +296,43 @@ function create_spec(f, args...; scheduler=get_scheduler(), deduplicator=schedul
 	# Tuple/NamedTuple version
 	# kw = values(kwargs)
 	# kw = sort_namedtuple_by_keys(kw)
-	# spec = Spec(f, args, kw)
+	# sa = SpecArgs(f, args, kw)
 
 	# Vector{Any}/Vector{Pair{Symbol,Any}} version
 	a = collect(Any, args)
 	kw = collect(Pair{Symbol,Any}, kwargs)
 	sort!(kw; by=first)
-	spec = Spec(f, a, kw)
+	sa = SpecArgs(f, a, kw)
 
-	deduplicator !== nothing && (spec = deduplicate!(deduplicator, spec))
-	WrappedSpec(spec)
+	deduplicator !== nothing && (sa = deduplicate!(deduplicator, sa))
+	WrappedSpec(sa)
 end
 
 
-Base.isequal(a::WrappedSpec, b::WrappedSpec) = isequal(a.op, b.op) && isequal(a.spec, b.spec)
+Base.isequal(a::WrappedSpec, b::WrappedSpec) = isequal(a.op, b.op) && isequal(a.sa, b.sa)
 
 
 
 
-function visit_dependencies(f, spec::Spec)
+function visit_dependencies(f, sa::SpecArgs)
 	# Tuple/NamedTuple version
-	# visit_specs(f, spec.args)
-	# visit_specs(f, spec.kwargs)
+	# visit_specs(f, sa.args)
+	# visit_specs(f, sa.kwargs)
 
 	# Vector{Any}/Vector{Pair{Symbol,Any}} version
-	# visit_specs.(Ref(f), spec.args)
-	foreach(spec.args) do x
+	# visit_specs.(Ref(f), sa.args)
+	foreach(sa.args) do x
 		visit_specs(f, x)
 	end
-	foreach(spec.kwargs) do p
+	foreach(sa.kwargs) do p
 		visit_specs(f, p[2])
 	end
 end
-# visit_dependencies(f, ws::WrappedSpec) = visit_dependencies(f, ws.spec)
+# visit_dependencies(f, ws::WrappedSpec) = visit_dependencies(f, ws.sa)
 
 
 # NB: To visit all dependencies of a spec, call visit_dependencies on spec.
-visit_specs(f, spec::Spec) = f(spec)
+visit_specs(f, sa::SpecArgs) = f(sa) # TODO: Get rid of this?
 visit_specs(f, ws::WrappedSpec) = f(ws)
 
 function visit_specs(f, v::AbstractVector{T}) where T
@@ -343,7 +350,7 @@ function visit_specs(f, nt::T) where T<:NamedTuple
 end
 
 function visit_specs(f, df::DataFrame)
-	foreach(col->visit_specs(f,col), eachcol(df)) # This handles the somewhat strange case of putting Specs as elements of DataFrame column vectors
+	foreach(col->visit_specs(f,col), eachcol(df)) # This ensures we can put Specs as elements of DataFrame column vectors
 end
 
 function visit_specs(f, x::T) where T
@@ -359,26 +366,26 @@ end
 
 
 # Find a better name?
-function map_args(f::F, spec::Spec) where F
+function map_args(f::F, sa::SpecArgs) where F
 	# Tuple/NamedTuple version
-	# a = map_specs(f, spec.args)
-	# kw = map_specs(f, spec.kwargs)
+	# a = map_specs(f, sa.args)
+	# kw = map_specs(f, sa.kwargs)
 
 	# Vector{Any}/Vector{Pair{Symbol,Any}} version
-	a = _map_arg_vec(spec.args) do x
+	a = _map_arg_vec(sa.args) do x
 		map_specs(f, x)
 	end
-	kw = _map_arg_vec(spec.kwargs) do p
+	kw = _map_arg_vec(sa.kwargs) do p
 		p[1]=>map_specs(f, p[2])
 	end
 
-	Spec(spec.f, a, kw)
+	SpecArgs(sa.f, a, kw)
 end
 
 
 # Find a better name?
 # NB: To map all args/dependencies of a spec, call map_args on spec.
-map_specs(f::F, spec::Spec) where F = @something f(spec) spec
+map_specs(f::F, sa::SpecArgs) where F = @something f(sa) sa # TODO: Get rid of this?
 map_specs(f::F, ws::WrappedSpec) where F = @something f(ws) ws
 
 function _map_specs(f::F, v::AbstractVector{T}) where {F,T}
@@ -432,10 +439,10 @@ map_specs(f::F, x::T) where {F,T} = @something f(x) _map_specs(f, x)
 
 
 _fetched(::Any) = nothing
-_fetched(ws::WrappedSpec) = WrappedSpec(ws.spec, :fetch)
+_fetched(ws::WrappedSpec) = WrappedSpec(ws.sa, :fetch)
 
 _prefetched(::Any) = nothing
-_prefetched(ws::WrappedSpec) = WrappedSpec(ws.spec, :prefetch)
+_prefetched(ws::WrappedSpec) = WrappedSpec(ws.sa, :prefetch)
 
 
 fetched(x) = map_specs(_fetched, x)

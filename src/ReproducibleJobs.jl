@@ -26,8 +26,8 @@ export
 	Deduplicator,
 	Cache,
 	Scheduler,
-	Spec,
-	WrappedSpec, # or make public?
+	# SpecArgs, # Should this be public?
+	WrappedSpec, # Rename to spec
 	CompoundResult,
 	AbstractPreprocess,
 	Preprocess,
