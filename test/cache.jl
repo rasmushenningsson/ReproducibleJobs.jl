@@ -3,6 +3,7 @@ using ReproducibleJobs
 using ReproducibleJobs: ROArray, ROVec, ROMat, ROBitArray, ROBitVec, ROBitMat, lookup_hash, deduplication_pointer, DeconstructedWeak, reconstruct_weak_rec, NotValid, CompoundResult, key2path, cache_get!, cache_try_get_compoundresult
 using ReadOnlyArrays
 using StableHashTraits
+using LinearAlgebra
 using SparseArrays
 using DataFrames
 using HDF5 # For raw reading of .jld2 files for testing purposes

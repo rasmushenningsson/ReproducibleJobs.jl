@@ -3,6 +3,7 @@ using ReproducibleJobs
 using ReproducibleJobs: ROArray, ROVec, ROMat, ROBitArray, ROBitVec, ROBitMat, Hash, deduplication_hash, lookup_hash, deduplicate_type, deduplication_pointer, CompoundResult
 using ReadOnlyArrays
 using StableHashTraits
+using LinearAlgebra
 using SparseArrays
 using DataFrames
 using InlineStrings
