@@ -19,8 +19,14 @@ is_preprocessing(f) = false
 # get_dependencies(spec::Spec) = get_dependencies(Returns(true), spec)
 
 function get_dependencies(spec::Spec)
-	deps = SpecUnion[]
-	visit_dependencies(spec) do dep::SpecUnion
+	deps = WrappedSpec[]
+	# visit_dependencies(spec) do dep::WrappedSpec
+	# 	push!(deps, dep)
+	# end
+
+	# DEBUG
+	visit_dependencies(spec) do dep
+		@assert dep isa WrappedSpec "Hmm. $(typeof(dep)) $(dep.f)"
 		push!(deps, dep)
 	end
 	return unique!(deps)

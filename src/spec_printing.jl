@@ -283,7 +283,8 @@ function _should_collapse(::Type{T}; nested::Bool) where T
 	return false
 end
 
-_should_collapse(::Type{<:SpecUnion}; nested) = false
+# _should_collapse(::Type{<:SpecUnion}; nested) = false
+_should_collapse(::Type{WrappedSpec}; nested) = false
 
 _should_collapse(::Type{AbstractRange}; nested) = true
 function _should_collapse(::Type{T}; nested) where T<:Union{<:AbstractArray, <:AbstractDict, <:AbstractSet}
@@ -312,11 +313,11 @@ _should_collapse(::Type{DataFrame}) = false
 should_collapse(::Type{T}) where T = _should_collapse(T; nested=false)
 
 
-function extend_print_node!(pn::PrintNode, s::T) where T<:SpecUnion
+function extend_print_node!(pn::PrintNode, ws::WrappedSpec)
 	# Special handling of `get_cached`, to make things more compact
 	suffix = ""
 
-	spec = get_sa(s)
+	spec = get_sa(ws)
 
 	if spec.f == compoundresult_sub
 		sub = only(spec.args[2:end])
@@ -337,8 +338,11 @@ function extend_print_node!(pn::PrintNode, s::T) where T<:SpecUnion
 	# Standard handling
 
 	extend_title!(pn, styled_function_name(spec.f))
-	if T !== Spec
-		extend_title!(pn, styled"{bright_black,light:($T)}")
+	# if T !== Spec
+	# 	extend_title!(pn, styled"{bright_black,light:($T)}")
+	# end
+	if ws.op !== :forward
+		extend_title!(pn, styled"{bright_black,light:($(ws.op))}")
 	end
 
 	isempty(suffix) || extend_title!(pn, suffix)
@@ -505,9 +509,9 @@ function build_print_node(context, value; prefix="")
 end
 
 
-function print_spec(io::IO, s::SpecUnion; kwargs...)
+function print_spec(io::IO, ws::WrappedSpec; kwargs...)
 	context = PrintContext(; line_length=displaysize(io)[2])
-	tree = build_print_node(context, s)
+	tree = build_print_node(context, ws)
 	AbstractTrees.print_tree(io, tree; kwargs...)
 end
-print_spec(s::SpecUnion; kwargs...) = print_spec(stdout, s; kwargs...)
+print_spec(ws::WrappedSpec; kwargs...) = print_spec(stdout, ws; kwargs...)

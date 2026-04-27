@@ -68,16 +68,17 @@ function Base.empty!(scheduler::Scheduler)
 end
 
 
-fetch_dependencies!(scheduler, deps) = IdDict{SpecUnion,Any}(dep=>fetch!(scheduler, dep) for dep in deps)
+fetch_dependencies!(scheduler, deps) = IdDict{WrappedSpec,Any}(dep=>fetch!(scheduler, dep) for dep in deps)
 
 
 
 function process_dependency!(scheduler, dep; parent_f)
-	dep isa Call && return dep # Already preprocessed as far as it gets
+	# dep isa Call && return dep # Already preprocessed as far as it gets
+	dep.op === :call && return dep # Already preprocessed as far as it gets
 	process!(scheduler, dep; parent_f, processing_errors_throw=false)
 end
 process_dependencies!(scheduler, deps; parent_f) =
-	IdDict{SpecUnion,Any}(dep=>process_dependency!(scheduler, dep; parent_f) for dep in deps)
+	IdDict{WrappedSpec,Any}(dep=>process_dependency!(scheduler, dep; parent_f) for dep in deps)
 
 
 
@@ -124,14 +125,14 @@ function preprocess(scheduler::Scheduler, spec::Spec)
 	end
 end
 
-function replace_forwarded(spec::Spec, upstream::IdDict{<:SpecUnion,Any})
+function replace_forwarded(spec::Spec, upstream::IdDict{WrappedSpec,Any})
 	err = propagate_error(spec, values(upstream))
 	err !== nothing && return err
 	return map_args(x->get(upstream,x,nothing), spec)
 end
 
 
-function compute(scheduler::Scheduler, spec::Spec, upstream::IdDict{<:SpecUnion,Any})
+function compute(scheduler::Scheduler, spec::Spec, upstream::IdDict{WrappedSpec,Any})
 	f = spec.f
 	try
 		@info "Running $f"
@@ -176,7 +177,7 @@ function compute(scheduler::Scheduler, spec::Spec, upstream::IdDict{<:SpecUnion,
 end
 
 
-function _fetch_and_compute!(scheduler, spec::Spec, deps::Vector{<:SpecUnion})
+function _fetch_and_compute!(scheduler, spec::Spec, deps::Vector{WrappedSpec})
 	deps = fetch_dependencies!(scheduler, deps)
 	# res = compute(scheduler, spec, deps)
 
@@ -184,16 +185,17 @@ function _fetch_and_compute!(scheduler, spec::Spec, deps::Vector{<:SpecUnion})
 	t = @elapsed res = compute(scheduler, spec, deps)
 	@info "compute $(spec.f) $(t)s"
 
-	@assert !(res isa SpecUnion)
+	@assert !(res isa WrappedSpec)
 	res
 end
 
 
-function _fetch_and_compute_cached!(scheduler, spec::Spec, deps::Vector{<:SpecUnion})
-	inner_spec = spec.args[1]::SpecUnion
+function _fetch_and_compute_cached!(scheduler, spec::Spec, deps::Vector{WrappedSpec})
+	inner_spec = spec.args[1]::WrappedSpec
 	inner_sa = get_sa(inner_spec)
 	inner_deps = get_dependencies(inner_sa)
-	@assert all(s->s isa Call, inner_deps) # The outer Call has enforced all inner specs to be Calls has well.
+	# @assert all(s->s isa Call, inner_deps) # The outer Call has enforced all inner specs to be Calls has well.
+	@assert all(s->s.op === :call, inner_deps) # The outer Call has enforced all inner specs to be Calls has well.
 
 	cache_get!(scheduler.cache, inner_sa) do
 		_fetch_and_compute!(scheduler, inner_sa, inner_deps)
@@ -201,13 +203,14 @@ function _fetch_and_compute_cached!(scheduler, spec::Spec, deps::Vector{<:SpecUn
 end
 
 # TODO: Simplify code
-function _fetch_and_compute_sub!(scheduler, spec::Spec, deps::Vector{<:SpecUnion})
+function _fetch_and_compute_sub!(scheduler, spec::Spec, deps::Vector{WrappedSpec})
 	@assert spec.f in (compoundresult_sub, compoundresult_keys)
 
-	cached_spec = get_sa(spec.args[1]::SpecUnion)
+	cached_spec = get_sa(spec.args[1]::WrappedSpec)
 	@assert cached_spec.f == get_cached
 	cached_deps = get_dependencies(cached_spec)
-	@assert all(s->s isa Call, cached_deps) # The outer Call has enforced all sub specs to be Calls has well.
+	# @assert all(s->s isa Call, cached_deps) # The outer Call has enforced all sub specs to be Calls has well.
+	@assert all(s->s.op === :call, cached_deps) # The outer Call has enforced all sub specs to be Calls has well.
 
 	# Try in this order
 	# 0. (Already done) Is it cached and still valid in spec.result.
@@ -272,11 +275,14 @@ end
 
 
 
-function _process_once!(scheduler::Scheduler, spec::Spec, deps::Vector{<:SpecUnion})
+function _process_once!(scheduler::Scheduler, spec::Spec, deps::Vector{WrappedSpec})
 	forwarded_deps = process_dependencies!(scheduler, deps; parent_f=spec.f)
 
 	if !isempty(forwarded_deps)
+		# @show typeof.(keys(forwarded_deps))
+		# @show typeof.(values(forwarded_deps))
 		spec = replace_forwarded(spec, forwarded_deps)::Union{Spec,ProcessingException}
+		# @show spec
 	end
 
 	if is_preprocessing(spec)
@@ -290,7 +296,8 @@ function _process_once!(scheduler::Scheduler, spec::Spec, deps::Vector{<:SpecUni
 		spec isa ProcessingException && return spec
 
 		spec = deduplicate!(scheduler.deduplicator, spec)
-		Call(spec)
+		# Call(spec)
+		WrappedSpec(spec, :call)
 	end
 end
 
@@ -341,30 +348,36 @@ end
 
 
 # Return tuple with result and Bool telling if it's done (TODO: Make code more clear)
-function process_once!(scheduler::Scheduler, s::T; parent_f) where T<:SpecUnion
+# function process_once!(scheduler::Scheduler, s::T; parent_f) where T<:SpecUnion
+function process_once!(scheduler::Scheduler, spec::Spec, op::Symbol; parent_f)
 	# Early out, we don't need to consider dependencies for this
-	if parent_f !== nothing && T <: Union{Spec,Prefetch}
-		if !should_forward_child(parent_f, s.f)
-			return s, true
+	# if parent_f !== nothing && T <: Union{Spec,Prefetch}
+	# 	if !should_forward_child(parent_f, s.f)
+	# 		return s, true
+	# 	end
+	# end
+	if parent_f !== nothing && op in (:forward,:prefetch)
+		if !should_forward_child(parent_f, spec.f)
+			return (WrappedSpec(spec, op), true)
 		end
 	end
 
-	spec = get_sa(s)
+	# spec = get_sa(s)
 
 	deps = get_dependencies(spec)
 
-	if !is_preprocessing(spec) && all(x->x isa Call, deps)
+	# if !is_preprocessing(spec) && all(x->x isa Call, deps)
+	if !is_preprocessing(spec) && all(x->x.op === :call, deps)
 		# ready to call
 
 		# Stop if we are forwarding, nothing left to do
-		T===Spec && return (Call(spec), true)
-
+		# T===Spec && return (Call(spec), true)
+		op === :forward && return (WrappedSpec(spec, :call), true)
 
 		res = get_result!(spec) do
 			# # DEBUG
 			# h = lookup_hash(scheduler.deduplicator, spec)
 			# @info "Computing $(spec.f) ($(hash_string(h)[1:6]), n=$(processing_count(h)))"
-
 
 			if spec.f == compoundresult_sub || spec.f == compoundresult_keys
 				_fetch_and_compute_sub!(scheduler, spec, deps)
@@ -375,7 +388,8 @@ function process_once!(scheduler::Scheduler, s::T; parent_f) where T<:SpecUnion
 			end
 		end
 		@assert !(res isa CompoundResult) # Is this a good place to check? Maybe should be ensured earlier.
-		@assert !(res isa SpecUnion)
+		# @assert !(res isa SpecUnion)
+		@assert !(res isa WrappedSpec)
 
 		lru_touch!(scheduler.lru, spec) do
 			Base.summarysize(res)
@@ -393,7 +407,8 @@ function process_once!(scheduler::Scheduler, s::T; parent_f) where T<:SpecUnion
 		_process_once!(scheduler, spec, deps)
 	end
 
-	if res isa SpecUnion
+	# if res isa SpecUnion
+	if res isa WrappedSpec
 		return res, false
 	else
 		return res, true # forwarding returned a value, we are done
@@ -401,36 +416,57 @@ function process_once!(scheduler::Scheduler, s::T; parent_f) where T<:SpecUnion
 end
 
 
-function process!(scheduler::Scheduler, s::T; parent_f=nothing, processing_errors_throw=true) where T<:SpecUnion
+# function process!(scheduler::Scheduler, s::T; parent_f=nothing, processing_errors_throw=true) where T<:SpecUnion
+function process!(scheduler::Scheduler, spec::Spec, op::Symbol; parent_f=nothing, processing_errors_throw=true)
 	evict_results!(scheduler; evict_all=false)
 
 	while true
-		res, done = process_once!(scheduler, s; parent_f)
+		res, done = process_once!(scheduler, spec, op; parent_f)
 		# done && return res
 		if done
 			processing_errors_throw && res isa Exception && throw(res)
 			return res
 		end
-		res::SpecUnion
-		s = transfer_op(s, res)
+		# res::SpecUnion
+		res::WrappedSpec
+		# spec = transfer_op(spec, res)
+		spec = get_sa(res)
+		# Keep the op
 	end
 end
 
 
-fetch!(scheduler::Scheduler, s::SpecUnion; kwargs...) = process!(scheduler, fetched(s); kwargs...)
-forward!(scheduler::Scheduler, s::SpecUnion; kwargs...) = process!(scheduler, get_sa(s); kwargs...) # strip Wrapper to get forwarding
+# fetch!(scheduler::Scheduler, s::SpecUnion; kwargs...) = process!(scheduler, fetched(s); kwargs...)
+# forward!(scheduler::Scheduler, s::SpecUnion; kwargs...) = process!(scheduler, get_sa(s); kwargs...) # strip Wrapper to get forwarding
 
-function forward_once!(scheduler::Scheduler, s::SpecUnion; parent_f=nothing, processing_errors_throw=true)
-	res, _ = process_once!(scheduler, get_sa(s); parent_f) # strip Wrapper to get forwarding
+# function forward_once!(scheduler::Scheduler, s::SpecUnion; parent_f=nothing, processing_errors_throw=true)
+# 	res, _ = process_once!(scheduler, get_sa(s); parent_f) # strip Wrapper to get forwarding
+# 	processing_errors_throw && res isa Exception && throw(res)
+# 	res
+# end
+
+
+# fetch!(s::SpecUnion; kwargs...) = fetch!(get_scheduler(), s; kwargs...)
+# forward!(s::SpecUnion; kwargs...) = forward!(get_scheduler(), s; kwargs...)
+# forward_once!(s::SpecUnion; kwargs...) = forward_once!(get_scheduler(), s; kwargs...)
+# process!(s::SpecUnion; kwargs...) = process!(get_scheduler(), s; kwargs...)
+
+
+fetch!(scheduler::Scheduler, ws::WrappedSpec; kwargs...) = process!(scheduler, get_sa(ws), :fetch; kwargs...)
+forward!(scheduler::Scheduler, ws::WrappedSpec; kwargs...) = process!(scheduler, get_sa(ws), :forward; kwargs...)
+process!(scheduler::Scheduler, ws::WrappedSpec; kwargs...) = process!(scheduler, get_sa(ws), ws.op; kwargs...)
+
+function forward_once!(scheduler::Scheduler, ws::WrappedSpec; parent_f=nothing, processing_errors_throw=true)
+	res, _ = process_once!(scheduler, get_sa(ws), :forward; parent_f)
 	processing_errors_throw && res isa Exception && throw(res)
 	res
 end
 
 
-fetch!(s::SpecUnion; kwargs...) = fetch!(get_scheduler(), s; kwargs...)
-forward!(s::SpecUnion; kwargs...) = forward!(get_scheduler(), s; kwargs...)
-forward_once!(s::SpecUnion; kwargs...) = forward_once!(get_scheduler(), s; kwargs...)
-process!(s::SpecUnion; kwargs...) = process!(get_scheduler(), s; kwargs...)
+fetch!(ws::WrappedSpec; kwargs...) = fetch!(get_scheduler(), ws; kwargs...)
+forward!(ws::WrappedSpec; kwargs...) = forward!(get_scheduler(), ws; kwargs...)
+forward_once!(ws::WrappedSpec; kwargs...) = forward_once!(get_scheduler(), ws; kwargs...)
+process!(ws::WrappedSpec; kwargs...) = process!(get_scheduler(), ws; kwargs...)
 
 
 
