@@ -9,7 +9,7 @@ mutable struct SpecArgs # TODO: Add template parameters for args/kwargs? Or find
 	# Cache (forwarding)
 	# This is the result of `process_once`, when preprocessing.
 	# Later, we might want to make this a sumtype. (But then we need mutually recursive types, which is not yet supported by Julia.)
-	next::Any # NotValid means it is not computed. Most often a WrappedSpec. Can also be a value (in rare cases specs forwards to values).
+	next::Any # NotValid means it is not computed. Most often a Spec. Can also be a value (in rare cases specs forwards to values).
 
 	# Cache (result)
 	result::Any
@@ -215,50 +215,46 @@ Base.Broadcast.broadcastable(sa::SpecArgs) = Ref(sa) # treat as scalar for broad
 
 
 
-struct WrappedSpec
+struct Spec
 	sa::SpecArgs
 	op::Symbol # :forward, :call, :fetch or :prefetch
-	function WrappedSpec(sa::SpecArgs, op::Symbol)
+	function Spec(sa::SpecArgs, op::Symbol)
 		@assert op in (:forward, :call, :fetch, :prefetch)
 		new(sa, op)
 	end
 end
-WrappedSpec(sa) = WrappedSpec(sa, :forward)
+Spec(sa) = Spec(sa, :forward)
 
-Base.Broadcast.broadcastable(ws::WrappedSpec) = Ref(ws) # treat as scalar for broadcasting
+Base.Broadcast.broadcastable(spec::Spec) = Ref(spec) # treat as scalar for broadcasting
 
 
 
 
 # Usually accessed through getproperty
-get_function(ws::WrappedSpec) = ws.sa.f
-get_args(ws::WrappedSpec) = ws.sa.args
-get_kwargs(ws::WrappedSpec) = ws.sa.kwargs
+get_function(spec::Spec) = spec.sa.f
+get_args(spec::Spec) = spec.sa.args
+get_kwargs(spec::Spec) = spec.sa.kwargs
 
-function Base.getproperty(ws::WrappedSpec, s::Symbol)
-	s === :f && return get_function(ws)
-	s === :args && return get_args(ws)
-	s === :kwargs && return get_kwargs(ws)
-	getfield(ws, s)
+function Base.getproperty(spec::Spec, s::Symbol)
+	s === :f && return get_function(spec)
+	s === :args && return get_args(spec)
+	s === :kwargs && return get_kwargs(spec)
+	getfield(spec, s)
 end
-Base.propertynames(::WrappedSpec, private::Bool=false) =
+Base.propertynames(::Spec, private::Bool=false) =
 	private ? (:f, :args, :kwargs, :spec) : (:f, :args, :kwargs)
 
 
-# # TODO: Rename to get_spec?
-# get_sa(spec::Spec) = spec
-# get_sa(ws::WrappedSpec) = ws.spec
-get_sa(ws::WrappedSpec) = ws.sa
+get_sa(spec::Spec) = spec.sa
 
-SpecArgs(ws::WrappedSpec) = get_sa(ws)
+SpecArgs(spec::Spec) = get_sa(spec)
 
 
-# function transfer_op(src::WrappedSpec, dest::Union{Spec,WrappedSpec})
-function transfer_op(src::WrappedSpec, dest::WrappedSpec)
+function transfer_op(src::Spec, dest::Spec)
 	if src.op == :call
-		dest.op === :call ? dest : WrappedSpec(get_sa(dest), :forward) # We can keep Call, but never transfer it (so fallback to standard forwarding)
+		dest.op === :call ? dest : Spec(get_sa(dest), :forward) # We can keep Call, but never transfer it (so fallback to standard forwarding)
 	else
-		WrappedSpec(get_sa(dest), src.op) # Transfer
+		Spec(get_sa(dest), src.op) # Transfer
 	end
 end
 
@@ -268,7 +264,7 @@ function try_get_result_rec(sa::SpecArgs)
 	if sa.result !== NotValid() || sa.weak_result !== NotValid()
 		sa.result, sa.weak_result
 	elseif sa.next !== NotValid()
-		if sa.next isa WrappedSpec
+		if sa.next isa Spec
 			try_get_result_rec(sa.next) # recurse
 		else
 			sa.next, NotValid() # it forwarded to a value
@@ -277,17 +273,17 @@ function try_get_result_rec(sa::SpecArgs)
 		NotValid(), NotValid()
 	end
 end
-try_get_result_rec(ws::WrappedSpec) = try_get_result_rec(get_sa(ws))
+try_get_result_rec(spec::Spec) = try_get_result_rec(get_sa(spec))
 
 
 
 
-deduplicate_type(::Type{<:WrappedSpec}) = true
-deconstruct_type(::Type{<:WrappedSpec}) = true
-type_to_tag(::Type{WrappedSpec}) = TypeTag(:WrappedSpec)
-tag_to_type(::Val{:WrappedSpec}) = WrappedSpec
-deconstruct(ws::WrappedSpec) = (ws.sa,ws.op)
-reconstruct(::Type{WrappedSpec}, (sa,op)::Tuple{SpecArgs,Symbol}) = WrappedSpec(sa, op)
+deduplicate_type(::Type{<:Spec}) = true
+deconstruct_type(::Type{<:Spec}) = true
+type_to_tag(::Type{Spec}) = TypeTag(:Spec)
+tag_to_type(::Val{:Spec}) = Spec
+deconstruct(spec::Spec) = (spec.sa, spec.op)
+reconstruct(::Type{Spec}, (sa,op)::Tuple{SpecArgs,Symbol}) = Spec(sa, op)
 
 
 
@@ -305,11 +301,11 @@ function create_spec(f, args...; scheduler=get_scheduler(), deduplicator=schedul
 	sa = SpecArgs(f, a, kw)
 
 	deduplicator !== nothing && (sa = deduplicate!(deduplicator, sa))
-	WrappedSpec(sa)
+	Spec(sa)
 end
 
 
-Base.isequal(a::WrappedSpec, b::WrappedSpec) = isequal(a.op, b.op) && isequal(a.sa, b.sa)
+Base.isequal(a::Spec, b::Spec) = isequal(a.op, b.op) && isequal(a.sa, b.sa)
 
 
 
@@ -328,12 +324,12 @@ function visit_dependencies(f, sa::SpecArgs)
 		visit_specs(f, p[2])
 	end
 end
-# visit_dependencies(f, ws::WrappedSpec) = visit_dependencies(f, ws.sa)
+# visit_dependencies(f, spec::Spec) = visit_dependencies(f, spec.sa)
 
 
 # NB: To visit all dependencies of a spec, call visit_dependencies on spec.
 visit_specs(f, sa::SpecArgs) = f(sa) # TODO: Get rid of this?
-visit_specs(f, ws::WrappedSpec) = f(ws)
+visit_specs(f, spec::Spec) = f(spec)
 
 function visit_specs(f, v::AbstractVector{T}) where T
 	# The eltype check gives some false positives, but it prevents some unnecessary traversal and mostly gets the job done
@@ -386,7 +382,7 @@ end
 # Find a better name?
 # NB: To map all args/dependencies of a spec, call map_args on spec.
 map_specs(f::F, sa::SpecArgs) where F = @something f(sa) sa # TODO: Get rid of this?
-map_specs(f::F, ws::WrappedSpec) where F = @something f(ws) ws
+map_specs(f::F, spec::Spec) where F = @something f(spec) spec
 
 function _map_specs(f::F, v::AbstractVector{T}) where {F,T}
 	# The eltype check gives some false positives, but it prevents some unnecessary traversal and mostly gets the job done
@@ -439,10 +435,10 @@ map_specs(f::F, x::T) where {F,T} = @something f(x) _map_specs(f, x)
 
 
 _fetched(::Any) = nothing
-_fetched(ws::WrappedSpec) = WrappedSpec(ws.sa, :fetch)
+_fetched(spec::Spec) = Spec(spec.sa, :fetch)
 
 _prefetched(::Any) = nothing
-_prefetched(ws::WrappedSpec) = WrappedSpec(ws.sa, :prefetch)
+_prefetched(spec::Spec) = Spec(spec.sa, :prefetch)
 
 
 fetched(x) = map_specs(_fetched, x)
@@ -475,7 +471,7 @@ function _show_result(io::IO, w::WeakRef)
 	end
 end
 
-function Base.show(io::IO, spec::WrappedSpec)
+function Base.show(io::IO, spec::Spec)
 	if get(io,:compact,false)
 		show(io, spec.f)
 	else

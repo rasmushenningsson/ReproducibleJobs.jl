@@ -283,7 +283,7 @@ function _should_collapse(::Type{T}; nested::Bool) where T
 	return false
 end
 
-_should_collapse(::Type{WrappedSpec}; nested) = false
+_should_collapse(::Type{Spec}; nested) = false
 
 _should_collapse(::Type{AbstractRange}; nested) = true
 function _should_collapse(::Type{T}; nested) where T<:Union{<:AbstractArray, <:AbstractDict, <:AbstractSet}
@@ -312,49 +312,49 @@ _should_collapse(::Type{DataFrame}) = false
 should_collapse(::Type{T}) where T = _should_collapse(T; nested=false)
 
 
-function extend_print_node!(pn::PrintNode, ws::WrappedSpec)
+function extend_print_node!(pn::PrintNode, spec::Spec)
 	# Special handling of `get_cached`, to make things more compact
 	suffix = ""
 
-	spec = get_sa(ws)
+	sa = get_sa(spec)
 
-	if spec.f == compoundresult_sub
-		sub = only(spec.args[2:end])
+	if sa.f == compoundresult_sub
+		sub = only(sa.args[2:end])
 		suffix = styled"{green,light:(cached:$sub)}"
-		spec = get_sa(spec.args[1]) # unwrap to `get_cached`
-		@assert spec.f == get_cached
-		spec = get_sa(spec.args[1]) # unwrap fully
-	elseif spec.f == compoundresult_keys
+		sa = get_sa(sa.args[1]) # unwrap to `get_cached`
+		@assert sa.f == get_cached
+		sa = get_sa(sa.args[1]) # unwrap fully
+	elseif sa.f == compoundresult_keys
 		suffix = styled"{green,light:(cached keys)}"
-		spec = get_sa(spec.args[1]) # unwrap to `get_cached`
-		@assert spec.f == get_cached
-		spec = get_sa(spec.args[1]) # unwrap fully
-	elseif spec.f == get_cached
+		sa = get_sa(sa.args[1]) # unwrap to `get_cached`
+		@assert sa.f == get_cached
+		sa = get_sa(sa.args[1]) # unwrap fully
+	elseif sa.f == get_cached
 		suffix = styled"{green,light:(cached)}"
-		spec = get_sa(spec.args[1]) # unwrap the spec
+		sa = get_sa(sa.args[1]) # unwrap the sa
 	end
 
 	# Standard handling
 
-	extend_title!(pn, styled_function_name(spec.f))
-	if ws.op !== :forward
-		extend_title!(pn, styled"{bright_black,light:($(ws.op))}")
+	extend_title!(pn, styled_function_name(sa.f))
+	if spec.op !== :forward
+		extend_title!(pn, styled"{bright_black,light:($(spec.op))}")
 	end
 
 	isempty(suffix) || extend_title!(pn, suffix)
 
-	p = _get_pointer(spec)
+	p = _get_pointer(sa)
 	@assert p !== C_NULL
 	extend_title!(pn, PointerOridinal(pn.context, p))
 
 	if !add_pointer!(pn.context, p)
 		# First time we see this item
 		context2 = descend(pn.context)
-		for a in spec.args
+		for a in sa.args
 			push!(pn.children, build_print_node(context2, a))
 		end
-		# for (k,v) in pairs(spec.kwargs) # NamedTuple version
-		for (k,v) in spec.kwargs # Vector{Pair{Symbol,Any}}
+		# for (k,v) in pairs(sa.kwargs) # NamedTuple version
+		for (k,v) in sa.kwargs # Vector{Pair{Symbol,Any}}
 			startswith(string(k), "__") && continue
 			push!(pn.children, build_print_node(context2, v; prefix=styled"{blue:$k:}"))
 		end
@@ -505,9 +505,9 @@ function build_print_node(context, value; prefix="")
 end
 
 
-function print_spec(io::IO, ws::WrappedSpec; kwargs...)
+function print_spec(io::IO, spec::Spec; kwargs...)
 	context = PrintContext(; line_length=displaysize(io)[2])
-	tree = build_print_node(context, ws)
+	tree = build_print_node(context, spec)
 	AbstractTrees.print_tree(io, tree; kwargs...)
 end
-print_spec(ws::WrappedSpec; kwargs...) = print_spec(stdout, ws; kwargs...)
+print_spec(spec::Spec; kwargs...) = print_spec(stdout, spec; kwargs...)
