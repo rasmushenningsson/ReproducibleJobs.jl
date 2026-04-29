@@ -113,7 +113,7 @@ function preprocess(scheduler::Scheduler, sa::SpecArgs)
 
 	# preprocess_display_item = add_item!(scheduler.progress_display, ProgressItem(styled"{green,light:⋅ Preprocessing} $f"; show_time=false))
 	# add_item!(scheduler.progress_display, ProgressItem(styled"{green,light:⋅ Preprocessing} $f"; finished=true))
-	preprocess_display_item = add_item!(scheduler.progress_display, ProgressItem(styled"{green,light:⋅ Preprocessing} $f"; finished=true))
+	preprocess_display_item = add_item!(scheduler.progress_display, ProgressItem(styled"{green,light:⋅ Preprocessing} $f"))
 	print_display(scheduler.progress_display)
 
 	# set_text!(scheduler.preprocess_display_item[], styled"{green,light:⋅ Preprocessing} $f")
@@ -171,49 +171,53 @@ function compute(scheduler::Scheduler, sa::SpecArgs, upstream::IdDict{Spec,Any})
 
 	# Worker
 	task = Threads.@spawn begin # TODO: Keep a task alive instead
-		try
-			# @info "Running $f"
-			# progress_item = add_item!(progress_display, ProgressItem("Running $f"))
-			progress_item = add_item!(progress_display, ProgressItem(styled"{green:⋅ Running} $f"))
+		# @info "Running $f"
+		# progress_item = add_item!(progress_display, ProgressItem("Running $f"))
+		progress_item = add_item!(progress_display, ProgressItem(styled"{green:⋅ Running} $f"))
 
-			err = propagate_error(sa, values(upstream))
-			err !== nothing && return err
+		err = propagate_error(sa, values(upstream))
+		if err !== nothing
+			res = err
+			# TODO: Update progress_item text
+		else
+			try
+				v = _get_kwarg(sa, :__version, nothing)
+				@assert v !== nothing "__version kwarg must be provided for all (non-preprocessing) specs."
 
-			v = _get_kwarg(sa, :__version, nothing)
-			@assert v !== nothing "__version kwarg must be provided for all (non-preprocessing) specs."
+				sa_replaced = map_args(x->get(upstream,x,nothing), sa)
+				args = sa_replaced.args
+				kwargs = sa_replaced.kwargs
 
-			sa_replaced = map_args(x->get(upstream,x,nothing), sa)
-			args = sa_replaced.args
-			kwargs = sa_replaced.kwargs
+				# Get rid of kwargs where the key starts with __
+				# kwargs = NamedTuple{filter(k->!startswith(string(k),"__"), keys(kwargs))}(kwargs)
 
-			# Get rid of kwargs where the key starts with __
-			# kwargs = NamedTuple{filter(k->!startswith(string(k),"__"), keys(kwargs))}(kwargs)
+				kwargs = filter(p->!startswith(string(p[1]),"__"), kwargs) # TODO: we can probably avoid allocations here, if we can assume that __ kwargs are at always at the beginning/end of the sorted kwargs
 
-			kwargs = filter(p->!startswith(string(p[1]),"__"), kwargs) # TODO: we can probably avoid allocations here, if we can assume that __ kwargs are at always at the beginning/end of the sorted kwargs
+				res = f(args...; kwargs...)
+				@assert res !== nothing "Computation of $f returned nothing"
+			catch e
+				if e isa InterruptException
+					res = e
+				else
+					# TODO: Update progress_item text
 
-			res = f(args...; kwargs...)
-			@assert res !== nothing "Computation of $f returned nothing"
-			remove_item!(progress_display, progress_item)
+					# TODO: Do not show anything/much here, it will be shown later instead
+					@warn "Error computing $f"
+					bt = Base.catch_backtrace()
+					# Base.showerror(stdout, e, bt)
+					# Base.showerror(stdout, e)
 
-		catch e
-			if e isa InterruptException
-				res = e
-			else
-				# TODO: Do not show anything/much here, it will be shown later instead
-				@warn "Error computing $f"
-				bt = Base.catch_backtrace()
-				# Base.showerror(stdout, e, bt)
-				# Base.showerror(stdout, e)
+					io = IOBuffer()
+					Base.showerror(IOContext(io, :color=>true), e)
+					message = String(take!(io))
+					@warn message
 
-				io = IOBuffer()
-				Base.showerror(IOContext(io, :color=>true), e)
-				message = String(take!(io))
-				@warn message
-
-				# println()
-				res = ProcessingException(sa, e, stacktrace(bt))
+					# println()
+					res = ProcessingException(sa, e, stacktrace(bt))
+				end
 			end
 		end
+		remove_item!(progress_display, progress_item)
 		done[] = true
 		notify(ev)
 		res
@@ -227,9 +231,13 @@ function compute(scheduler::Scheduler, sa::SpecArgs, upstream::IdDict{Spec,Any})
 
 	res = fetch(task)
 
-	add_item!(progress_display, ProgressItem(styled"{green,light:⋅ Deduplicating} $f"; finished=true))
+	deduplication_progress_item = add_item!(progress_display, ProgressItem(styled"{green,light:⋅ Deduplicating} $f"))
 	print_display(progress_display)
+
 	res = deduplicate!(scheduler.deduplicator, res) # TODO: Use periodic_wait and show time used
+
+	remove_item!(progress_display, deduplication_progress_item)
+	print_display(progress_display)
 
 	res
 end
@@ -451,10 +459,8 @@ end
 
 function _reset_progress_display!(scheduler, sa::SpecArgs)
 	empty!(scheduler.progress_display)
-	add_item!(scheduler.progress_display, ProgressItem(styled"{blue:Scheduler ($(sa.f))}"))
+	add_item!(scheduler.progress_display, ProgressItem(styled"{blue:Scheduler: }" * ReproducibleJobs.styled_function_name(sa.f)))
 	scheduler.lru_display_item[] = add_item!(scheduler.progress_display, ProgressItem("LRU Status"; show_time=false))
-	# scheduler.preprocess_display_item[] = add_item!(scheduler.progress_display, ProgressItem(; show_time=false))
-	# scheduler.deduplication_display_item[] = add_item!(scheduler.progress_display, ProgressItem(; show_time=false))
 end
 
 

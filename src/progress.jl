@@ -16,15 +16,12 @@ abstract type AbstractProgressItem end
 mutable struct ProgressItem <: AbstractProgressItem
 	text::Union{String,AnnotatedString}
 	start_time::Float64 # set to 0 to not show time
-	finish_time::Float64 # set to Inf if not yet finished
+	finished::Bool
 end
-function ProgressItem(text; show_time=true, finished=false)
-	t = show_time ? time() : 0.0
-	ProgressItem(text, t, finished ? t : Inf)
+function ProgressItem(text; show_time=true)
+	ProgressItem(text, show_time ? time() : 0.0, false)
 end
 ProgressItem(; kwargs...) = ProgressItem(""; kwargs...)
-
-get_run_time(item::ProgressItem, t) = iszero(item.start_time) ? 0.0 : min(t, item.finish_time)-item.start_time
 
 
 
@@ -86,7 +83,7 @@ add_item!(pd::ProgressDisplay, item::ProgressItem) = (put!(pd.channel, ProgressM
 _set_text!(item::ProgressItem, text::Union{String,AnnotatedString}) = item.text = text
 set_text!(pd::ProgressDisplay, item::ProgressItem, text::Union{String,AnnotatedString}) = (put!(pd.channel, ProgressMessageSetText(item, text)); nothing)
 
-_set_finish_time!(item::ProgressItem, t) = item.finish_time = t
+_set_finished!(item::ProgressItem) = item.finished = true
 remove_item!(pd::ProgressDisplay, item::ProgressItem) = (put!(pd.channel, ProgressMessageRemoveItem(item, time())); nothing)
 
 
@@ -105,6 +102,19 @@ function print_duration(io, s::Real)
 end
 
 
+function print_item(io, item::ProgressItem, t; finish_time=nothing)
+	isempty(item.text) || print(io, item.text, " ")
+
+	if !iszero(item.start_time)
+		# Show runtime
+		run_time = @something(finish_time, t) - item.start_time
+		print_duration(io, run_time)
+	end
+	finish_time !== nothing && print(io, styled"{bright_black:Done.}")
+	println(io)
+end
+
+
 function print_display(io, pd::ProgressDisplay)
 	move_cursor_up(io, pd.nlines)
 
@@ -119,17 +129,8 @@ function print_display(io, pd::ProgressDisplay)
 			_set_text!(msg.item, msg.text)
 		else#if msg isa ProgressMessageRemoveItem
 			msg::ProgressMessageRemoveItem
-			let item = msg.item
-				_set_finish_time!(item, msg.t) # mark for removal
-
-				# print item here! (it will be removed from the list later)
-				# TODO: Improve code reuse?
-				print(io, item.text, " ")
-				print_duration(io, get_run_time(item, t))
-				print(io, styled"{bright_black:Done.}")
-				println(io)
-			end
-
+			_set_finished!(msg.item) # mark for removal
+			print_item(io, msg.item, t; finish_time=msg.t) # print removed items first (in order of removal)
 		end
 	end
 
@@ -138,17 +139,12 @@ function print_display(io, pd::ProgressDisplay)
 	prev = pd.head
 	curr = prev.next
 	while curr !== nothing
-		if curr.item.finish_time !== Inf # TODO: Use bool instead to mark removal
+		if curr.item.finished
 			# Remove item
 			prev.next = curr.next
 			curr === pd.tail && (pd.tail = prev)
 		else
-			let item = curr.item
-				# TODO: Improve code reuse?
-				print(io, item.text, " ")
-				print_duration(io, get_run_time(item, t))
-				println(io)
-			end
+			print_item(io, curr.item, t)
 			nlines += 1
 			prev = curr
 		end
