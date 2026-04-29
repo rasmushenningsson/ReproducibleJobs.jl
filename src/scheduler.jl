@@ -65,7 +65,10 @@ function evict_results!(scheduler::Scheduler; evict_all=true)
 
 	r_sz_str = _byte_size_string(lru.total_size)
 	c_sz_str = _byte_size_string(mem_capacity)
-	set_text!(scheduler.lru_display_item[], "⋅ LRU: $(length(lru))/$item_capacity items ($r_sz_str/$c_sz_str)")
+	# set_text!(scheduler.lru_display_item[], "⋅ LRU: $(length(lru))/$item_capacity items ($r_sz_str/$c_sz_str)")
+	if scheduler.lru_display_item[] !== nothing
+		set_text!(scheduler.progress_display, scheduler.lru_display_item[], "⋅ LRU: $(length(lru))/$item_capacity items ($r_sz_str/$c_sz_str)")
+	end
 
 	scheduler
 end
@@ -141,7 +144,8 @@ function preprocess(scheduler::Scheduler, sa::SpecArgs)
 		res = ProcessingException(sa, e, stacktrace(bt))
 	end
 
-	set_text!(preprocess_display_item; finished=true)
+	# set_text!(preprocess_display_item; finished=true)
+	remove_item!(scheduler.progress_display, preprocess_display_item)
 	print_display(scheduler.progress_display)
 	# set_text!(preprocess_display_item, ""; disappear_duration=0.0)
 
@@ -189,7 +193,7 @@ function compute(scheduler::Scheduler, sa::SpecArgs, upstream::IdDict{Spec,Any})
 
 			res = f(args...; kwargs...)
 			@assert res !== nothing "Computation of $f returned nothing"
-			set_text!(progress_item; finished=true)
+			remove_item!(progress_display, progress_item)
 
 		catch e
 			if e isa InterruptException
@@ -223,7 +227,7 @@ function compute(scheduler::Scheduler, sa::SpecArgs, upstream::IdDict{Spec,Any})
 
 	res = fetch(task)
 
-	add_item!(scheduler.progress_display, ProgressItem(styled"{green,light:⋅ Deduplicating} $f"; finished=true))
+	add_item!(progress_display, ProgressItem(styled"{green,light:⋅ Deduplicating} $f"; finished=true))
 	print_display(progress_display)
 	res = deduplicate!(scheduler.deduplicator, res) # TODO: Use periodic_wait and show time used
 
@@ -478,9 +482,10 @@ process!(scheduler::Scheduler, spec::Spec; kwargs...) = process!(scheduler, get_
 
 
 function forward_once!(scheduler::Scheduler, spec::Spec; @nospecialize(parent_f=nothing), processing_errors_throw=true, external_call=true)
-	external_call && _reset_progress_display!(scheduler, s)
+	sa = get_sa(spec)
+	external_call && _reset_progress_display!(scheduler, sa)
 	evict_results!(scheduler; evict_all=false)
-	res, _ = process_once!(scheduler, get_sa(spec), :forward; parent_f)
+	res, _ = process_once!(scheduler, sa, :forward; parent_f)
 	processing_errors_throw && res isa Exception && throw(res)
 	res
 end

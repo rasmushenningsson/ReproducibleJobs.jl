@@ -12,88 +12,84 @@ move_cursor_up(n; kwargs...) = move_cursor_up(stdout, n; kwargs...)
 abstract type AbstractProgressItem end
 
 
-struct DisplayItem
-	text::Union{String,AnnotatedString}
-	time::Float64
-	done::Bool
-end
-
 
 mutable struct ProgressItem <: AbstractProgressItem
-	lock::ReentrantLock
 	text::Union{String,AnnotatedString}
-	start_time::Float64
-	finish_time::Float64
+	start_time::Float64 # set to 0 to not show time
+	finish_time::Float64 # set to Inf if not yet finished
 end
-function ProgressItem(text; finished=false, show_time=true)
-	t = time()
-	start_time = show_time ? t : 0.0
-
-	if finished
-		ProgressItem(ReentrantLock(), text, start_time, t)
-	else
-		ProgressItem(ReentrantLock(), text, start_time, Inf)
-	end
+function ProgressItem(text; show_time=true, finished=false)
+	t = show_time ? time() : 0.0
+	ProgressItem(text, t, finished ? t : Inf)
 end
 ProgressItem(; kwargs...) = ProgressItem(""; kwargs...)
 
-function set_text!(item::ProgressItem, text::Union{Nothing,String,AnnotatedString}=nothing; finished=false)
-	lock(item.lock) do
-		if finished
-			t = time()
-			item.finish_time = t
-		end
-		text !== nothing && (item.text = text)
-		nothing
-	end
-end
-function get_display_item(item::ProgressItem, t::Float64)
-	lock(item.lock) do
-		run_time = iszero(item.start_time) ? 0.0 : min(t,item.finish_time)-item.start_time
-		done = item.finish_time != Inf
-		DisplayItem(item.text, run_time, done)
-	end
-end
+get_run_time(item::ProgressItem, t) = iszero(item.start_time) ? 0.0 : min(t, item.finish_time)-item.start_time
+
 
 
 
 mutable struct ListNode{T}
-	item::T
+	const item::T
 	next::Union{Nothing,ListNode{T}}
 end
 ListNode(item) = ListNode(item, nothing)
 
 
 
+struct ProgressMessageAddItem
+	item::ProgressItem
+	# TODO: optional parent
+end
+
+struct ProgressMessageSetText
+	item::ProgressItem
+	text::Union{String,AnnotatedString}
+end
+
+struct ProgressMessageRemoveItem
+	item::ProgressItem
+	t::Float64 # Time at message creation
+end
+
+
+const ProgressMessageUnion = Union{ProgressMessageAddItem, ProgressMessageSetText, ProgressMessageRemoveItem}
+
 mutable struct ProgressDisplay
-	lock::ReentrantLock
 	nlines::Int # the number of active lines
-	head::ListNode{ProgressItem}
+	head::ListNode{ProgressItem} # dummy item, we always ignore the first item in the list
 	tail::ListNode{ProgressItem}
-	display_items::Vector{DisplayItem}
-	removed_items::Vector{DisplayItem}
+	channel::Channel{ProgressMessageUnion}
 end
 function ProgressDisplay()
 	head = ListNode(ProgressItem())
-	ProgressDisplay(ReentrantLock(), 0, head, head, [], [])
+	ProgressDisplay(0, head, head, Channel{ProgressMessageUnion}(Inf))
 end
 
 function Base.empty!(pd::ProgressDisplay)
-	lock(pd.lock) do
-		pd.nlines = 0
-		pd.head = pd.tail = ListNode(ProgressItem())
-		empty!(pd.display_items)
-	end
+	pd.nlines = 0
+	pd.head = pd.tail = ListNode(ProgressItem())
+	empty!(pd.channel)
 end
 
-function add_item!(pd::ProgressDisplay, item::ProgressItem)
-	lock(pd.lock) do
-		li = ListNode(item)
-		pd.tail.next = li
-		pd.tail = li
-		item
-	end
+# Inserts at the front - because this gives the correct print order.
+function _add_item!(pd::ProgressDisplay, item::ProgressItem)
+	li = ListNode(item)
+	# head is a dummy item, so we insert just after it
+	li.next = pd.head.next
+	pd.head.next = li
+	pd.tail === pd.head && (pd.tail = li)
+	item
 end
+add_item!(pd::ProgressDisplay, item::ProgressItem) = (put!(pd.channel, ProgressMessageAddItem(item)); item)
+
+_set_text!(item::ProgressItem, text::Union{String,AnnotatedString}) = item.text = text
+set_text!(pd::ProgressDisplay, item::ProgressItem, text::Union{String,AnnotatedString}) = (put!(pd.channel, ProgressMessageSetText(item, text)); nothing)
+
+_set_finish_time!(item::ProgressItem, t) = item.finish_time = t
+remove_item!(pd::ProgressDisplay, item::ProgressItem) = (put!(pd.channel, ProgressMessageRemoveItem(item, time())); nothing)
+
+
 
 
 function print_duration(io, s::Real)
@@ -110,39 +106,54 @@ end
 
 
 function print_display(io, pd::ProgressDisplay)
-	empty!(pd.display_items)
-	empty!(pd.removed_items)
+	move_cursor_up(io, pd.nlines)
 
-	n = pd.nlines
-	t = lock(pd.lock) do
-		t = time()
-		prev = pd.head
-		curr = prev.next
-		while curr !== nothing
-			di = get_display_item(curr.item, t)
-			
-			if di.done
-				isempty(di.text) || push!(pd.removed_items, di)
-				prev.next = curr.next
-				curr === pd.tail && (pd.tail = prev)
-			else
-				isempty(di.text) || push!(pd.display_items, di)
-				prev = curr
+	t = time()
+
+	# Process item updates (isempty!+take! works since we only have one consumer task)
+	while !isempty(pd.channel)
+		msg = take!(pd.channel)
+		if msg isa ProgressMessageAddItem
+			_add_item!(pd, msg.item)
+		elseif msg isa ProgressMessageSetText
+			_set_text!(msg.item, msg.text)
+		else#if msg isa ProgressMessageRemoveItem
+			msg::ProgressMessageRemoveItem
+			let item = msg.item
+				_set_finish_time!(item, msg.t) # mark for removal
+
+				# print item here! (it will be removed from the list later)
+				# TODO: Improve code reuse?
+				print(io, item.text, " ")
+				print_duration(io, get_run_time(item, t))
+				print(io, styled"{bright_black:Done.}")
+				println(io)
 			end
-			curr = curr.next
+
 		end
-		pd.nlines = length(pd.display_items)
-
 	end
 
-	move_cursor_up(io, n)
-
-	for di in Iterators.flatten((Iterators.reverse(pd.removed_items), Iterators.reverse(pd.display_items)))
-		print(io, di.text, " ")
-		print_duration(io, di.time)
-		di.done && print(io, styled"{bright_black:Done.}")
-		println(io)
+	# Print remaining items
+	nlines = 0
+	prev = pd.head
+	curr = prev.next
+	while curr !== nothing
+		if curr.item.finish_time !== Inf # TODO: Use bool instead to mark removal
+			# Remove item
+			prev.next = curr.next
+			curr === pd.tail && (pd.tail = prev)
+		else
+			let item = curr.item
+				# TODO: Improve code reuse?
+				print(io, item.text, " ")
+				print_duration(io, get_run_time(item, t))
+				println(io)
+			end
+			nlines += 1
+			prev = curr
+		end
+		curr = curr.next
 	end
-
+	pd.nlines = nlines
 end
 print_display(pd::ProgressDisplay) = print_display(stdout, pd)
