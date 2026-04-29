@@ -244,10 +244,14 @@ end
 Base.propertynames(::Spec, private::Bool=false) =
 	private ? (:f, :args, :kwargs, :spec) : (:f, :args, :kwargs)
 
-
 get_sa(spec::Spec) = spec.sa
-
 SpecArgs(spec::Spec) = get_sa(spec)
+
+
+_get_kwarg(f, spec::Spec, key::Symbol) = _get_kwarg(f, get_sa(spec), key)
+_get_kwarg(spec::Spec, key::Symbol, default) = _get_kwarg(get_sa(spec), key, default)
+_get_kwarg(spec::Spec, key::Symbol) = _get_kwarg(get_sa(spec), key)
+
 
 
 function transfer_op(src::Spec, dest::Spec)
