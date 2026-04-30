@@ -9,11 +9,12 @@ end
 struct WorkPreprocess
 	sa::SpecArgs
 end
-struct WorkDeduplicate
+struct WorkDeduplicateResult
+	sa::SpecArgs
 	obj::Any
 end
 
-const WorkUnion = Union{WorkCompute, WorkPreprocess, WorkDeduplicate}
+const WorkUnion = Union{WorkCompute, WorkPreprocess, WorkDeduplicateResult}
 
 
 mutable struct Scheduler{H}
@@ -21,6 +22,7 @@ mutable struct Scheduler{H}
 
 	cache::Cache{SpecArgs,H} # sa -> result stored on disk
 
+	work_task::Union{Task,Nothing}
 	work_channel::Channel{WorkUnion}
 	result_channel::Channel{Any} # later maybe change to Tuple{SpecArgs,Any} if we have multiple worker tasks
 
@@ -47,7 +49,7 @@ function Scheduler(cache::Cache{SpecArgs,H};
 	work_channel = Channel{WorkUnion}(Inf)
 	result_channel = Channel{Any}(Inf)
 
-	scheduler = Scheduler{H}(cache.deduplicator, cache, work_channel, result_channel, Ref(lru_item_capacity), Ref(lru_mem_capacity), Ref(lru_mem_fraction), LRUCache{SpecArgs}(), ProgressDisplay(), Ref{Union{ProgressItem,Nothing}}(nothing))
+	scheduler = Scheduler{H}(cache.deduplicator, cache, nothing, work_channel, result_channel, Ref(lru_item_capacity), Ref(lru_mem_capacity), Ref(lru_mem_fraction), LRUCache{SpecArgs}(), ProgressDisplay(), Ref{Union{ProgressItem,Nothing}}(nothing))
 
 	# Move to inner constructor?
     finalizer(scheduler) do s
@@ -55,14 +57,12 @@ function Scheduler(cache::Cache{SpecArgs,H};
         close(s.result_channel)
     end
 
-    Threads.@spawn worker_task(scheduler, work_channel, result_channel)
-
-
 	scheduler
 end
 Scheduler(deduplicator::Deduplicator{H}; lru_item_capacity=nothing, lru_mem_capacity=nothing, lru_mem_fraction=nothing, kwargs...) where H =
 	Scheduler(Cache(SpecArgs, deduplicator; kwargs...); lru_item_capacity, lru_mem_capacity, lru_mem_fraction)
 Scheduler(; kwargs...) = Scheduler(Deduplicator(); kwargs...)
+
 
 
 function set_lru_item_capacity!(scheduler::Scheduler, capacity)
@@ -109,6 +109,15 @@ function Base.empty!(scheduler::Scheduler)
 	evict_results!(scheduler)
 	force_empty!(scheduler.lru)
 	# empty!(scheduler.deduplicator) # Hmm. This is problematic, because the user can still have specs, and the deduplicator shouldn't lose track of those.
+
+	# Shut down the previous worker task
+	close(scheduler.work_channel)
+	close(scheduler.result_channel)
+	scheduler.work_task = nothing
+
+	scheduler.work_channel = Channel{WorkUnion}(Inf)
+	scheduler.result_channel = Channel{Any}(Inf)
+
 	scheduler
 end
 
@@ -139,6 +148,15 @@ end
 
 
 
+function ensure_work_task_is_running!(scheduler::Scheduler)
+	if scheduler.work_task === nothing || istaskdone(scheduler.work_task) || istaskfailed(scheduler.work_task)
+		empty!(scheduler.work_channel)
+		empty!(scheduler.result_channel)
+		scheduler.work_task = Threads.@spawn work_runner(scheduler, scheduler.work_channel, scheduler.result_channel)
+	end
+	scheduler
+end
+
 function _short_exception_string(e::Exception; n::Int=40)
 	n = max(n,3) # need space for ellipsis
 	s = string(e)
@@ -148,75 +166,60 @@ function _short_exception_string(e::Exception; n::Int=40)
 end
 
 
-
 # Hmm. Maybe better to not pass scheduler - seems like that might prevent GC of scheduler if restarted.
-function worker_task(scheduler::Scheduler, work_channel::Channel{WorkUnion}, result_channel::Channel{Any})
-	try
-		@info "Spawned worker task"
-		progress_display = scheduler.progress_display
+function work_runner(scheduler::Scheduler, work_channel::Channel{WorkUnion}, result_channel::Channel{Any})
+	@info "Spawned work task"
+	progress_display = scheduler.progress_display
 
-		for work in work_channel # will exit when work_channel is closed
-			progress_item = nothing
+	for work in work_channel # will exit when work_channel is closed
+		progress_item = nothing
+		sa = work.sa::SpecArgs
 
-			local res
-			try
-				# @info "Got work type: $(typeof(work))"
-				# println()
-				# println()
-				# println()
-				# println()
-				# println()
-				# println()
+		local res
+		try
+			f = sa.f
 
-				# NB: Deduplication and thus also Preprocessing are not thread-safe and is thus currently assumed to not happen in parallel
-				if work isa WorkPreprocess
-					sa = work.sa
-					f = sa.f
-					progress_item = add_item!(progress_display, ProgressItem(styled"{blue:⋅ Preprocessing} " * ReproducibleJobs.styled_function_name(f)))
-					res = f(sa.args...; sa.kwargs...)
-					@assert res !== nothing "Preprocessing of $f returned nothing"
-					remove_item!(progress_display, progress_item)
-				elseif work isa WorkCompute
-					sa = work.sa
-					f = sa.f
-					progress_item = add_item!(progress_display, ProgressItem(styled"{blue:⋅ Running} " * ReproducibleJobs.styled_function_name(f)))
+			# NB: Deduplication and thus also Preprocessing are not thread-safe and is thus currently assumed to not happen in parallel
+			if work isa WorkPreprocess
+				progress_item = add_item!(progress_display, ProgressItem(styled"{blue:⋅ Preprocessing} " * ReproducibleJobs.styled_function_name(f)))
+				res = f(sa.args...; sa.kwargs...)
+				@assert res !== nothing "Preprocessing of $f returned nothing"
+				remove_item!(progress_display, progress_item)
+			elseif work isa WorkCompute
+				progress_item = add_item!(progress_display, ProgressItem(styled"{blue:⋅ Running} " * ReproducibleJobs.styled_function_name(f)))
 
-					v = _get_kwarg(sa, :__version, nothing)
-					@assert v !== nothing "__version kwarg must be provided for all (non-preprocessing) specs."
+				v = _get_kwarg(sa, :__version, nothing)
+				@assert v !== nothing "__version kwarg must be provided for all (non-preprocessing) specs."
 
-					kwargs = Iterators.filter(p->!startswith(string(p[1]),"__"), sa.kwargs)
-					res = f(sa.args...; kwargs...)
-					@assert res !== nothing "Computation of $f returned nothing"
-					remove_item!(progress_display, progress_item)
-				elseif work isa WorkDeduplicate
-					# TODO: Only show deduplication message if it takes time (>0.1s).
-					progress_item = add_item!(progress_display, ProgressItem(styled"{blue:⋅ Deduplicating}"))
-					res = deduplicate!(scheduler.deduplicator, work.obj)
-					remove_item!(progress_display, progress_item)
-				end
-			catch e
-				exception_text = _short_exception_string(e)
-				progress_item !== nothing && remove_item!(progress_display, progress_item, styled"{red:$exception_text}")
-				if e isa InterruptException
-					res = e
-				else
-					# TODO: Where to show error?
-					# io = IOBuffer()
-					# Base.showerror(IOContext(io, :color=>true), e)
-					# message = String(take!(io))
-					# @warn message
-
-					# Do not show anything/much here, it will be shown later instead.
-					bt = Base.catch_backtrace()
-					res = ProcessingException(sa, e, stacktrace(bt))
-				end
+				kwargs = Iterators.filter(p->!startswith(string(p[1]),"__"), sa.kwargs)
+				res = f(sa.args...; kwargs...)
+				@assert res !== nothing "Computation of $f returned nothing"
+				remove_item!(progress_display, progress_item)
+			elseif work isa WorkDeduplicateResult
+				# TODO: Only show deduplication message if it takes time (>0.1s).
+				progress_item = add_item!(progress_display, ProgressItem(styled"{blue:⋅ Deduplicating }" * ReproducibleJobs.styled_function_name(f)))
+				res = deduplicate!(scheduler.deduplicator, work.obj)
+				remove_item!(progress_display, progress_item)
 			end
+		catch e
+			exception_text = _short_exception_string(e)
+			progress_item !== nothing && remove_item!(progress_display, progress_item, styled"{red:$exception_text}")
+			if e isa InterruptException
+				res = e
+			else
+				# TODO: Where to show error?
+				# io = IOBuffer()
+				# Base.showerror(IOContext(io, :color=>true), e)
+				# message = String(take!(io))
+				# @warn message
 
-			put!(result_channel, res)
+				# Do not show anything/much here, it will be shown later instead.
+				bt = Base.catch_backtrace()
+				res = ProcessingException(sa, e, stacktrace(bt))
+			end
 		end
-	catch e
-		@warn "Internal error: $e"
-		Base.showerror(stderr, e)
+
+		put!(result_channel, res)
 	end
 end
 
@@ -236,6 +239,12 @@ function process_work(scheduler, work::WorkUnion)
 	local res
 
 	while !done
+		if istaskfailed(scheduler.work_task) || istaskdone(scheduler.work_task)
+			done = true
+			fetch(scheduler.work_task) # will throw if the task threw an exception
+			error("Unknown work_task failure")
+		end
+
 		res = take!(scheduler.result_channel)
 		if res === nothing # Timed out
 			print_display(progress_display)
@@ -252,7 +261,7 @@ preprocess(::Scheduler, err::Exception) = err
 
 function preprocess(scheduler::Scheduler, sa::SpecArgs)
 	res = process_work(scheduler, WorkPreprocess(sa))
-	res = process_work(scheduler, WorkDeduplicate(res))
+	res = process_work(scheduler, WorkDeduplicateResult(sa, res))
 end
 
 
@@ -261,7 +270,7 @@ compute(::Scheduler, err::Exception) = err
 
 function compute(scheduler::Scheduler, sa::SpecArgs)
 	res = process_work(scheduler, WorkCompute(sa))
-	res = process_work(scheduler, WorkDeduplicate(res))
+	res = process_work(scheduler, WorkDeduplicateResult(sa, res))
 end
 
 
@@ -498,7 +507,10 @@ end
 
 
 function process!(scheduler::Scheduler, sa::SpecArgs, op::Symbol; @nospecialize(parent_f=nothing), processing_errors_throw=true, external_call=true)
-	external_call && _reset_progress_display!(scheduler, sa)
+	if external_call
+		ensure_work_task_is_running!(scheduler)
+		_reset_progress_display!(scheduler, sa)
+	end
 	evict_results!(scheduler; evict_all=false)
 
 	while true
@@ -522,7 +534,10 @@ process!(scheduler::Scheduler, spec::Spec; kwargs...) = process!(scheduler, get_
 
 function forward_once!(scheduler::Scheduler, spec::Spec; @nospecialize(parent_f=nothing), processing_errors_throw=true, external_call=true)
 	sa = get_sa(spec)
-	external_call && _reset_progress_display!(scheduler, sa)
+	if external_call
+		ensure_work_task_is_running!(scheduler)
+		_reset_progress_display!(scheduler, sa)
+	end
 	evict_results!(scheduler; evict_all=false)
 	res, _ = process_once!(scheduler, sa, :forward; parent_f)
 	processing_errors_throw && res isa Exception && throw(res)
