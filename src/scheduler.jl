@@ -106,19 +106,26 @@ function propagate_error(sa::SpecArgs, vals)::Union{Nothing, ProcessingException
 end
 
 
-preprocess(::Scheduler, err::ProcessingException) = err
+
+function _short_exception_string(e::Exception; n::Int=40)
+	n = max(n,3) # need space for ellipsis
+	s = string(e)
+	s = replace(s, r"\r\n|\r|\n" => " ") # replace line breaks with space
+	length(s) > n && (s = s[1:n-3]*"...")
+	s
+end
+
+
+
+preprocess(::Scheduler, err::Exception) = err
 
 function preprocess(scheduler::Scheduler, sa::SpecArgs)
 	f = sa.f
 
-	# preprocess_display_item = add_item!(scheduler.progress_display, ProgressItem(styled"{green,light:⋅ Preprocessing} $f"; show_time=false))
-	# add_item!(scheduler.progress_display, ProgressItem(styled"{green,light:⋅ Preprocessing} $f"; finished=true))
-	# preprocess_display_item = add_item!(scheduler.progress_display, ProgressItem(styled"{green,light:⋅ Preprocessing} $f"))
-	preprocess_display_item = add_item!(scheduler.progress_display, ProgressItem(styled"{blue:⋅ Preprocessing} " * ReproducibleJobs.styled_function_name(sa.f)))
-	print_display(scheduler.progress_display)
+	progress_display = scheduler.progress_display
 
-	# set_text!(scheduler.preprocess_display_item[], styled"{green,light:⋅ Preprocessing} $f")
-	# print_display(scheduler.progress_display)
+	progress_item = add_item!(progress_display, ProgressItem(styled"{blue:⋅ Preprocessing} " * ReproducibleJobs.styled_function_name(f)))
+	print_display(progress_display)
 
 	local res
 
@@ -129,26 +136,26 @@ function preprocess(scheduler::Scheduler, sa::SpecArgs)
 		@assert res !== nothing "Preprocessing of $f returned nothing"
 
 		res = deduplicate!(scheduler.deduplicator, res) # needed because forwarding can return a value
+		remove_item!(progress_display, progress_item)
 	catch e
-		# TODO: Do not show anything/much here, it will be shown later instead
-		@warn "Error preprocessing $f"
-		bt = Base.catch_backtrace()
-		# Base.showerror(stdout, e, bt)
-		# Base.showerror(stdout, e)
-		# println()
+		exception_text = _short_exception_string(e)
+		remove_item!(progress_display, progress_item, styled"{red:$exception_text}")
+		if e isa InterruptException
+			res = e
+		else
+			# TODO: Where to show error?
+			# io = IOBuffer()
+			# Base.showerror(IOContext(io, :color=>true), e)
+			# message = String(take!(io))
+			# @warn message
 
-		io = IOBuffer()
-		Base.showerror(IOContext(io, :color=>true), e)
-		message = String(take!(io))
-		@warn message
-
-		res = ProcessingException(sa, e, stacktrace(bt))
+			# Do not show anything/much here, it will be shown later instead.
+			bt = Base.catch_backtrace()
+			res = ProcessingException(sa, e, stacktrace(bt))
+		end
 	end
 
-	# set_text!(preprocess_display_item; finished=true)
-	remove_item!(scheduler.progress_display, preprocess_display_item)
-	print_display(scheduler.progress_display)
-	# set_text!(preprocess_display_item, ""; disappear_duration=0.0)
+	print_display(progress_display)
 
 	res
 end
@@ -160,6 +167,8 @@ function replace_dependencies(sa::SpecArgs, upstream::IdDict{Spec,Any})
 end
 
 
+
+compute(::Scheduler, err::Exception) = err
 
 function compute(scheduler::Scheduler, sa::SpecArgs)
 	f = sa.f
@@ -173,7 +182,7 @@ function compute(scheduler::Scheduler, sa::SpecArgs)
 	# Worker
 	task = Threads.@spawn begin # TODO: Keep a task alive instead
 		# @info "Running $f"
-		progress_item_text = styled"{blue:⋅ Running} " * ReproducibleJobs.styled_function_name(sa.f)
+		progress_item_text = styled"{blue:⋅ Running} " * ReproducibleJobs.styled_function_name(f)
 		progress_item = add_item!(progress_display, ProgressItem(progress_item_text))
 
 		try
@@ -188,10 +197,7 @@ function compute(scheduler::Scheduler, sa::SpecArgs)
 			@assert res !== nothing "Computation of $f returned nothing"
 			remove_item!(progress_display, progress_item)
 		catch e
-			exception_text = string(e)
-			exception_text = replace(exception_text, r"\r\n|\r|\n" => " ") # replace line breaks with space
-			length(exception_text) > 40 && (exception_text = exception_text[1:37]*"...")
-
+			exception_text = _short_exception_string(e)
 			remove_item!(progress_display, progress_item, styled"{red:$exception_text}")
 			if e isa InterruptException
 				res = e
@@ -239,9 +245,7 @@ function _fetch_and_compute!(scheduler, sa::SpecArgs, deps::Vector{Spec})
 	fetched_deps = fetch_dependencies!(scheduler, deps)
 
 	if !isempty(fetched_deps)
-		res = replace_dependencies(sa, fetched_deps)::Union{SpecArgs,ProcessingException}
-		res isa ProcessingException && return res
-		sa = res::SpecArgs
+		sa = replace_dependencies(sa, fetched_deps)::Union{SpecArgs,ProcessingException,InterruptException}
 	end
 	res = compute(scheduler, sa)
 	@assert !(res isa Spec)
@@ -339,14 +343,14 @@ function _process_once!(scheduler::Scheduler, sa::SpecArgs, deps::Vector{Spec})
 	forwarded_deps = process_dependencies!(scheduler, deps; parent_f=sa.f)
 
 	if !isempty(forwarded_deps)
-		sa = replace_dependencies(sa, forwarded_deps)::Union{SpecArgs,ProcessingException}
+		sa = replace_dependencies(sa, forwarded_deps)::Union{SpecArgs,ProcessingException,InterruptException}
 	end
+
+	sa isa Exception && return sa
 
 	if is_preprocessing(sa)
 		preprocess(scheduler, sa)
 	else
-		sa isa ProcessingException && return sa
-
 		sa = deduplicate!(scheduler.deduplicator, sa)
 		Spec(sa, :call)
 	end
