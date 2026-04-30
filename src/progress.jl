@@ -47,6 +47,7 @@ end
 struct ProgressMessageRemoveItem
 	item::ProgressItem
 	t::Float64 # Time at message creation
+	text::Union{String,AnnotatedString}
 end
 
 
@@ -84,7 +85,8 @@ _set_text!(item::ProgressItem, text::Union{String,AnnotatedString}) = item.text 
 set_text!(pd::ProgressDisplay, item::ProgressItem, text::Union{String,AnnotatedString}) = (put!(pd.channel, ProgressMessageSetText(item, text)); nothing)
 
 _set_finished!(item::ProgressItem) = item.finished = true
-remove_item!(pd::ProgressDisplay, item::ProgressItem) = (put!(pd.channel, ProgressMessageRemoveItem(item, time())); nothing)
+remove_item!(pd::ProgressDisplay, item::ProgressItem, text=styled"{bright_black:Done}") =
+	(put!(pd.channel, ProgressMessageRemoveItem(item, time(), text)); nothing)
 
 
 
@@ -102,7 +104,7 @@ function print_duration(io, s::Real)
 end
 
 
-function print_item(io, item::ProgressItem, t; finish_time=nothing)
+function print_item(io, item::ProgressItem, t; finish_time=nothing, finish_text=nothing)
 	isempty(item.text) || print(io, item.text, " ")
 
 	if !iszero(item.start_time)
@@ -110,7 +112,7 @@ function print_item(io, item::ProgressItem, t; finish_time=nothing)
 		run_time = @something(finish_time, t) - item.start_time
 		print_duration(io, run_time)
 	end
-	finish_time !== nothing && print(io, styled"{bright_black:Done.}")
+	finish_text !== nothing && print(io, finish_text)
 	println(io)
 end
 
@@ -130,7 +132,7 @@ function print_display(io, pd::ProgressDisplay)
 		else#if msg isa ProgressMessageRemoveItem
 			msg::ProgressMessageRemoveItem
 			_set_finished!(msg.item) # mark for removal
-			print_item(io, msg.item, t; finish_time=msg.t) # print removed items first (in order of removal)
+			print_item(io, msg.item, t; finish_time=msg.t, finish_text=msg.text) # print removed items first (in order of removal)
 		end
 	end
 

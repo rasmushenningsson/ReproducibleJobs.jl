@@ -67,7 +67,7 @@ function evict_results!(scheduler::Scheduler; evict_all=true)
 	c_sz_str = _byte_size_string(mem_capacity)
 	# set_text!(scheduler.lru_display_item[], "⋅ LRU: $(length(lru))/$item_capacity items ($r_sz_str/$c_sz_str)")
 	if scheduler.lru_display_item[] !== nothing
-		set_text!(scheduler.progress_display, scheduler.lru_display_item[], "⋅ LRU: $(length(lru))/$item_capacity items ($r_sz_str/$c_sz_str)")
+		set_text!(scheduler.progress_display, scheduler.lru_display_item[], styled"{blue:⋅ LRU:} $(length(lru))/$item_capacity items ($r_sz_str/$c_sz_str)")
 	end
 
 	scheduler
@@ -113,7 +113,8 @@ function preprocess(scheduler::Scheduler, sa::SpecArgs)
 
 	# preprocess_display_item = add_item!(scheduler.progress_display, ProgressItem(styled"{green,light:⋅ Preprocessing} $f"; show_time=false))
 	# add_item!(scheduler.progress_display, ProgressItem(styled"{green,light:⋅ Preprocessing} $f"; finished=true))
-	preprocess_display_item = add_item!(scheduler.progress_display, ProgressItem(styled"{green,light:⋅ Preprocessing} $f"))
+	# preprocess_display_item = add_item!(scheduler.progress_display, ProgressItem(styled"{green,light:⋅ Preprocessing} $f"))
+	preprocess_display_item = add_item!(scheduler.progress_display, ProgressItem(styled"{blue:⋅ Preprocessing} " * ReproducibleJobs.styled_function_name(sa.f)))
 	print_display(scheduler.progress_display)
 
 	# set_text!(scheduler.preprocess_display_item[], styled"{green,light:⋅ Preprocessing} $f")
@@ -152,7 +153,7 @@ function preprocess(scheduler::Scheduler, sa::SpecArgs)
 	res
 end
 
-function replace_forwarded(sa::SpecArgs, upstream::IdDict{Spec,Any})
+function replace_dependencies(sa::SpecArgs, upstream::IdDict{Spec,Any})
 	err = propagate_error(sa, values(upstream))
 	err !== nothing && return err
 	return map_args(x->get(upstream,x,nothing), sa)
@@ -160,7 +161,7 @@ end
 
 
 
-function compute(scheduler::Scheduler, sa::SpecArgs, upstream::IdDict{Spec,Any})
+function compute(scheduler::Scheduler, sa::SpecArgs)
 	f = sa.f
 
 	progress_display = scheduler.progress_display
@@ -172,52 +173,41 @@ function compute(scheduler::Scheduler, sa::SpecArgs, upstream::IdDict{Spec,Any})
 	# Worker
 	task = Threads.@spawn begin # TODO: Keep a task alive instead
 		# @info "Running $f"
-		# progress_item = add_item!(progress_display, ProgressItem("Running $f"))
-		progress_item = add_item!(progress_display, ProgressItem(styled"{green:⋅ Running} $f"))
+		progress_item_text = styled"{blue:⋅ Running} " * ReproducibleJobs.styled_function_name(sa.f)
+		progress_item = add_item!(progress_display, ProgressItem(progress_item_text))
 
-		err = propagate_error(sa, values(upstream))
-		if err !== nothing
-			res = err
-			# TODO: Update progress_item text
-		else
-			try
-				v = _get_kwarg(sa, :__version, nothing)
-				@assert v !== nothing "__version kwarg must be provided for all (non-preprocessing) specs."
+		try
+			v = _get_kwarg(sa, :__version, nothing)
+			@assert v !== nothing "__version kwarg must be provided for all (non-preprocessing) specs."
 
-				sa_replaced = map_args(x->get(upstream,x,nothing), sa)
-				args = sa_replaced.args
-				kwargs = sa_replaced.kwargs
+			args = sa.args
+			kwargs = sa.kwargs
+			kwargs = Iterators.filter(p->!startswith(string(p[1]),"__"), kwargs)
 
-				# Get rid of kwargs where the key starts with __
-				# kwargs = NamedTuple{filter(k->!startswith(string(k),"__"), keys(kwargs))}(kwargs)
+			res = f(args...; kwargs...)
+			@assert res !== nothing "Computation of $f returned nothing"
+			remove_item!(progress_display, progress_item)
+		catch e
+			exception_text = string(e)
+			exception_text = replace(exception_text, r"\r\n|\r|\n" => " ") # replace line breaks with space
+			length(exception_text) > 40 && (exception_text = exception_text[1:37]*"...")
 
-				kwargs = filter(p->!startswith(string(p[1]),"__"), kwargs) # TODO: we can probably avoid allocations here, if we can assume that __ kwargs are at always at the beginning/end of the sorted kwargs
+			remove_item!(progress_display, progress_item, styled"{red:$exception_text}")
+			if e isa InterruptException
+				res = e
+			else
+				# TODO: Where to show error?
+				# io = IOBuffer()
+				# Base.showerror(IOContext(io, :color=>true), e)
+				# message = String(take!(io))
+				# @warn message
 
-				res = f(args...; kwargs...)
-				@assert res !== nothing "Computation of $f returned nothing"
-			catch e
-				if e isa InterruptException
-					res = e
-				else
-					# TODO: Update progress_item text
-
-					# TODO: Do not show anything/much here, it will be shown later instead
-					@warn "Error computing $f"
-					bt = Base.catch_backtrace()
-					# Base.showerror(stdout, e, bt)
-					# Base.showerror(stdout, e)
-
-					io = IOBuffer()
-					Base.showerror(IOContext(io, :color=>true), e)
-					message = String(take!(io))
-					@warn message
-
-					# println()
-					res = ProcessingException(sa, e, stacktrace(bt))
-				end
+				# Do not show anything/much here, it will be shown later instead.
+				bt = Base.catch_backtrace()
+				res = ProcessingException(sa, e, stacktrace(bt))
 			end
 		end
-		remove_item!(progress_display, progress_item)
+
 		done[] = true
 		notify(ev)
 		res
@@ -231,7 +221,8 @@ function compute(scheduler::Scheduler, sa::SpecArgs, upstream::IdDict{Spec,Any})
 
 	res = fetch(task)
 
-	deduplication_progress_item = add_item!(progress_display, ProgressItem(styled"{green,light:⋅ Deduplicating} $f"))
+	# TODO: Only show deduplication message if it takes time (>0.1s).
+	deduplication_progress_item = add_item!(progress_display, ProgressItem(styled"{blue:⋅ Deduplicating} " * ReproducibleJobs.styled_function_name(sa.f)))
 	print_display(progress_display)
 
 	res = deduplicate!(scheduler.deduplicator, res) # TODO: Use periodic_wait and show time used
@@ -245,10 +236,16 @@ end
 
 
 function _fetch_and_compute!(scheduler, sa::SpecArgs, deps::Vector{Spec})
-	deps = fetch_dependencies!(scheduler, deps)
-	res = compute(scheduler, sa, deps)
+	fetched_deps = fetch_dependencies!(scheduler, deps)
+
+	if !isempty(fetched_deps)
+		res = replace_dependencies(sa, fetched_deps)::Union{SpecArgs,ProcessingException}
+		res isa ProcessingException && return res
+		sa = res::SpecArgs
+	end
+	res = compute(scheduler, sa)
 	@assert !(res isa Spec)
-	res
+	return res
 end
 
 
@@ -342,7 +339,7 @@ function _process_once!(scheduler::Scheduler, sa::SpecArgs, deps::Vector{Spec})
 	forwarded_deps = process_dependencies!(scheduler, deps; parent_f=sa.f)
 
 	if !isempty(forwarded_deps)
-		sa = replace_forwarded(sa, forwarded_deps)::Union{SpecArgs,ProcessingException}
+		sa = replace_dependencies(sa, forwarded_deps)::Union{SpecArgs,ProcessingException}
 	end
 
 	if is_preprocessing(sa)
@@ -460,7 +457,7 @@ end
 function _reset_progress_display!(scheduler, sa::SpecArgs)
 	empty!(scheduler.progress_display)
 	add_item!(scheduler.progress_display, ProgressItem(styled"{blue:Scheduler: }" * ReproducibleJobs.styled_function_name(sa.f)))
-	scheduler.lru_display_item[] = add_item!(scheduler.progress_display, ProgressItem("LRU Status"; show_time=false))
+	scheduler.lru_display_item[] = add_item!(scheduler.progress_display, ProgressItem(styled"{blue:LRU:}"; show_time=false))
 end
 
 
