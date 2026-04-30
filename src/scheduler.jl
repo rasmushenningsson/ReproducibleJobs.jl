@@ -47,7 +47,8 @@ get_lru_item_capacity() = get_lru_item_capacity(get_scheduler())
 function evict_results!(scheduler::Scheduler; evict_all=true)
 	lru = scheduler.lru
 	item_capacity = scheduler.lru_item_capacity[]
-	mem_capacity = min(scheduler.lru_mem_capacity[], round(Int, scheduler.lru_mem_fraction[]*Sys.free_memory())) # NB: Sys.free_memory is a bad way to measure this. Julia doesn't always return memory to the system.
+	# mem_capacity = min(scheduler.lru_mem_capacity[], round(Int, scheduler.lru_mem_fraction[]*Sys.free_memory())) # NB: Sys.free_memory is a bad way to measure this. Julia doesn't always return memory to the system.
+	mem_capacity = scheduler.lru_mem_capacity[]
 
 	initial_items = length(lru)
 	initial_size = lru.total_size
