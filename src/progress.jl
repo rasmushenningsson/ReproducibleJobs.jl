@@ -14,13 +14,16 @@ abstract type AbstractProgressItem end
 
 
 mutable struct ProgressItem <: AbstractProgressItem
+	type::Symbol # One of :text, :timed, :pending
 	text::Union{String,AnnotatedString}
-	start_time::Float64 # set to 0 to not show time
+	start_time::Float64
 	finished::Bool
+	function ProgressItem(type, text, start_time, finished)
+		@assert type in (:text, :timed, :pending)
+		new(type, text, start_time, finished)
+	end
 end
-function ProgressItem(text; show_time=true)
-	ProgressItem(text, show_time ? time() : 0.0, false)
-end
+ProgressItem(text; type=:timed) = ProgressItem(type, text, time(), false)
 ProgressItem(; kwargs...) = ProgressItem(""; kwargs...)
 
 
@@ -36,7 +39,7 @@ ListNode(item) = ListNode(item, nothing)
 
 struct ProgressMessageAddItem
 	item::ProgressItem
-	# TODO: optional parent
+	# TODO: optional parent for nesting
 end
 
 struct ProgressMessageSetText
@@ -50,8 +53,12 @@ struct ProgressMessageRemoveItem
 	text::Union{String,AnnotatedString}
 end
 
+struct ProgressMessageInfo
+	text::Union{String,AnnotatedString}
+end
 
-const ProgressMessageUnion = Union{ProgressMessageAddItem, ProgressMessageSetText, ProgressMessageRemoveItem}
+
+const ProgressMessageUnion = Union{ProgressMessageAddItem, ProgressMessageSetText, ProgressMessageRemoveItem, ProgressMessageInfo}
 
 mutable struct ProgressDisplay
 	nlines::Int # the number of active lines
@@ -88,6 +95,7 @@ _set_finished!(item::ProgressItem) = item.finished = true
 remove_item!(pd::ProgressDisplay, item::ProgressItem, text=styled"{bright_black:Done}") =
 	(put!(pd.channel, ProgressMessageRemoveItem(item, time(), text)); nothing)
 
+add_info_item!(pd::ProgressDisplay, text::Union{String,AnnotatedString}) = (put!(pd.channel, ProgressMessageInfo(text)); nothing)
 
 
 
@@ -104,16 +112,23 @@ function print_duration(io, s::Real)
 end
 
 
+# returns true if something was printed
 function print_item(io, item::ProgressItem, t; finish_time=nothing, finish_text=nothing)
+	run_time = @something(finish_time, t) - item.start_time
+	if item.type === :pending
+		if run_time < 0.05
+			return false
+		else
+			item.type = :timed
+		end
+	end
+
 	isempty(item.text) || print(io, item.text, " ")
 
-	if !iszero(item.start_time)
-		# Show runtime
-		run_time = @something(finish_time, t) - item.start_time
-		print_duration(io, run_time)
-	end
+	item.type === :timed && print_duration(io, run_time)
 	finish_text !== nothing && print(io, finish_text)
 	println(io)
+	return true
 end
 
 
@@ -129,10 +144,12 @@ function print_display(io, pd::ProgressDisplay)
 			_add_item!(pd, msg.item)
 		elseif msg isa ProgressMessageSetText
 			_set_text!(msg.item, msg.text)
-		else#if msg isa ProgressMessageRemoveItem
-			msg::ProgressMessageRemoveItem
+		elseif msg isa ProgressMessageRemoveItem
 			_set_finished!(msg.item) # mark for removal
 			print_item(io, msg.item, t; finish_time=msg.t, finish_text=msg.text) # print removed items first (in order of removal)
+		else#if msg isa ProgressMessageInfo
+			msg::ProgressMessageInfo
+			println(io, msg.text) # one-off
 		end
 	end
 
@@ -146,8 +163,7 @@ function print_display(io, pd::ProgressDisplay)
 			prev.next = curr.next
 			curr === pd.tail && (pd.tail = prev)
 		else
-			print_item(io, curr.item, t)
-			nlines += 1
+			nlines += print_item(io, curr.item, t)
 			prev = curr
 		end
 		curr = curr.next

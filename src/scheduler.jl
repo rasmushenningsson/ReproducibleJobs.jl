@@ -22,6 +22,7 @@ mutable struct Scheduler{H}
 
 	cache::Cache{SpecArgs,H} # sa -> result stored on disk
 
+	work_task_world_age::UInt64 # world_age when work_task was started (so we can restart it if world age has changed)
 	work_task::Union{Task,Nothing}
 	work_channel::Channel{WorkUnion}
 	result_channel::Channel{Any} # later maybe change to Tuple{SpecArgs,Any} if we have multiple worker tasks
@@ -49,7 +50,7 @@ function Scheduler(cache::Cache{SpecArgs,H};
 	work_channel = Channel{WorkUnion}(Inf)
 	result_channel = Channel{Any}(Inf)
 
-	scheduler = Scheduler{H}(cache.deduplicator, cache, nothing, work_channel, result_channel, Ref(lru_item_capacity), Ref(lru_mem_capacity), Ref(lru_mem_fraction), LRUCache{SpecArgs}(), ProgressDisplay(), Ref{Union{ProgressItem,Nothing}}(nothing))
+	scheduler = Scheduler{H}(cache.deduplicator, cache, UInt64(0), nothing, work_channel, result_channel, Ref(lru_item_capacity), Ref(lru_mem_capacity), Ref(lru_mem_fraction), LRUCache{SpecArgs}(), ProgressDisplay(), Ref{Union{ProgressItem,Nothing}}(nothing))
 
 	# Move to inner constructor?
     finalizer(scheduler) do s
@@ -149,9 +150,10 @@ end
 
 
 function ensure_work_task_is_running!(scheduler::Scheduler)
-	if scheduler.work_task === nothing || istaskdone(scheduler.work_task) || istaskfailed(scheduler.work_task)
+	if scheduler.work_task === nothing || istaskdone(scheduler.work_task) || istaskfailed(scheduler.work_task) || Base.get_world_counter() != scheduler.work_task_world_age
 		empty!(scheduler.work_channel)
 		empty!(scheduler.result_channel)
+		scheduler.work_task_world_age = Base.get_world_counter()
 		scheduler.work_task = Threads.@spawn work_runner(scheduler, scheduler.work_channel, scheduler.result_channel)
 	end
 	scheduler
@@ -197,7 +199,7 @@ function work_runner(scheduler::Scheduler, work_channel::Channel{WorkUnion}, res
 				remove_item!(progress_display, progress_item)
 			elseif work isa WorkDeduplicateResult
 				# TODO: Only show deduplication message if it takes time (>0.1s).
-				progress_item = add_item!(progress_display, ProgressItem(styled"{blue:⋅ Deduplicating }" * ReproducibleJobs.styled_function_name(f)))
+				progress_item = add_item!(progress_display, ProgressItem(styled"{blue:⋅ Deduplicating }" * ReproducibleJobs.styled_function_name(f); type=:pending))
 				res = deduplicate!(scheduler.deduplicator, work.obj)
 				remove_item!(progress_display, progress_item)
 			end
@@ -502,7 +504,7 @@ end
 function _reset_progress_display!(scheduler, sa::SpecArgs)
 	empty!(scheduler.progress_display)
 	add_item!(scheduler.progress_display, ProgressItem(styled"{blue:Scheduler: }" * ReproducibleJobs.styled_function_name(sa.f)))
-	scheduler.lru_display_item[] = add_item!(scheduler.progress_display, ProgressItem(styled"{blue:LRU:}"; show_time=false))
+	scheduler.lru_display_item[] = add_item!(scheduler.progress_display, ProgressItem(styled"{blue:LRU:}"; type=:text))
 end
 
 
