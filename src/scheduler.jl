@@ -35,6 +35,7 @@ mutable struct Scheduler{H}
 	# Progress display and related
 	progress_display::ProgressDisplay
 	lru_display_item::Base.RefValue{Union{ProgressItem,Nothing}}
+	gc_display_item::Base.RefValue{Union{ProgressItem,Nothing}}
 	# preprocess_display_item::Base.RefValue{Union{ProgressItem,Nothing}} # We reuse a single display item for preprocessing, to avoid flooding the terminal
 	# deduplication_display_item::Base.RefValue{Union{ProgressItem,Nothing}} # We reuse a single display item for deduplication, to avoid flooding the terminal
 end
@@ -50,7 +51,7 @@ function Scheduler(cache::Cache{SpecArgs,H};
 	work_channel = Channel{WorkUnion}(Inf)
 	result_channel = Channel{Any}(Inf)
 
-	scheduler = Scheduler{H}(cache.deduplicator, cache, UInt64(0), nothing, work_channel, result_channel, Ref(lru_item_capacity), Ref(lru_mem_capacity), Ref(lru_mem_fraction), LRUCache{SpecArgs}(), ProgressDisplay(), Ref{Union{ProgressItem,Nothing}}(nothing))
+	scheduler = Scheduler{H}(cache.deduplicator, cache, UInt64(0), nothing, work_channel, result_channel, Ref(lru_item_capacity), Ref(lru_mem_capacity), Ref(lru_mem_fraction), LRUCache{SpecArgs}(), ProgressDisplay(), Ref{Union{ProgressItem,Nothing}}(nothing), Ref{Union{ProgressItem,Nothing}}(nothing))
 
 	# Move to inner constructor?
     finalizer(scheduler) do s
@@ -504,7 +505,14 @@ end
 function _reset_progress_display!(scheduler, sa::SpecArgs)
 	empty!(scheduler.progress_display)
 	add_item!(scheduler.progress_display, ProgressItem(styled"{blue:Scheduler: }" * ReproducibleJobs.styled_function_name(sa.f)))
-	scheduler.lru_display_item[] = add_item!(scheduler.progress_display, ProgressItem(styled"{blue:LRU:}"; type=:text))
+	scheduler.gc_display_item[] = add_item!(scheduler.progress_display, ProgressItem(styled"{blue:⋅ GC:}"; type=:text))
+	scheduler.lru_display_item[] = add_item!(scheduler.progress_display, ProgressItem(styled"{blue:⋅ LRU:}"; type=:text))
+end
+
+function _update_gc_display!(scheduler::Scheduler)
+	live = Base.format_bytes(Base.gc_live_bytes())
+	# More stuff? E.g. time since last full/incremental sweep. And max memory usage.
+	set_text!(scheduler.progress_display, scheduler.gc_display_item[], styled"{blue:⋅ GC:} live $live")
 end
 
 
@@ -514,6 +522,7 @@ function process!(scheduler::Scheduler, sa::SpecArgs, op::Symbol; @nospecialize(
 		_reset_progress_display!(scheduler, sa)
 	end
 	evict_results!(scheduler; evict_all=false)
+	_update_gc_display!(scheduler)
 
 	while true
 		res, done = process_once!(scheduler, sa, op; parent_f)
@@ -541,6 +550,7 @@ function forward_once!(scheduler::Scheduler, spec::Spec; @nospecialize(parent_f=
 		_reset_progress_display!(scheduler, sa)
 	end
 	evict_results!(scheduler; evict_all=false)
+	_update_gc_display!(scheduler)
 	res, _ = process_once!(scheduler, sa, :forward; parent_f)
 	processing_errors_throw && res isa Exception && throw(res)
 	res
