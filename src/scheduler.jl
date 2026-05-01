@@ -97,8 +97,10 @@ function evict_results!(scheduler::Scheduler; evict_all=true)
 	# 	@info "Evicted: $(initial_items-length(lru)) items ($e_sz_str). Remaining: $(length(lru)) items ($r_sz_str). Capacity: $item_capacity items ($c_sz_str)."
 	# end
 
-	r_sz_str = _byte_size_string(lru.total_size)
-	c_sz_str = _byte_size_string(mem_capacity)
+	# r_sz_str = _byte_size_string(lru.total_size)
+	# c_sz_str = _byte_size_string(mem_capacity)
+	r_sz_str = Base.format_bytes(lru.total_size; binary=false)
+	c_sz_str = Base.format_bytes(mem_capacity; binary=false)
 	# set_text!(scheduler.lru_display_item[], "⋅ LRU: $(length(lru))/$item_capacity items ($r_sz_str/$c_sz_str)")
 	if scheduler.lru_display_item[] !== nothing
 		set_text!(scheduler.progress_display, scheduler.lru_display_item[], styled"{blue:⋅ LRU:} $(length(lru))/$item_capacity items ($r_sz_str/$c_sz_str)")
@@ -155,6 +157,7 @@ function ensure_work_task_is_running!(scheduler::Scheduler)
 		empty!(scheduler.work_channel)
 		empty!(scheduler.result_channel)
 		scheduler.work_task_world_age = Base.get_world_counter()
+		# @info "Spawning work task"
 		scheduler.work_task = Threads.@spawn work_runner(scheduler, scheduler.work_channel, scheduler.result_channel)
 	end
 	scheduler
@@ -171,7 +174,6 @@ end
 
 # Hmm. Maybe better to not pass scheduler - seems like that might prevent GC of scheduler if restarted.
 function work_runner(scheduler::Scheduler, work_channel::Channel{WorkUnion}, result_channel::Channel{Any})
-	@info "Spawned work task"
 	progress_display = scheduler.progress_display
 
 	for work in work_channel # will exit when work_channel is closed
@@ -510,7 +512,7 @@ function _reset_progress_display!(scheduler, sa::SpecArgs)
 end
 
 function _update_gc_display!(scheduler::Scheduler)
-	live = Base.format_bytes(Base.gc_live_bytes())
+	live = Base.format_bytes(Base.gc_live_bytes(); binary=false)
 	# More stuff? E.g. time since last full/incremental sweep. And max memory usage.
 	set_text!(scheduler.progress_display, scheduler.gc_display_item[], styled"{blue:⋅ GC:} live $live")
 end
