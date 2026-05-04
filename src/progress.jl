@@ -256,3 +256,6 @@ function (pb::ProgressBar)()
 	i = next!(item)
 	i == item.n && remove_item!(pb.pd, item)
 end
+
+# This is needed to enable compatibility with ProgressMeter, but we do removal automatically when taking the last step
+(pb::ProgressBar)(::Val{:done}) = nothing
