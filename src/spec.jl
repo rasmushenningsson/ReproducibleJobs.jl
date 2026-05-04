@@ -1,7 +1,7 @@
 
 struct SpecInitialized end
-# struct SpecWaiting end # TODO: Add
-# struct SpecProcessing end # TODO: Add
+struct SpecWaiting end # Waiting for dependencies to finish
+struct SpecProcessing end # Running or Preprocessing
 
 # TODO: This could be simplified a lot with mutually recursive type definitions. (We could store a Spec directly in that case, instead of sa and op.)
 struct SpecNext{T}
@@ -25,7 +25,7 @@ end
 
 
 
-# const SpecStateUnion = Union{SpecInitialized, SpecNext{SpecArgs}, SpecResult, SpecErrored}
+# const SpecStateUnion = Union{SpecInitialized, SpecWaiting, SpecProcessing, SpecNext{SpecArgs}, SpecResult, SpecErrored}
 
 # TODO: Can we find a better name for this struct?
 mutable struct SpecArgs # TODO: Add template parameters for args/kwargs? Or find a another way to handle types better?
@@ -35,7 +35,7 @@ mutable struct SpecArgs # TODO: Add template parameters for args/kwargs? Or find
 	const args::Vector{Any}
 	const kwargs::Vector{Pair{Symbol,Any}}
 
-	state::Union{SpecInitialized, SpecNext{SpecArgs}, SpecResult, SpecErrored} # SpecStateUnion, but we cannot define it already because it uses SpecArgs
+	state::Union{SpecInitialized, SpecWaiting, SpecProcessing, SpecNext{SpecArgs}, SpecResult, SpecErrored} # SpecStateUnion, but we cannot define it already because it uses SpecArgs
 
 	function SpecArgs(f, args, kwargs)
 		# @assert issorted(keys(kwargs))
@@ -46,7 +46,7 @@ end
 SpecArgs(sa::SpecArgs) = sa
 
 
-const SpecStateUnion = Union{SpecInitialized, SpecNext{SpecArgs}, SpecResult, SpecErrored}
+const SpecStateUnion = Union{SpecInitialized, SpecWaiting, SpecProcessing, SpecNext{SpecArgs}, SpecResult, SpecErrored}
 
 
 Base.propertynames(::SpecArgs, private::Bool=false) =

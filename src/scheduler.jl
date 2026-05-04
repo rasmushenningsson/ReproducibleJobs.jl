@@ -289,12 +289,16 @@ function replace_dependencies(sa::SpecArgs, upstream::IdDict{Spec,Any})
 end
 
 function _fetch_and_compute!(scheduler, sa::SpecArgs, deps::Vector{Spec})
+	# TODO: Check that sa.state is as expected?
+	sa.state = SpecWaiting()
 	fetched_deps = fetch_dependencies!(scheduler, deps)
 
+	sa_replaced = sa
 	if !isempty(fetched_deps)
-		sa = replace_dependencies(sa, fetched_deps)::Union{SpecArgs,ProcessingException,InterruptException}
+		sa_replaced = replace_dependencies(sa, fetched_deps)::Union{SpecArgs,ProcessingException,InterruptException}
 	end
-	res = compute(scheduler, sa)
+	sa.state = SpecProcessing()
+	res = compute(scheduler, sa_replaced)
 	@assert !(res isa Spec)
 	return res
 end
@@ -306,6 +310,7 @@ function _fetch_and_compute_cached!(scheduler, sa::SpecArgs, deps::Vector{Spec})
 	inner_deps = get_dependencies(inner_sa)
 	@assert all(s->s.op === :call, inner_deps) # The outer call has enforced all inner specs to be calls has well.
 
+	sa.state = SpecWaiting()
 	cache_get!(scheduler.cache, inner_sa) do
 		_fetch_and_compute!(scheduler, inner_sa, inner_deps)
 	end
@@ -319,6 +324,8 @@ function _fetch_and_compute_sub!(scheduler, sa::SpecArgs, deps::Vector{Spec})
 	@assert cached_sa.f == get_cached
 	cached_deps = get_dependencies(cached_sa)
 	@assert all(s->s.op === :call, cached_deps) # The outer call has enforced all sub-specs to be calls has well.
+
+	sa.state = SpecWaiting()
 
 	# Try in this order
 	# 0. (Already done) Is it cached and still valid in sa.result.
@@ -376,19 +383,22 @@ end
 
 
 function _process_once!(scheduler::Scheduler, sa::SpecArgs, deps::Vector{Spec})
+	sa.state = SpecWaiting()
 	forwarded_deps = process_dependencies!(scheduler, deps; parent_f=sa.f)
 
+	sa_replaced = sa
 	if !isempty(forwarded_deps)
-		sa = replace_dependencies(sa, forwarded_deps)::Union{SpecArgs,ProcessingException,InterruptException}
+		sa_replaced = replace_dependencies(sa, forwarded_deps)::Union{SpecArgs,ProcessingException,InterruptException}
 	end
 
-	sa isa Exception && return sa
+	sa_replaced isa Exception && return sa_replaced
 
-	if is_preprocessing(sa)
-		preprocess(scheduler, sa)
+	if is_preprocessing(sa_replaced)
+		sa.state = SpecProcessing()
+		preprocess(scheduler, sa_replaced)
 	else
-		sa = deduplicate!(scheduler.deduplicator, sa)
-		Spec(sa, :call)
+		sa_replaced = deduplicate!(scheduler.deduplicator, sa_replaced)
+		Spec(sa_replaced, :call)
 	end
 end
 
@@ -439,13 +449,7 @@ end
 
 
 # Return tuple with result and Bool telling if it's done (TODO: Make code more clear)
-function process_once!(scheduler::Scheduler, sa::SpecArgs, op::Symbol; @nospecialize(parent_f))
-	if parent_f !== nothing && op in (:forward,:prefetch)
-		if !should_forward_child(parent_f, sa.f) # TODO: Avoid passing parent_f which can have many different types and just pass sufficient info to make this decision? Then we can get rid of @nospecialize...
-			return (Spec(sa, op), true)
-		end
-	end
-
+function process_once!(scheduler::Scheduler, sa::SpecArgs, op::Symbol)
 	deps = get_dependencies(sa)
 
 	if !is_preprocessing(sa) && all(x->x.op === :call, deps)
@@ -510,6 +514,7 @@ function _update_gc_display!(scheduler::Scheduler)
 end
 
 
+# TODO: Avoid passing parent_f which can have many different types and just pass sufficient info to make this decision? Then we can get rid of @nospecialize...
 function process!(scheduler::Scheduler, sa::SpecArgs, op::Symbol; @nospecialize(parent_f=nothing), processing_errors_throw=true, external_call=true)
 	if external_call
 		ensure_work_task_is_running!(scheduler)
@@ -519,7 +524,11 @@ function process!(scheduler::Scheduler, sa::SpecArgs, op::Symbol; @nospecialize(
 	_update_gc_display!(scheduler)
 
 	while true
-		res, done = process_once!(scheduler, sa, op; parent_f)
+		if parent_f !== nothing && op in (:forward,:prefetch) && !should_forward_child(parent_f, sa.f)
+			return Spec(sa, op) # processing done, we shouldn't forward anymore
+		end
+
+		res, done = process_once!(scheduler, sa, op)
 		# done && return res
 		if done
 			processing_errors_throw && res isa Exception && throw(res)
@@ -537,7 +546,7 @@ forward!(scheduler::Scheduler, spec::Spec; kwargs...) = process!(scheduler, get_
 process!(scheduler::Scheduler, spec::Spec; kwargs...) = process!(scheduler, get_sa(spec), spec.op; kwargs...)
 
 
-function forward_once!(scheduler::Scheduler, spec::Spec; @nospecialize(parent_f=nothing), processing_errors_throw=true, external_call=true)
+function forward_once!(scheduler::Scheduler, spec::Spec; processing_errors_throw=true, external_call=true)
 	sa = get_sa(spec)
 	if external_call
 		ensure_work_task_is_running!(scheduler)
@@ -545,7 +554,7 @@ function forward_once!(scheduler::Scheduler, spec::Spec; @nospecialize(parent_f=
 	end
 	evict_results!(scheduler; evict_all=false)
 	_update_gc_display!(scheduler)
-	res, _ = process_once!(scheduler, sa, :forward; parent_f)
+	res, _ = process_once!(scheduler, sa, :forward)
 	processing_errors_throw && res isa Exception && throw(res)
 	res
 end
