@@ -59,14 +59,15 @@ function force_empty!(lru::LRUCache)
 	lru
 end
 
-function _byte_size(n::Int)
-	n < 1000   && return (n, " bytes")
-	n < 1000^2 && return (round(n/1000,   digits=1), " kB")
-	n < 1000^3 && return (round(n/1000^2, digits=1), " MB")
-	              return (round(n/1000^3, digits=1), " GB")
-end
-_byte_size_string(n) = string(_byte_size(n)...)
+# Use Base.format_bytes(; binary=false) instead of inventing our own
+# function _byte_size(n::Int)
+# 	n < 1000   && return (n, " bytes")
+# 	n < 1000^2 && return (round(n/1000,   digits=1), " kB")
+# 	n < 1000^3 && return (round(n/1000^2, digits=1), " MB")
+# 	              return (round(n/1000^3, digits=1), " GB")
+# end
+# _byte_size_string(n) = string(_byte_size(n)...)
 
 function Base.show(io::IO, lru::LRUCache)
-	print(io, "LRUCache($(length(lru)) items, ", _byte_size(lru.total_size)..., ")")
+	print(io, "LRUCache($(length(lru)) items, ", Base.format_bytes(lru.total_size; binary=false), ")")
 end
