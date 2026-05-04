@@ -1,27 +1,60 @@
-# TODO: Can we find a better name for this struct?
-mutable struct SpecArgs # TODO: Add template parameters for args/kwargs? Or find a another way to handle types better?
-	f::Any
-	# args::Tuple
-	# kwargs::NamedTuple
-	args::Vector{Any}
-	kwargs::Vector{Pair{Symbol,Any}}
 
-	# Cache (forwarding)
-	# This is the result of `process_once`, when preprocessing.
-	# Later, we might want to make this a sumtype. (But then we need mutually recursive types, which is not yet supported by Julia.)
-	next::Any # NotValid means it is not computed. Most often a Spec. Can also be a value (in rare cases specs forwards to values).
+struct SpecInitialized end
+# struct SpecWaiting end # TODO: Add
+# struct SpecProcessing end # TODO: Add
 
-	# Cache (result)
+# struct SpecNext
+# 	# Ideally, this should store a Spec, but that's not possible without mutually recursive type definitions.
+# 	sa::SpecArgs
+# 	op::Symbol
+# end
+
+# TODO: This could be simplified a lot with mutually recursive type definitions. (We could store a Spec directly in that case.)
+struct SpecNext{T}
+	# Ideally, this should store a Spec, but that's not possible without mutually recursive type definitions.
+	sa::T
+	op::Symbol
+end
+# See below for constructor taking Spec
+
+
+struct SpecResult
 	result::Any
 	weak_result::Any
+end
+SpecResult(result::Any) =
+	SpecResult(result, deconstruct_weak_rec(result))
+
+struct SpecErrored
+	exception::Exception
+end
+
+
+
+
+# const SpecStateUnion = Union{SpecInitialized, SpecNext, SpecResult, SpecErrored}
+
+# TODO: Can we find a better name for this struct?
+mutable struct SpecArgs # TODO: Add template parameters for args/kwargs? Or find a another way to handle types better?
+	const f::Any
+	# args::Tuple
+	# kwargs::NamedTuple
+	const args::Vector{Any}
+	const kwargs::Vector{Pair{Symbol,Any}}
+
+	state::Union{SpecInitialized, SpecNext{SpecArgs}, SpecResult, SpecErrored} # SpecStateUnion, but we cannot define it already because it uses SpecArgs
 
 	function SpecArgs(f, args, kwargs)
 		# @assert issorted(keys(kwargs))
 		@assert issorted(kwargs; by=first) # TODO: Also check that we don't have duplicate keys?
-		new(f, args, kwargs, NotValid(), NotValid(), NotValid())
+		new(f, args, kwargs, SpecInitialized())
 	end
 end
 SpecArgs(sa::SpecArgs) = sa
+
+
+const SpecStateUnion = Union{SpecInitialized, SpecNext{SpecArgs}, SpecResult, SpecErrored}
+
 
 Base.propertynames(::SpecArgs, private::Bool=false) =
 	private ? fieldnames(SpecArgs) : (:f, :args, :kwargs)
@@ -177,36 +210,47 @@ _get_kwarg(sa::SpecArgs, key::Symbol, default) = _get_kwarg(()->default, sa, key
 _get_kwarg(sa::SpecArgs, key::Symbol) = _get_kwarg(()->throw(KeyError(key)), sa, key)
 
 
-# TODO: Make this code easier to read
-function get_next!(f, sa::SpecArgs)
-	if sa.next === NotValid()
-		sa.next = f()
+
+function set_result!(sa::SpecArgs, res)
+	if res isa Exception
+		sa.state = SpecErrored(res)
+	else
+		sa.state = SpecResult(res)
 	end
-	sa.next
+	sa
 end
 
-# TODO: Make this code easier to read
-function get_result!(f, sa::SpecArgs)
-	sa.result !== NotValid() && return sa.result
 
-	if sa.weak_result !== NotValid()
-		# Attempt to reconstruct from weakly stored reference
-		sa.result = reconstruct_weak_rec(sa.weak_result)
-		sa.result !== NotValid() && return sa.result
-		sa.weak_result = NotValid()
+function get_result!(sa::SpecArgs)
+	if sa.state isa SpecResult
+		sr = sa.state
+		sr.result !== NotValid() && return sr.result
+		if sr.weak_result !== NotValid()
+			# Attempt to reconstruct from weakly stored reference
+			result = reconstruct_weak_rec(sr.weak_result)
+			if result !== NotValid()
+				sa.state = SpecResult(result, sr.weak_result) # successful reconstruction
+				return result
+			end
+			# sa.state = SpecResult(NotValid(), NotValid()) # failed to reconstruct, so the weak result is no longer relevant
+			sa.state = SpecInitialized() # failed to reconstruct, so the weak result is no longer relevant
+		end
+		return NotValid()
+	elseif sa.state isa SpecErrored
+		return sa.state.exception
 	end
-
-	# Compute result
-	result = f()
-	if !(result isa InterruptException)
-		sa.result = result
-		sa.weak_result = deconstruct_weak_rec(sa.result)
-	end
-	return result
+	return NotValid()
 end
 
-# NB: Any weak result will still be present and the result can thus still be reconstructed if it has not yet been GCed.
-empty_result!(sa::SpecArgs) = (sa.result = NotValid(); sa)
+function empty_result!(sa::SpecArgs)
+	if sa.state isa SpecResult
+		# sa.state.result = NotValid()
+		sa.state = SpecResult(NotValid(), sa.state.weak_result)
+	elseif sa.state isa SpecErrored
+		sa.state = SpecInitialized()
+	end
+	sa
+end
 
 
 
@@ -224,6 +268,10 @@ struct Spec
 	end
 end
 Spec(sa) = Spec(sa, :forward)
+
+
+SpecNext(spec::Spec) = SpecNext{SpecArgs}(spec.sa, spec.op) # workaround to handle mutually recursive types
+Spec(next::SpecNext{SpecArgs}) = Spec(next.sa, next.op)
 
 Base.Broadcast.broadcastable(spec::Spec) = Ref(spec) # treat as scalar for broadcasting
 
@@ -265,14 +313,10 @@ end
 
 
 function try_get_result_rec(sa::SpecArgs)
-	if sa.result !== NotValid() || sa.weak_result !== NotValid()
-		sa.result, sa.weak_result
-	elseif sa.next !== NotValid()
-		if sa.next isa Spec
-			try_get_result_rec(sa.next) # recurse
-		else
-			sa.next, NotValid() # it forwarded to a value
-		end
+	if sa.state isa SpecResult
+		sa.state.result, sa.state.weak_result
+	elseif sa.state isa SpecNext{SpecArgs}
+		try_get_result_rec(sa.state.sa) # recurse
 	else
 		NotValid(), NotValid()
 	end

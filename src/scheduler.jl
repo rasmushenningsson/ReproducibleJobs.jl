@@ -1,8 +1,3 @@
-# This is a simple single-threaded scheduler.
-# It is expected to change name later.
-# And maybe not be the default.
-
-
 struct WorkCompute
 	sa::SpecArgs
 end
@@ -108,6 +103,7 @@ function evict_results!(scheduler::Scheduler; evict_all=true)
 
 	scheduler
 end
+evict_results!(; kwargs...) = evict_results!(get_scheduler(); kwargs...)
 
 function Base.empty!(scheduler::Scheduler)
 	evict_results!(scheduler)
@@ -172,61 +168,66 @@ function _short_exception_string(e::Exception; n::Int=40)
 end
 
 
+function work_run_single(scheduler, work::WorkUnion, result_channel::Channel)
+	progress_display = scheduler.progress_display
+	progress_item = nothing
+	sa = work.sa::SpecArgs
+
+	local res
+	try
+		f = sa.f
+
+		# NB: Deduplication and thus also Preprocessing are not thread-safe and is thus currently assumed to not happen in parallel
+		if work isa WorkPreprocess
+			progress_item = add_item!(progress_display, ProgressText(styled"{blue:⋅ Preprocessing} " * ReproducibleJobs.styled_function_name(f)))
+			res = f(sa.args...; sa.kwargs...)
+			@assert res !== nothing "Preprocessing of $f returned nothing"
+			remove_item!(progress_display, progress_item)
+		elseif work isa WorkCompute
+			progress_item = add_item!(progress_display, ProgressText(styled"{blue:⋅ Running} " * ReproducibleJobs.styled_function_name(f)))
+
+			v = _get_kwarg(sa, :__version, nothing)
+			@assert v !== nothing "__version kwarg must be provided for all (non-preprocessing) specs."
+
+			kwargs = Iterators.filter(p->!startswith(string(p[1]),"__"), sa.kwargs)
+			res = f(sa.args...; kwargs...)
+			@assert res !== nothing "Computation of $f returned nothing"
+			remove_item!(progress_display, progress_item)
+		elseif work isa WorkDeduplicateResult
+			# TODO: Only show deduplication message if it takes time (>0.1s).
+			progress_item = add_item!(progress_display, ProgressText(styled"{blue:⋅ Deduplicating }" * ReproducibleJobs.styled_function_name(f); type=:pending))
+			res = deduplicate!(scheduler.deduplicator, work.obj)
+			remove_item!(progress_display, progress_item)
+		end
+	catch e
+		exception_text = _short_exception_string(e)
+		progress_item !== nothing && remove_item!(progress_display, progress_item, styled"{red:$exception_text}")
+		if e isa InterruptException
+			res = e
+		else
+			# TODO: Where to show error?
+			# io = IOBuffer()
+			# Base.showerror(IOContext(io, :color=>true), e)
+			# message = String(take!(io))
+			# @warn message
+
+			# Do not show anything/much here, it will be shown later instead.
+			bt = Base.catch_backtrace()
+			res = ProcessingException(sa, e, stacktrace(bt))
+		end
+	end
+
+	put!(result_channel, res)
+end
+
+
 # Hmm. Maybe better to not pass scheduler - seems like that might prevent GC of scheduler if restarted.
 function work_runner(scheduler::Scheduler, work_channel::Channel{WorkUnion}, result_channel::Channel{Any})
-	progress_display = scheduler.progress_display
-
 	for work in work_channel # will exit when work_channel is closed
-		progress_item = nothing
-		sa = work.sa::SpecArgs
-
-		local res
-		try
-			f = sa.f
-
-			# NB: Deduplication and thus also Preprocessing are not thread-safe and is thus currently assumed to not happen in parallel
-			if work isa WorkPreprocess
-				progress_item = add_item!(progress_display, ProgressText(styled"{blue:⋅ Preprocessing} " * ReproducibleJobs.styled_function_name(f)))
-				res = f(sa.args...; sa.kwargs...)
-				@assert res !== nothing "Preprocessing of $f returned nothing"
-				remove_item!(progress_display, progress_item)
-			elseif work isa WorkCompute
-				progress_item = add_item!(progress_display, ProgressText(styled"{blue:⋅ Running} " * ReproducibleJobs.styled_function_name(f)))
-
-				v = _get_kwarg(sa, :__version, nothing)
-				@assert v !== nothing "__version kwarg must be provided for all (non-preprocessing) specs."
-
-				kwargs = Iterators.filter(p->!startswith(string(p[1]),"__"), sa.kwargs)
-				res = f(sa.args...; kwargs...)
-				@assert res !== nothing "Computation of $f returned nothing"
-				remove_item!(progress_display, progress_item)
-			elseif work isa WorkDeduplicateResult
-				# TODO: Only show deduplication message if it takes time (>0.1s).
-				progress_item = add_item!(progress_display, ProgressText(styled"{blue:⋅ Deduplicating }" * ReproducibleJobs.styled_function_name(f); type=:pending))
-				res = deduplicate!(scheduler.deduplicator, work.obj)
-				remove_item!(progress_display, progress_item)
-			end
-		catch e
-			exception_text = _short_exception_string(e)
-			progress_item !== nothing && remove_item!(progress_display, progress_item, styled"{red:$exception_text}")
-			if e isa InterruptException
-				res = e
-			else
-				# TODO: Where to show error?
-				# io = IOBuffer()
-				# Base.showerror(IOContext(io, :color=>true), e)
-				# message = String(take!(io))
-				# @warn message
-
-				# Do not show anything/much here, it will be shown later instead.
-				bt = Base.catch_backtrace()
-				res = ProcessingException(sa, e, stacktrace(bt))
-			end
-		end
-
-		put!(result_channel, res)
+		work_run_single(scheduler, work, result_channel) # Do this in a separate function to enable GC to run properly.
 	end
 end
+
 
 function process_work(scheduler, work::WorkUnion)
 	progress_display = scheduler.progress_display
@@ -333,52 +334,41 @@ function _fetch_and_compute_sub!(scheduler, sa::SpecArgs, deps::Vector{Spec})
 	end
 
 
-	# TODO: Put part of this in a helper function, get_result?, in spec.jl?
-	# 1.
-	if cached_sa.result !== NotValid()
-		# @info "Found cached CompoundResult ($(get_sa(cached_sa.args[1]).f))"
-		cr = cached_sa.result
-		cr isa Exception && return cr
-		@assert cr isa CompoundResult "Expected CompoundResult, got $(typeof(cr))."
-		return sub === nothing ? get_keys(cr) : get_subresult(cr, sub)
+	if cached_sa.state isa SpecResult
+		# 1.
+		if cached_sa.state.result !== NotValid()
+			cr = cached_sa.state.result
+			cr isa Exception && return cr
+			@assert cr isa CompoundResult "Expected CompoundResult, got $(typeof(cr))."
+			return sub === nothing ? get_keys(cr) : get_subresult(cr, sub)
+		end
+
+		# 2.
+		w = cached_sa.state.weak_result
+		if w !== NotValid()
+			@assert w isa CompoundResult "Expected CompoundResult, got $(typeof(w))."
+			sub === nothing && return get_keys(w)
+			v = reconstruct_weak_rec(get_subresult(w, sub))
+			v !== NotValid() && return v
+		end
 	end
 
-	w = cached_sa.weak_result
-	if w !== NotValid()
-		# @info "Attempting 2 ($(get_sa(cached_sa.args[1]).f))"
-
-		# Attempt to reconstruct from weakly stored CompoundResult
-		@assert w isa CompoundResult "Expected CompoundResult, got $(typeof(w))."
-		sub === nothing && return get_keys(w)
-		# sub === nothing && return (@info "2 success $sub ($(get_sa(cached_sa.args[1]).f))"; return get_keys(w))
-		v = reconstruct_weak_rec(get_subresult(w, sub))
-		v !== NotValid() && return v
-		# v !== NotValid() && (@info "2 success $sub ($(get_sa(cached_sa.args[1]).f))"; return v)
-		# @info "2 failed ($(get_sa(cached_sa.args[1]).f))"
-		v !== NotValid() && return v
-		# v !== NotValid() && (@info "2 success $sub ($(get_sa(cached_spec.args[1]).f))"; return v)
-		# @info "2 failed ($(get_sa(cached_spec.args[1]).f))"
-	end
 
 	# 3.
 	inner_sa = get_sa(cached_sa.args[1])
-	# @info "Attempting 3 ($(get_sa(cached_sa.args[1]).f))"
 	v = cache_try_get_compoundresult(scheduler.cache, inner_sa; sub, return_keys=sub===nothing)
 	v !== NotValid() && return v
-	# v !== NotValid() && (@info "3 success $sub ($(get_sa(cached_sa.args[1]).f))"; return v)
-	# @info "3 failed ($(get_sa(cached_sa.args[1]).f))"
 
-	# 4.
-	# @info "Attempting 4 ($(get_sa(cached_sa.args[1]).f))"
-	cr = get_result!(cached_sa) do # This is to ensure cached_sa.result gets set, maybe use set_result! instead? Because we should never reach here if cached_sa.result !== nothing.
-		_fetch_and_compute_cached!(scheduler, cached_sa, cached_deps)
-	end
+	cr = _fetch_and_compute_cached!(scheduler, cached_sa, cached_deps)
+	set_result!(cached_sa, cr)
+
 	cr isa Exception && return cr
-	cr isa CompoundResult || throw(ArgumentError("Tried to retrieve sub-result from result that was not a CompoundResult."))
 
 	lru_touch!(scheduler.lru, inner_sa) do
 		Base.summarysize(cr)
 	end
+
+	cr isa CompoundResult || throw(ArgumentError("Tried to retrieve sub-result from result that was not a CompoundResult."))
 
 	return sub === nothing ? get_keys(cr) : get_subresult(cr, sub)
 end
@@ -464,19 +454,18 @@ function process_once!(scheduler::Scheduler, sa::SpecArgs, op::Symbol; @nospecia
 		# Stop if we are forwarding, nothing left to do
 		op === :forward && return (Spec(sa, :call), true)
 
-		res = get_result!(sa) do
-			# # DEBUG
-			# h = lookup_hash(scheduler.deduplicator, sa)
-			# @info "Computing $(sa.f) ($(hash_string(h)[1:6]), n=$(processing_count(h)))"
+		# Already computed?
+		res = get_result!(sa)
+		res !== NotValid() && return (res, true)
 
-			if sa.f == compoundresult_sub || sa.f == compoundresult_keys
-				_fetch_and_compute_sub!(scheduler, sa, deps)
-			elseif sa.f == get_cached
-				_fetch_and_compute_cached!(scheduler, sa, deps)
-			else
-				_fetch_and_compute!(scheduler, sa, deps)
-			end
+		if sa.f == compoundresult_sub || sa.f == compoundresult_keys
+			res = _fetch_and_compute_sub!(scheduler, sa, deps)
+		elseif sa.f == get_cached
+			res = _fetch_and_compute_cached!(scheduler, sa, deps)
+		else
+			res = _fetch_and_compute!(scheduler, sa, deps)
 		end
+
 		@assert !(res isa CompoundResult) # Is this a good place to check? Maybe should be ensured earlier.
 		@assert !(res isa Spec)
 
@@ -484,23 +473,26 @@ function process_once!(scheduler::Scheduler, sa::SpecArgs, op::Symbol; @nospecia
 			Base.summarysize(res)
 		end
 
-
+		set_result!(sa, res)
 		return res, true
 	end
 
-	res = get_next!(sa) do
-		# # DEBUG
-		# h = lookup_hash(scheduler.deduplicator, sa)
-		# @info "Preprocessing $(sa.f) ($(hash_string(h)[1:6]), n=$(processing_count(h)))"
+	# Cached forwarding
+	sa.state isa SpecNext{SpecArgs} && return (Spec(sa.state), false)
 
-		_process_once!(scheduler, sa, deps)
-	end
+	# Cached result
+	res = get_result!(sa)
+	res !== NotValid() && return (res, true)
 
+	# Preprocess
+	res = _process_once!(scheduler, sa, deps)
 	if res isa Spec
-		return res, false
-	else
-		return res, true # forwarding returned a value, we are done
+		sa.state = SpecNext(res)
+		return res, false # Still forwarding, not done.
 	end
+
+	set_result!(sa, res) # Preprocessing yielded a result, we are done.
+	return res, true
 end
 
 
