@@ -34,10 +34,10 @@ mutable struct Scheduler{H}
 
 	# Progress display and related
 	progress_display::ProgressDisplay
-	lru_display_item::Base.RefValue{Union{ProgressItem,Nothing}}
-	gc_display_item::Base.RefValue{Union{ProgressItem,Nothing}}
-	# preprocess_display_item::Base.RefValue{Union{ProgressItem,Nothing}} # We reuse a single display item for preprocessing, to avoid flooding the terminal
-	# deduplication_display_item::Base.RefValue{Union{ProgressItem,Nothing}} # We reuse a single display item for deduplication, to avoid flooding the terminal
+	lru_display_item::Base.RefValue{Union{ProgressText,Nothing}}
+	gc_display_item::Base.RefValue{Union{ProgressText,Nothing}}
+	# preprocess_display_item::Base.RefValue{Union{ProgressText,Nothing}} # We reuse a single display item for preprocessing, to avoid flooding the terminal
+	# deduplication_display_item::Base.RefValue{Union{ProgressText,Nothing}} # We reuse a single display item for deduplication, to avoid flooding the terminal
 end
 function Scheduler(cache::Cache{SpecArgs,H};
 	               lru_item_capacity = nothing,
@@ -51,7 +51,7 @@ function Scheduler(cache::Cache{SpecArgs,H};
 	work_channel = Channel{WorkUnion}(Inf)
 	result_channel = Channel{Any}(Inf)
 
-	scheduler = Scheduler{H}(cache.deduplicator, cache, UInt64(0), nothing, work_channel, result_channel, Ref(lru_item_capacity), Ref(lru_mem_capacity), Ref(lru_mem_fraction), LRUCache{SpecArgs}(), ProgressDisplay(), Ref{Union{ProgressItem,Nothing}}(nothing), Ref{Union{ProgressItem,Nothing}}(nothing))
+	scheduler = Scheduler{H}(cache.deduplicator, cache, UInt64(0), nothing, work_channel, result_channel, Ref(lru_item_capacity), Ref(lru_mem_capacity), Ref(lru_mem_fraction), LRUCache{SpecArgs}(), ProgressDisplay(), Ref{Union{ProgressText,Nothing}}(nothing), Ref{Union{ProgressText,Nothing}}(nothing))
 
 	# Move to inner constructor?
     finalizer(scheduler) do s
@@ -186,12 +186,12 @@ function work_runner(scheduler::Scheduler, work_channel::Channel{WorkUnion}, res
 
 			# NB: Deduplication and thus also Preprocessing are not thread-safe and is thus currently assumed to not happen in parallel
 			if work isa WorkPreprocess
-				progress_item = add_item!(progress_display, ProgressItem(styled"{blue:⋅ Preprocessing} " * ReproducibleJobs.styled_function_name(f)))
+				progress_item = add_item!(progress_display, ProgressText(styled"{blue:⋅ Preprocessing} " * ReproducibleJobs.styled_function_name(f)))
 				res = f(sa.args...; sa.kwargs...)
 				@assert res !== nothing "Preprocessing of $f returned nothing"
 				remove_item!(progress_display, progress_item)
 			elseif work isa WorkCompute
-				progress_item = add_item!(progress_display, ProgressItem(styled"{blue:⋅ Running} " * ReproducibleJobs.styled_function_name(f)))
+				progress_item = add_item!(progress_display, ProgressText(styled"{blue:⋅ Running} " * ReproducibleJobs.styled_function_name(f)))
 
 				v = _get_kwarg(sa, :__version, nothing)
 				@assert v !== nothing "__version kwarg must be provided for all (non-preprocessing) specs."
@@ -202,7 +202,7 @@ function work_runner(scheduler::Scheduler, work_channel::Channel{WorkUnion}, res
 				remove_item!(progress_display, progress_item)
 			elseif work isa WorkDeduplicateResult
 				# TODO: Only show deduplication message if it takes time (>0.1s).
-				progress_item = add_item!(progress_display, ProgressItem(styled"{blue:⋅ Deduplicating }" * ReproducibleJobs.styled_function_name(f); type=:pending))
+				progress_item = add_item!(progress_display, ProgressText(styled"{blue:⋅ Deduplicating }" * ReproducibleJobs.styled_function_name(f); type=:pending))
 				res = deduplicate!(scheduler.deduplicator, work.obj)
 				remove_item!(progress_display, progress_item)
 			end
@@ -506,15 +506,15 @@ end
 
 function _reset_progress_display!(scheduler, sa::SpecArgs)
 	empty!(scheduler.progress_display)
-	add_item!(scheduler.progress_display, ProgressItem(styled"{blue:Scheduler: }" * ReproducibleJobs.styled_function_name(sa.f)))
-	scheduler.gc_display_item[] = add_item!(scheduler.progress_display, ProgressItem(styled"{blue:⋅ GC:}"; type=:text))
-	scheduler.lru_display_item[] = add_item!(scheduler.progress_display, ProgressItem(styled"{blue:⋅ LRU:}"; type=:text))
+	add_item!(scheduler.progress_display, ProgressText(styled"{blue:Scheduler: }" * ReproducibleJobs.styled_function_name(sa.f)))
+	scheduler.gc_display_item[] = add_item!(scheduler.progress_display, ProgressText(styled"{blue:⋅ GC:}"; type=:text))
+	scheduler.lru_display_item[] = add_item!(scheduler.progress_display, ProgressText(styled"{blue:⋅ LRU:}"; type=:text))
 end
 
 function _update_gc_display!(scheduler::Scheduler)
 	live = Base.format_bytes(Base.gc_live_bytes(); binary=false)
 	# More stuff? E.g. time since last full/incremental sweep. And max memory usage.
-	set_text!(scheduler.progress_display, scheduler.gc_display_item[], styled"{blue:⋅ GC:} live $live")
+	set_text!(scheduler.progress_display, scheduler.gc_display_item[], styled"{blue:⋅ GC:} $live live")
 end
 
 
