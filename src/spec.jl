@@ -3,16 +3,9 @@ struct SpecInitialized end
 # struct SpecWaiting end # TODO: Add
 # struct SpecProcessing end # TODO: Add
 
-# struct SpecNext
-# 	# Ideally, this should store a Spec, but that's not possible without mutually recursive type definitions.
-# 	sa::SpecArgs
-# 	op::Symbol
-# end
-
-# TODO: This could be simplified a lot with mutually recursive type definitions. (We could store a Spec directly in that case.)
+# TODO: This could be simplified a lot with mutually recursive type definitions. (We could store a Spec directly in that case, instead of sa and op.)
 struct SpecNext{T}
-	# Ideally, this should store a Spec, but that's not possible without mutually recursive type definitions.
-	sa::T
+	sa::T # This is always SpecArgs, but we need a type parameter to handle the mutually recursive types.
 	op::Symbol
 end
 # See below for constructor taking Spec
@@ -32,7 +25,7 @@ end
 
 
 
-# const SpecStateUnion = Union{SpecInitialized, SpecNext, SpecResult, SpecErrored}
+# const SpecStateUnion = Union{SpecInitialized, SpecNext{SpecArgs}, SpecResult, SpecErrored}
 
 # TODO: Can we find a better name for this struct?
 mutable struct SpecArgs # TODO: Add template parameters for args/kwargs? Or find a another way to handle types better?
