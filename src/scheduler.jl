@@ -17,6 +17,8 @@ mutable struct Scheduler{H}
 
 	cache::Cache{SpecArgs,H} # sa -> result stored on disk
 
+	processing_queue::Vector{SpecArgs} # lifo queue of specs ready to be posted to the work_channel
+
 	work_task_world_age::UInt64 # world_age when work_task was started (so we can restart it if world age has changed)
 	work_task::Union{Task,Nothing}
 	work_channel::Channel{WorkUnion}
@@ -46,7 +48,7 @@ function Scheduler(cache::Cache{SpecArgs,H};
 	work_channel = Channel{WorkUnion}(Inf)
 	result_channel = Channel{Any}(Inf)
 
-	scheduler = Scheduler{H}(cache.deduplicator, cache, UInt64(0), nothing, work_channel, result_channel, Ref(lru_item_capacity), Ref(lru_mem_capacity), Ref(lru_mem_fraction), LRUCache{SpecArgs}(), ProgressDisplay(), Ref{Union{ProgressText,Nothing}}(nothing), Ref{Union{ProgressText,Nothing}}(nothing))
+	scheduler = Scheduler{H}(cache.deduplicator, cache, Spec[], UInt64(0), nothing, work_channel, result_channel, Ref(lru_item_capacity), Ref(lru_mem_capacity), Ref(lru_mem_fraction), LRUCache{SpecArgs}(), ProgressDisplay(), Ref{Union{ProgressText,Nothing}}(nothing), Ref{Union{ProgressText,Nothing}}(nothing))
 
 	# Move to inner constructor?
     finalizer(scheduler) do s
@@ -122,9 +124,10 @@ function Base.empty!(scheduler::Scheduler)
 end
 
 
+# old
 fetch_dependencies!(scheduler, deps) = IdDict{Spec,Any}(dep=>fetch!(scheduler, dep; external_call=false) for dep in deps)
 
-
+# old
 function process_dependency!(scheduler, dep; @nospecialize(parent_f))
 	dep.op === :call && return dep # Already preprocessed as far as it gets
 	process!(scheduler, dep; parent_f, processing_errors_throw=false, external_call=false)
@@ -135,10 +138,11 @@ process_dependencies!(scheduler, deps; @nospecialize(parent_f)) =
 
 
 
-function propagate_error(sa::SpecArgs, vals)::Union{Nothing, ProcessingException, InterruptException}
-	if any(x->x isa InterruptException, vals)
-		return InterruptException()
-	elseif any(x->x isa ProcessingException, vals)
+function propagate_error(sa::SpecArgs, vals)::Union{Nothing, ProcessingException}#, InterruptException}
+	# if any(x->x isa InterruptException, vals)
+	# 	return InterruptException()
+	# elseif any(x->x isa ProcessingException, vals)
+	if any(x->x isa ProcessingException, vals)
 		causes = filter!(x->x isa ProcessingException, collect(vals))
 		return ProcessingException(sa, causes)
 	else
@@ -196,25 +200,21 @@ function work_run_single(scheduler, work::WorkUnion, result_channel::Channel)
 		elseif work isa WorkDeduplicateResult
 			# TODO: Only show deduplication message if it takes time (>0.1s).
 			progress_item = add_item!(progress_display, ProgressText(styled"{blue:⋅ Deduplicating }" * ReproducibleJobs.styled_function_name(f); type=:pending))
-			res = deduplicate!(scheduler.deduplicator, work.obj)
+			res = deduplicate!(scheduler.deduplicator, work.obj; transfer_ownership=true) # Since it is a result, we know that we own the data
 			remove_item!(progress_display, progress_item)
 		end
 	catch e
 		exception_text = _short_exception_string(e)
 		progress_item !== nothing && remove_item!(progress_display, progress_item, styled"{red:$exception_text}")
-		if e isa InterruptException
-			res = e
-		else
-			# TODO: Where to show error?
-			# io = IOBuffer()
-			# Base.showerror(IOContext(io, :color=>true), e)
-			# message = String(take!(io))
-			# @warn message
+		# TODO: Where to show error?
+		# io = IOBuffer()
+		# Base.showerror(IOContext(io, :color=>true), e)
+		# message = String(take!(io))
+		# @warn message
 
-			# Do not show anything/much here, it will be shown later instead.
-			bt = Base.catch_backtrace()
-			res = ProcessingException(sa, e, stacktrace(bt))
-		end
+		# Do not show anything/much here, it will be shown later instead.
+		bt = Base.catch_backtrace()
+		res = ProcessingException(sa, e, stacktrace(bt))
 	end
 
 	put!(result_channel, res)
@@ -263,7 +263,7 @@ function process_work(scheduler, work::WorkUnion)
 end
 
 
-preprocess(::Scheduler, err::Exception) = err
+# preprocess(::Scheduler, err::Exception) = err
 
 function preprocess(scheduler::Scheduler, sa::SpecArgs)
 	res = process_work(scheduler, WorkPreprocess(sa))
@@ -272,7 +272,7 @@ end
 
 
 
-compute(::Scheduler, err::Exception) = err
+# compute(::Scheduler, err::Exception) = err
 
 function compute(scheduler::Scheduler, sa::SpecArgs)
 	res = process_work(scheduler, WorkCompute(sa))
@@ -286,6 +286,12 @@ function replace_dependencies(sa::SpecArgs, upstream::IdDict{Spec,Any})
 	err = propagate_error(sa, values(upstream))
 	err !== nothing && return err
 	return map_args(x->get(upstream,x,nothing), sa)
+end
+function replace_dependencies(sa::SpecArgs, upstream::IdDict{Tuple{SpecArgs,Symbol},Any}) # Ugly def since Julia currently doesn't support mutually recursive types
+	err = propagate_error(sa, values(upstream))
+	err !== nothing && return err
+	# return map_args(x->get(upstream, x, nothing), sa)
+	return map_args(x->(x isa Spec) ? get(upstream, (x.sa,x.op), nothing) : nothing, sa) # Ugly - See above. TODO: Make less ugly.
 end
 
 function _fetch_and_compute!(scheduler, sa::SpecArgs, deps::Vector{Spec})
@@ -437,15 +443,6 @@ end
 
 
 
-# DEBUG
-let proccessing_counts = Dict{Hash,Int}()
-	global function processing_count(h::Hash)
-		c = get(proccessing_counts, h, 0) + 1
-		proccessing_counts[h] = c
-		c
-	end
-end
-
 
 
 # Return tuple with result and Bool telling if it's done (TODO: Make code more clear)
@@ -500,6 +497,171 @@ function process_once!(scheduler::Scheduler, sa::SpecArgs, op::Symbol)
 end
 
 
+# function setup_dependency!(scheduler, sa::SpecArgs, op; @nospecialize parent_f)
+# 	if parent_f !== nothing && op in (:forward,:prefetch) && !should_forward_child(parent_f, sa.f)
+# 		return Spec(sa, op) # processing done, we shouldn't forward anymore
+# 	end
+# 	setup_processing!(scheduler, sa, op)
+# end
+
+function setup_dependency!(scheduler, sa::SpecArgs, call::Bool, dep::Spec)
+	curr::Spec = dep
+	if call
+		@assert curr.op == :call
+		next = setup_processing!(scheduler, curr)
+	else
+		# stop before calling
+		next = dep
+		while curr.op !== :call && should_forward_child(sa.f, curr.sa.f)
+			next = setup_processing!(scheduler, curr)
+			next isa Spec || break
+			curr = next
+		end
+	end
+
+	# first attempt
+	# curr::Spec = next = dep
+	# while !(op in (:forward,:prefetch)) || should_forward_child(sa.f, curr.sa.f)
+	# 	# next = setup_dependency!(scheduler, curr.sa, curr.op; parent_f=sa.f)
+	# 	next = setup_processing!(scheduler, curr)
+	# 	next isa Spec || break
+	# 	curr = next
+	# end
+
+	if next === NotValid() # we are waiting for an upstream spec to process
+		w = curr.sa.state::Union{SpecWaiting{SpecArgs},SpecProcessing{SpecArgs}}
+		push!(w.downstream, (sa,(dep.sa,dep.op))) # TODO: Make utility function to avoid ugly tuples here
+		# n_upstream_left += 1
+	end
+
+	# upstream[(dep.sa, dep.op)] = next
+
+	next
+end
+
+
+# WIP
+# This function will do one of the following:
+# 1. return the preprocessed spec/result if there is one cached
+# 2. return the computed result if there is one cached
+# 3. push the spec to the processing queue (if all dependencies are ready)
+# 4. set it up to wait for dependencies to finish processing
+# It may also recursively call setup_processing for the dependencies.
+function setup_processing!(scheduler, spec)
+	sa, op = spec.sa, spec.op
+	@info "setup_processing!: $(sa.f)"
+
+	# Cached forwarding
+	sa.state isa SpecNext{SpecArgs} && return Spec(sa.state)
+
+	if is_preprocessing(sa)
+		# Cached result
+		res = get_result!(sa)
+		res !== NotValid() && return res # Early out for preprocessing specs - it **preprocessed** to a result
+	end
+
+	deps = get_dependencies(sa)
+
+	ready_to_call = !is_preprocessing(sa) && all(x->x.op === :call, deps)
+
+	if op === :forward && ready_to_call
+		return Spec(sa, :call) # We cannot forward any further (Hmm. Should we ever get here? I think we want to prevent this case at an earlier step.)
+	end
+
+	if !is_preprocessing(sa)
+		# Cached result
+		res = get_result!(sa)
+		res !== NotValid() && return res # Early out for computing specs
+	end
+
+
+	# @show deps
+	# @show ready_to_call
+
+	# @show sa
+	# @show deps
+	# @show getfield.(deps, :op)
+
+
+	# # Maybe handle get_cached etc here?
+	# if ready_to_call && sa.f == get_cached
+	# 	@info "mmhm."
+	# end
+
+	# # This *might* be needed
+	# if sa.f == get_cached
+	# 	ready_to_call = false
+	# end
+
+
+
+	upstream = IdDict{Tuple{SpecArgs,Symbol},Any}()
+	n_upstream_left = 0
+	for dep in deps
+		# curr::Spec = next = dep
+		# while !(op in (:forward,:prefetch)) || should_forward_child(sa.f, dep.sa.f)
+		# 	# next = setup_dependency!(scheduler, curr.sa, curr.op; parent_f=sa.f)
+		# 	next = setup_processing!(scheduler, curr.sa, curr.op)
+		# 	next isa Spec || break
+		# 	curr = next
+		# end
+		
+		# upstream[(dep.sa, dep.op)] = next
+		# if next === NotValid() # we are waiting for an upstream spec to process
+		# 	w = curr.sa.state::Union{SpecWaiting{SpecArgs},SpecProcessing{SpecArgs}}
+		# 	push!(w.downstream, (sa,(dep.sa,dep.op))) # TODO: Make utility function to avoid ugly tuples here
+		# 	n_upstream_left += 1
+		# end
+
+		next = setup_dependency!(scheduler, sa, ready_to_call, dep)
+		# @show next
+		# @show next === dep
+		if next !== NotValid() # Did we get a value?
+			upstream[(dep.sa, dep.op)] = next
+		else
+			n_upstream_left += 1
+		end
+	end
+
+
+	# TESTING - this shows that I was missing forwarding to a spec with all deps :call before actually computing
+	if !ready_to_call && n_upstream_left == 0 && !is_preprocessing(sa.f)
+		sa_replaced = sa
+		if !isempty(upstream)
+			sa_replaced = replace_dependencies(sa, upstream)::Union{SpecArgs,ProcessingException}
+		end
+		if sa_replaced isa ProcessingException
+			set_result!(sa, sa_replaced)
+			return sa_replaced
+		else
+			sa_replaced::SpecArgs
+			sa.state = SpecNext(sa_replaced, op) # Keep the op?
+			return Spec(sa.state)
+		end
+	end
+
+
+	# @show n_upstream_left
+	sa.state = SpecWaiting(upstream, n_upstream_left, ready_to_call)
+	# n_upstream_left == 0 && push!(scheduler.processing_queue, sa) # ready to be processed
+
+	# DEBUG
+	if n_upstream_left == 0
+		@info "1: Pushed $(sa.f) to processing queue"
+
+		# @show sa
+		# @show sa.state
+
+		push!(scheduler.processing_queue, sa) # ready to be processed
+	end
+
+
+	return NotValid() # Not yet available (TODO: Use something else to signal this?)
+end
+
+
+
+
 function _reset_progress_display!(scheduler, sa::SpecArgs)
 	empty!(scheduler.progress_display)
 	add_item!(scheduler.progress_display, ProgressText(styled"{blue:Scheduler: }" * ReproducibleJobs.styled_function_name(sa.f)))
@@ -514,6 +676,7 @@ function _update_gc_display!(scheduler::Scheduler)
 end
 
 
+# Old
 # TODO: Avoid passing parent_f which can have many different types and just pass sufficient info to make this decision? Then we can get rid of @nospecialize...
 function process!(scheduler::Scheduler, sa::SpecArgs, op::Symbol; @nospecialize(parent_f=nothing), processing_errors_throw=true, external_call=true)
 	if external_call
@@ -539,6 +702,127 @@ function process!(scheduler::Scheduler, sa::SpecArgs, op::Symbol; @nospecialize(
 		# NB: Keep the op
 	end
 end
+
+
+function _update_downstream!(scheduler::Scheduler, downstream::Vector{Tuple{SpecArgs,Tuple{SpecArgs,Symbol}}}, res)
+	for (sa,(dep_sa,dep_op)) in downstream
+		state = sa.state::SpecWaiting
+
+		# update state, and either continue processing the dep or insert the value (next/result)
+		next = setup_dependency!(scheduler, sa, state.ready_to_call, Spec(dep_sa,dep_op))
+		if next !== NotValid() # Did we get a value?
+			state.upstream[(dep.sa, dep.op)] = next
+			state.n_upstream_left[] -= 1
+			# state.n_upstream_left[] == 0 && push!(scheduler.processing_queue, sa) # Ready to process the owning spec
+			
+			# DEBUG
+			if state.n_upstream_left[] == 0
+				@info "2: Pushed $(sa.f) to processing queue"
+				push!(scheduler.processing_queue, sa) # Ready to process the owning spec
+			end
+		end
+	end
+end
+
+
+
+function process_once_new!(scheduler::Scheduler, sa::SpecArgs)
+	state = sa.state::SpecWaiting
+	@assert state.n_upstream_left[] == 0
+
+	sa_replaced = sa
+	if !isempty(state.upstream)
+		sa_replaced = replace_dependencies(sa, state.upstream)::Union{SpecArgs,ProcessingException}
+	end
+	sa_replaced isa Exception && return sa_replaced
+
+	sa.state = SpecProcessing(state.downstream)
+	if is_preprocessing(sa.f)
+		res = preprocess(scheduler, sa_replaced)
+		if res isa Spec
+			sa.state = SpecNext(res)
+			return res
+		end
+		set_result!(sa, res) # Preprocessing yielded a result, we are done.
+		return res
+	else
+		# Hmm. We currently reach here with uncomputed specs! That was not the intention.
+		@info "process_once_new!"
+		sa.f == get_cached && @show sa_replaced
+
+		# TODO: Support these (probably during `setup_processing!`?)
+		@assert sa.f != compoundresult_sub
+		@assert sa.f != compoundresult_keys
+		@assert sa.f != get_cached
+
+		res = compute(scheduler, sa_replaced)
+		@assert !(res isa CompoundResult) # Is this a good place to check? Maybe should be ensured earlier.
+		@assert !(res isa Spec)
+
+		lru_touch!(scheduler.lru, sa) do
+			Base.summarysize(res)
+		end
+		set_result!(sa, res)
+		return res
+	end
+end
+
+function process_new!(scheduler::Scheduler, spec::Spec; processing_errors_throw=true, external_call=true)
+	if external_call
+		ensure_work_task_is_running!(scheduler)
+		_reset_progress_display!(scheduler, spec.sa)
+	end
+	evict_results!(scheduler; evict_all=false)
+	_update_gc_display!(scheduler)
+
+
+	# TODO: simplify code, should just be one loop - no nesting
+	while true
+		res = setup_processing!(scheduler, spec)
+
+		if res === NotValid()
+			while !isempty(scheduler.processing_queue)
+				curr_sa = pop!(scheduler.processing_queue) # LIFO
+				@info "Popped $(curr_sa.f) from processing queue"
+				@show typeof(curr_sa.state)
+				# @show typeof(curr_sa.state)
+				# @show curr_sa.state.n_upstream_left
+				# @show curr_sa.state.upstream
+				res = process_once_new!(scheduler, curr_sa)
+				processing_errors_throw && res isa Exception && throw(res)
+			end
+		end
+
+		if res isa Spec
+			spec.op == :forward && res.op == :call && return Spec(res.sa, :forward) # is this the right stop criterion?
+
+			spec = res # TODO: Transfer op from spec?
+		else
+			return res
+		end
+	end
+
+
+	# # TODO: This currently only forwards `spec` once. Fix.
+	# setup_processing!(scheduler, spec)
+
+	# while !isempty(scheduler.processing_queue)
+	# 	curr_sa = pop!(scheduler.processing_queue) # LIFO
+	# 	@info "Popped $(curr_sa.f) from processing queue"
+	# 	# @show typeof(curr_sa.state)
+	# 	# @show curr_sa.state.n_upstream_left
+	# 	# @show curr_sa.state.upstream
+	# 	res = process_once_new!(scheduler, curr_sa)
+	# 	processing_errors_throw && res isa Exception && throw(res)
+	# end
+
+	# # DEBUG
+	# spec.sa.state isa SpecNext && return Spec(spec.sa.state)
+
+
+	# return get_result!(spec.sa) # Hmm. Not good enough. The result might be GCed before this! We need to store it in a fake `upstream` or similar. (I guess it works currently because this spec is processed last and the item will thus be in the LRU.)
+end
+
 
 
 fetch!(scheduler::Scheduler, spec::Spec; kwargs...) = process!(scheduler, get_sa(spec), :fetch; kwargs...)

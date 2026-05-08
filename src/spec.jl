@@ -1,7 +1,20 @@
 
 struct SpecInitialized end
-struct SpecWaiting end # Waiting for dependencies to finish
-struct SpecProcessing end # Running or Preprocessing
+
+# TODO: This could be simplified a lot with mutually recursive type definitions. (We could store a Spec directly in that case, instead of sa and op.)
+struct SpecWaiting{T} # Waiting for dependencies to finish
+	downstream::Vector{Tuple{T,Tuple{T,Symbol}}} # Vector of sa=>(dep.sa,dep.op) pairs - so we know which dep to update in sa.state.upstream.
+	upstream::IdDict{Tuple{T,Symbol},Any} # (sa,op)=>next/result
+	n_upstream_left::Base.RefValue{Int}
+	call::Bool # If set to true, all deps will be fetched!, and the owning spec will be computed after all deps are processed.
+end
+SpecWaiting(upstream::IdDict{Tuple{T,Symbol},Any}, n_upstream_left::Int, call::Bool) where T = SpecWaiting{T}([], upstream, Ref(n_upstream_left), call)
+SpecWaiting() = SpecWaiting{SpecArgs}([],IdDict{Tuple{SpecArgs,Symbol},Any}(),Ref(0),false) # DUMMY USED DURING REFACTORING - TODO: Remove
+
+struct SpecProcessing{T}
+	downstream::Vector{Tuple{T,Tuple{T,Symbol}}} # Vector of sa=>(dep.sa,dep.op) pairs - so we know which dep to update in sa.state.upstream.
+end # Running or Preprocessing
+SpecProcessing() = SpecProcessing{SpecArgs}([]) # DUMMY USED DURING REFACTORING - TODO: Remove
 
 # TODO: This could be simplified a lot with mutually recursive type definitions. (We could store a Spec directly in that case, instead of sa and op.)
 struct SpecNext{T}
@@ -25,7 +38,7 @@ end
 
 
 
-# const SpecStateUnion = Union{SpecInitialized, SpecWaiting, SpecProcessing, SpecNext{SpecArgs}, SpecResult, SpecErrored}
+# const SpecStateUnion = Union{SpecInitialized, SpecWaiting{SpecArgs}, SpecProcessing{SpecArgs}, SpecNext{SpecArgs}, SpecResult, SpecErrored}
 
 # TODO: Can we find a better name for this struct?
 mutable struct SpecArgs # TODO: Add template parameters for args/kwargs? Or find a another way to handle types better?
@@ -35,7 +48,7 @@ mutable struct SpecArgs # TODO: Add template parameters for args/kwargs? Or find
 	const args::Vector{Any}
 	const kwargs::Vector{Pair{Symbol,Any}}
 
-	state::Union{SpecInitialized, SpecWaiting, SpecProcessing, SpecNext{SpecArgs}, SpecResult, SpecErrored} # SpecStateUnion, but we cannot define it already because it uses SpecArgs
+	state::Union{SpecInitialized, SpecWaiting{SpecArgs}, SpecProcessing{SpecArgs}, SpecNext{SpecArgs}, SpecResult, SpecErrored} # SpecStateUnion, but we cannot define it already because it uses SpecArgs
 
 	function SpecArgs(f, args, kwargs)
 		# @assert issorted(keys(kwargs))
@@ -46,7 +59,7 @@ end
 SpecArgs(sa::SpecArgs) = sa
 
 
-const SpecStateUnion = Union{SpecInitialized, SpecWaiting, SpecProcessing, SpecNext{SpecArgs}, SpecResult, SpecErrored}
+const SpecStateUnion = Union{SpecInitialized, SpecWaiting{SpecArgs}, SpecProcessing{SpecArgs}, SpecNext{SpecArgs}, SpecResult, SpecErrored}
 
 
 Base.propertynames(::SpecArgs, private::Bool=false) =
