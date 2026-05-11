@@ -526,9 +526,9 @@ end
 # 3. push the spec to the processing queue (if all dependencies are ready)
 # 4. set it up to wait for dependencies to finish processing
 # It may also recursively call setup_processing for the dependencies.
-function setup_processing!(scheduler, ref)
-	sr, op = ref.sr, ref.op
-	@info "setup_processing!: $(sr.f)"
+function setup_processing!(scheduler, job)
+	sr, op = job.sr, job.op
+	# add_info_item!(scheduler.progress_display, "setup_processing!: $(sr.f)")
 
 	# Cached forwarding
 	sr.state.x isa Next{State} && return sr.state.x.ref
@@ -615,10 +615,11 @@ function setup_processing!(scheduler, ref)
 			return spec_replaced
 		else
 			spec_replaced::Spec
-			sr_replaced = SpecRun(spec_replaced) # This should surely be deduplicated.
-			new_ref = Job(sr_replaced, op) # keep the op?
-			sr.state = state_next(new_ref)
-			return new_ref
+			# sr_replaced = SpecRun(spec_replaced) # This should surely be deduplicated.
+			sr_replaced = deduplicate!(scheduler.deduplicator, SpecRun(spec_replaced); transfer_ownership=true)
+			new_job = Job(sr_replaced, :call)
+			sr.state = state_next(new_job)
+			return new_job
 		end
 	end
 
@@ -629,7 +630,7 @@ function setup_processing!(scheduler, ref)
 
 	# DEBUG
 	if n_upstream_left == 0
-		@info "1: Pushed $(sr.f) to processing queue"
+		# add_info_item!(scheduler.progress_display, "1: Pushed $(sr.f) to processing queue")
 
 		# @show sr
 		# @show sr.state
@@ -686,6 +687,37 @@ function process!(scheduler::Scheduler, sr::SpecRun, op::Symbol; @nospecialize(p
 end
 
 
+
+
+fetch!(scheduler::Scheduler, job::Job; kwargs...) = process!(scheduler, get_sr(job), :fetch; kwargs...)
+forward!(scheduler::Scheduler, job::Job; kwargs...) = process!(scheduler, get_sr(job), :forward; kwargs...)
+process!(scheduler::Scheduler, job::Job; kwargs...) = process!(scheduler, get_sr(job), job.op; kwargs...)
+
+
+function forward_once!(scheduler::Scheduler, job::Job; processing_errors_throw=true, external_call=true)
+	sr = get_sr(job)
+	if external_call
+		ensure_work_task_is_running!(scheduler)
+		_reset_progress_display!(scheduler, sr)
+	end
+	evict_results!(scheduler; evict_all=false)
+	_update_gc_display!(scheduler)
+	res, _ = process_once!(scheduler, sr, :forward)
+	processing_errors_throw && res isa Exception && throw(res)
+	res
+end
+
+
+fetch!(job::Job; kwargs...) = fetch!(get_scheduler(), job; kwargs...)
+forward!(job::Job; kwargs...) = forward!(get_scheduler(), job; kwargs...)
+forward_once!(job::Job; kwargs...) = forward_once!(get_scheduler(), job; kwargs...)
+process!(job::Job; kwargs...) = process!(get_scheduler(), job; kwargs...)
+
+
+
+
+
+
 function _update_downstream!(scheduler::Scheduler, downstream::Vector{Pair{SpecRun{State},Job}}, res)
 	for (sr,dep) in downstream
 		waiting = sr.state.x::Waiting{State}
@@ -702,7 +734,7 @@ function _update_downstream!(scheduler::Scheduler, downstream::Vector{Pair{SpecR
 			
 			# DEBUG
 			if waiting.n_upstream_left[] == 0
-				@info "2: Pushed $(sr.f) to processing queue"
+				# add_info_item!(scheduler.progress_display, "2: Pushed $(sr.f) to processing queue")
 				push!(scheduler.processing_queue, sr) # Ready to process the owning spec
 			end
 		end
@@ -765,8 +797,10 @@ function process_once_new!(scheduler::Scheduler, sr::SpecRun)
 		return res
 	else
 		# Hmm. We currently reach here with uncomputed specs! That was not the intention.
-		@info "process_once_new!"
-		sr.f == get_cached && @show spec_replaced
+		# @info "process_once_new!"
+		# sr.f == get_cached && @show spec_replaced
+		# add_info_item!(scheduler.progress_display, "process_once_new!")
+		# sr.f == get_cached && add_info_item!(scheduler.progress_display, string(spec_replaced.f))
 
 		# TODO: Support these (probably during `setup_processing!`?)
 		@assert sr.f != compoundresult_sub
@@ -786,7 +820,7 @@ function process_once_new!(scheduler::Scheduler, sr::SpecRun)
 	end
 end
 
-function process_new!(scheduler::Scheduler, job::Job; processing_errors_throw=true, external_call=true)
+function process_new!(scheduler::Scheduler, job::Job; processing_errors_throw=true, external_call=true, once=false)
 	if external_call
 		ensure_work_task_is_running!(scheduler)
 		_reset_progress_display!(scheduler, job.sr)
@@ -802,8 +836,8 @@ function process_new!(scheduler::Scheduler, job::Job; processing_errors_throw=tr
 		if res === NotValid()
 			while !isempty(scheduler.processing_queue)
 				curr_sr = pop!(scheduler.processing_queue) # LIFO
-				add_info_item!(scheduler.progress_display, "Popped $(curr_sr.f) from processing queue")
-				add_info_item!(scheduler.progress_display, string(typeof(curr_sr.state.x)))
+				# @info "Popped $(curr_sr.f) from processing queue"
+				# add_info_item!(scheduler.progress_display, "Popped $(curr_sr.f) from processing queue")
 				# @show curr_sr.state.n_upstream_left
 				# @show curr_sr.state.upstream
 				res = process_once_new!(scheduler, curr_sr)
@@ -814,6 +848,7 @@ function process_new!(scheduler::Scheduler, job::Job; processing_errors_throw=tr
 		if res isa Job
 			job.op == :forward && res.op == :call && return res # is this the right stop criterion?
 			job = transfer_op(job, res)
+			once && return job
 		else
 			return res
 		end
@@ -868,37 +903,13 @@ end
 
 fetch_new!(scheduler::Scheduler, job::Job; kwargs...) = process_new!(scheduler, Job(get_sr(job), :fetch); kwargs...)
 forward_new!(scheduler::Scheduler, job::Job; kwargs...) = process_new!(scheduler, Job(get_sr(job), :forward); kwargs...)
+forward_once_new!(scheduler::Scheduler, job::Job; kwargs...) = process_new!(scheduler, Job(get_sr(job), :forward); kwargs..., once=true)
 
 fetch_new!(job::Job; kwargs...) = fetch_new!(get_scheduler(), 0job; kwargs...)
 forward_new!(job::Job; kwargs...) = forward_new!(get_scheduler(), job; kwargs...)
+forward_once_new!(job::Job; kwargs...) = forward_once_new!(get_scheduler(), job; kwargs...)
 
 
-
-
-
-fetch!(scheduler::Scheduler, job::Job; kwargs...) = process!(scheduler, get_sr(job), :fetch; kwargs...)
-forward!(scheduler::Scheduler, job::Job; kwargs...) = process!(scheduler, get_sr(job), :forward; kwargs...)
-process!(scheduler::Scheduler, job::Job; kwargs...) = process!(scheduler, get_sr(job), job.op; kwargs...)
-
-
-function forward_once!(scheduler::Scheduler, job::Job; processing_errors_throw=true, external_call=true)
-	sr = get_sr(job)
-	if external_call
-		ensure_work_task_is_running!(scheduler)
-		_reset_progress_display!(scheduler, sr)
-	end
-	evict_results!(scheduler; evict_all=false)
-	_update_gc_display!(scheduler)
-	res, _ = process_once!(scheduler, sr, :forward)
-	processing_errors_throw && res isa Exception && throw(res)
-	res
-end
-
-
-fetch!(job::Job; kwargs...) = fetch!(get_scheduler(), job; kwargs...)
-forward!(job::Job; kwargs...) = forward!(get_scheduler(), job; kwargs...)
-forward_once!(job::Job; kwargs...) = forward_once!(get_scheduler(), job; kwargs...)
-process!(job::Job; kwargs...) = process!(get_scheduler(), job; kwargs...)
 
 
 
