@@ -1,7 +1,7 @@
 
 struct SpecInitialized end
 
-# TODO: This could be simplified a lot with mutually recursive type definitions. (We could store a Spec directly in that case, instead of sr and op.)
+# TODO: This could be simplified a lot with mutually recursive type definitions. (We could store a SpecRef directly in that case, instead of sr and op.)
 struct SpecWaiting{T} # Waiting for dependencies to finish
 	downstream::Vector{Tuple{T,Tuple{T,Symbol}}} # Vector of sr=>(dep.sr,dep.op) pairs - so we know which dep to update in sr.state.upstream.
 	upstream::IdDict{Tuple{T,Symbol},Any} # (sr,op)=>next/result
@@ -16,12 +16,12 @@ struct SpecProcessing{T}
 end # Running or Preprocessing
 SpecProcessing() = SpecProcessing{SpecRun}([]) # DUMMY USED DURING REFACTORING - TODO: Remove
 
-# TODO: This could be simplified a lot with mutually recursive type definitions. (We could store a Spec directly in that case, instead of sr and op.)
+# TODO: This could be simplified a lot with mutually recursive type definitions. (We could store a SpecRef directly in that case, instead of sr and op.)
 struct SpecNext{T}
 	sr::T # This is always SpecRun, but we need a type parameter to handle the mutually recursive types.
 	op::Symbol
 end
-# See below for constructor taking Spec
+# See below for constructor taking SpecRef
 
 
 struct SpecResult
@@ -37,33 +37,55 @@ end
 
 
 
+struct Spec
+	f::Any
+	args::Vector{Any}
+	kwargs::Vector{Pair{Symbol,Any}}
+
+	function Spec(f, args, kwargs)
+		@assert issorted(kwargs; by=first) # TODO: Also check that we don't have duplicate keys?
+		new(f, args, kwargs)
+	end
+end
+
+# Usually accessed through getproperty
+get_function(spec::Spec) = spec.f
+get_args(spec::Spec) = spec.args
+get_kwargs(spec::Spec) = spec.kwargs
+
+
 
 # const SpecStateUnion = Union{SpecInitialized, SpecWaiting{SpecRun}, SpecProcessing{SpecRun}, SpecNext{SpecRun}, SpecResult, SpecErrored}
 
-# TODO: Can we find a better name for this struct?
-mutable struct SpecRun # TODO: Add template parameters for args/kwargs? Or find a another way to handle types better?
-	const f::Any
-	# args::Tuple
-	# kwargs::NamedTuple
-	const args::Vector{Any}
-	const kwargs::Vector{Pair{Symbol,Any}}
-
+mutable struct SpecRun
+	const spec::Spec
 	state::Union{SpecInitialized, SpecWaiting{SpecRun}, SpecProcessing{SpecRun}, SpecNext{SpecRun}, SpecResult, SpecErrored} # SpecStateUnion, but we cannot define it already because it uses SpecRun
-
-	function SpecRun(f, args, kwargs)
-		# @assert issorted(keys(kwargs))
-		@assert issorted(kwargs; by=first) # TODO: Also check that we don't have duplicate keys?
-		new(f, args, kwargs, SpecInitialized())
-	end
 end
+SpecRun(spec::Spec) = SpecRun(spec, SpecInitialized())
 SpecRun(sr::SpecRun) = sr
 
 
 const SpecStateUnion = Union{SpecInitialized, SpecWaiting{SpecRun}, SpecProcessing{SpecRun}, SpecNext{SpecRun}, SpecResult, SpecErrored}
 
 
+# Base.propertynames(::SpecRun, private::Bool=false) =
+# 	private ? fieldnames(SpecRun) : (:f, :args, :kwargs)
+
+
+# Usually accessed through getproperty
+get_function(sr::SpecRun) = get_function(sr.spec)
+get_args(sr::SpecRun) = get_args(sr.spec)
+get_kwargs(sr::SpecRun) = get_kwargs(sr.spec)
+
+function Base.getproperty(sr::SpecRun, s::Symbol)
+	s === :f && return get_function(sr)
+	s === :args && return get_args(sr)
+	s === :kwargs && return get_kwargs(sr)
+	getfield(sr, s)
+end
 Base.propertynames(::SpecRun, private::Bool=false) =
-	private ? fieldnames(SpecRun) : (:f, :args, :kwargs)
+	private ? (:f, :args, :kwargs, :spec, :state) : (:f, :args, :kwargs)
+
 
 
 # Doesn't create a new vector unless any child changed during deduplication
@@ -89,13 +111,6 @@ deduplication_pointer(sr::SpecRun) = pointer_from_objref(sr)
 function deduplicate_children!(d, sr::SpecRun; kwargs...)
 	f = sr.f # TODO: Should this be processed somehow? Probably not.
 
-	# Tuple/NamedTuple version
-	# a = deduplicate!(d, sr.args; kwargs...)
-	# kw = deduplicate!(d, sr.kwargs; kwargs...)
-
-	# Vector{Any}/Vector{Pair{Symbol,Any}} version
-	# a = _deduplicate_args(d, sr.args; kwargs...)
-	# kw = _deduplicate_args(d, sr.kwargs; kwargs...)
 	a = _map_arg_vec(sr.args) do x
 		deduplicate!(d, x; kwargs...)
 	end
@@ -106,7 +121,7 @@ function deduplicate_children!(d, sr::SpecRun; kwargs...)
 	if f === sr.f && a === sr.args && kw === sr.kwargs
 		sr # Not changed
 	else
-		SpecRun(f, a, kw)
+		SpecRun(Spec(f, a, kw))
 	end
 end
 function deduplication_hash(d, sr::SpecRun)
@@ -125,7 +140,7 @@ function deduplication_hash(d, sr::SpecRun)
 	kw = _map_arg_vec(sr.kwargs) do p
 		p[1]=>hash_or_value(d, p[2])
 	end
-	compute_hash(d, (TypeTag(:SpecRun), sr.f, a, kw))
+	compute_hash(d, (TypeTag(:Spec), sr.f, a, kw))
 end
 deduplication_copy(sr::SpecRun) = sr
 
@@ -134,17 +149,17 @@ deduplication_copy(sr::SpecRun) = sr
 function cache_save(io, name, sr::SpecRun)
 	# Save as a group
 	g = JLD2.Group(io, name)
-	g["type"] = "SpecRun"
+	g["type"] = "Spec"
 	g["f"] = sr.f # Is this the best I can do?
 	cache_save(g, "args", sr.args) # TODO: Must be fixed now that we use Vector{Any}
 	cache_save(g, "kwargs", sr.kwargs) # TODO: Must be fixed now that we use Vector{Pair{Symbol,Any}}
 	nothing
 end
-function cache_load(cache::Cache, ::Val{:SpecRun}, g)
+function cache_load(cache::Cache, ::Val{:Spec}, g)
 	f = g["f"]
 	args = cache_load(cache, g, "args") # TODO: Must be fixed now that we use Vector{Any}
 	kwargs = cache_load(cache, g, "kwargs") # TODO: Must be fixed now that we use Vector{Pair{Symbol,Any}}
-	sr = SpecRun(f, args, kwargs)
+	sr = SpecRun(Spec(f, args, kwargs))
 	deduplicate!(cache.deduplicator, sr; transfer_ownership=true)
 end
 
@@ -285,9 +300,9 @@ Base.Broadcast.broadcastable(ref::SpecRef) = Ref(ref) # treat as scalar for broa
 
 
 # Usually accessed through getproperty
-get_function(ref::SpecRef) = ref.sr.f
-get_args(ref::SpecRef) = ref.sr.args
-get_kwargs(ref::SpecRef) = ref.sr.kwargs
+get_function(ref::SpecRef) = get_function(ref.sr)
+get_args(ref::SpecRef) = get_args(ref.sr)
+get_kwargs(ref::SpecRef) = get_kwargs(ref.sr)
 
 function Base.getproperty(ref::SpecRef, s::Symbol)
 	s === :f && return get_function(ref)
@@ -352,7 +367,7 @@ function create_spec(f, args...; scheduler=get_scheduler(), deduplicator=schedul
 	a = collect(Any, args)
 	kw = collect(Pair{Symbol,Any}, kwargs)
 	sort!(kw; by=first)
-	sr = SpecRun(f, a, kw)
+	sr = SpecRun(Spec(f, a, kw))
 
 	deduplicator !== nothing && (sr = deduplicate!(deduplicator, sr))
 	SpecRef(sr)
@@ -429,7 +444,7 @@ function map_args(f::F, sr::SpecRun) where F
 		p[1]=>map_specs(f, p[2])
 	end
 
-	SpecRun(sr.f, a, kw)
+	SpecRun(Spec(sr.f, a, kw))
 end
 
 
