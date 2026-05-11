@@ -10,8 +10,8 @@ is_preprocessing(f, ::Spec) = is_preprocessing(f)
 is_preprocessing(f) = false
 
 # function get_dependencies(f::F, spec::Spec) where F
-# 	deps = SpecRef[]
-# 	visit_dependencies(spec) do dep::SpecRef
+# 	deps = Job[]
+# 	visit_dependencies(spec) do dep::Job
 # 		f(dep) && push!(deps, dep)
 # 	end
 # 	return unique!(deps)
@@ -20,8 +20,8 @@ is_preprocessing(f) = false
 # get_dependencies(spec::Spec) = get_dependencies(Returns(true), spec)
 
 function get_dependencies(spec::Spec)
-	deps = SpecRef[]
-	visit_dependencies(spec) do dep::SpecRef
+	deps = Job[]
+	visit_dependencies(spec) do dep::Job
 		push!(deps, dep)
 	end
 	return unique!(deps)

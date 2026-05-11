@@ -283,7 +283,7 @@ function _should_collapse(::Type{T}; nested::Bool) where T
 	return false
 end
 
-_should_collapse(::Type{SpecRef}; nested) = false
+_should_collapse(::Type{<:SpecRef}; nested) = false
 
 _should_collapse(::Type{AbstractRange}; nested) = true
 function _should_collapse(::Type{T}; nested) where T<:Union{<:AbstractArray, <:AbstractDict, <:AbstractSet}

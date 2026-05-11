@@ -153,7 +153,7 @@ function _run_spec_tests()
 
 		let set = f(Set((spec,2)))
 			(v1,v2) = set
-			v1 isa SpecRef || ((v1,v2) = (v2,v1)) # handle that order is not guaranteed
+			v1 isa Job || ((v1,v2) = (v2,v1)) # handle that order is not guaranteed
 			@test v1.op === op
 			@test v1.sr === spec.sr
 			@test v2 == 2
