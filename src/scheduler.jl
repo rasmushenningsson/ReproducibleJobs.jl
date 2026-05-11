@@ -498,11 +498,11 @@ function setup_dependency!(scheduler, sr::SpecRun{State}, call::Bool, dep::Job)
 	end
 
 	# first attempt
-	# curr::SpecRef = next = dep
+	# curr::Job = next = dep
 	# while !(op in (:forward,:prefetch)) || should_forward_child(sr.f, curr.sr.f)
 	# 	# next = setup_dependency!(scheduler, curr.sr, curr.op; parent_f=sr.f)
 	# 	next = setup_processing!(scheduler, curr)
-	# 	next isa SpecRef || break
+	# 	next isa Job || break
 	# 	curr = next
 	# end
 
@@ -577,11 +577,11 @@ function setup_processing!(scheduler, ref)
 	upstream = IdDict{Job,Any}()
 	n_upstream_left = 0
 	for dep in deps
-		# curr::SpecRef = next = dep
+		# curr::Job = next = dep
 		# while !(op in (:forward,:prefetch)) || should_forward_child(sr.f, dep.sr.f)
 		# 	# next = setup_dependency!(scheduler, curr.sr, curr.op; parent_f=sr.f)
 		# 	next = setup_processing!(scheduler, curr.sr, curr.op)
-		# 	next isa SpecRef || break
+		# 	next isa Job || break
 		# 	curr = next
 		# end
 		
@@ -691,9 +691,12 @@ function _update_downstream!(scheduler::Scheduler, downstream::Vector{Pair{SpecR
 		waiting = sr.state.x::Waiting{State}
 
 		# update waiting state, and either continue processing the dep or insert the value (next/result)
-		next = setup_dependency!(scheduler, sr, waiting.call, dep)
-		if next !== NotValid() # Did we get a value?
-			waiting.upstream[dep] = next
+		if res isa Job
+			res = setup_dependency!(scheduler, sr, waiting.call, res)
+		end
+
+		if res !== NotValid() # Did we get a value?
+			waiting.upstream[dep] = res
 			waiting.n_upstream_left[] -= 1
 			# waiting.n_upstream_left[] == 0 && push!(scheduler.processing_queue, sr) # Ready to process the owning spec
 			
@@ -709,19 +712,22 @@ end
 
 
 function process_once_new!(scheduler::Scheduler, sr::SpecRun)
-	state = sr.state.x::Waiting{State}
-	@assert state.n_upstream_left[] == 0
+	waiting = sr.state.x::Waiting{State}
+	@assert waiting.n_upstream_left[] == 0
 
-	if isempty(state.upstream)
+	if isempty(waiting.upstream)
 		spec_replaced = sr.spec
 	else
-		spec_replaced = replace_dependencies(sr.spec, state.upstream)::Union{Spec,ProcessingException}
+		spec_replaced = replace_dependencies(sr.spec, waiting.upstream)::Union{Spec,ProcessingException}
 	end
 	spec_replaced isa Exception && return spec_replaced
 
-	sr.state = state_processing(state.downstream)
+	downstream = waiting.downstream
+	sr.state = state_processing(downstream)
 	if is_preprocessing(sr.f)
 		res = preprocess(scheduler, spec_replaced)
+		_update_downstream!(scheduler, downstream, res)
+
 		if res isa Job
 			sr.state = state_next(res)
 			return res
@@ -745,6 +751,7 @@ function process_once_new!(scheduler::Scheduler, sr::SpecRun)
 		lru_touch!(scheduler.lru, sr) do
 			Base.summarysize(res)
 		end
+		_update_downstream!(scheduler, downstream, res)
 		set_result!(sr, res)
 		return res
 	end
