@@ -497,24 +497,10 @@ function setup_dependency!(scheduler, sr::SpecRun{State}, call::Bool, dep::Job)
 		end
 	end
 
-	# first attempt
-	# curr::Job = next = dep
-	# while !(op in (:forward,:prefetch)) || should_forward_child(sr.f, curr.sr.f)
-	# 	# next = setup_dependency!(scheduler, curr.sr, curr.op; parent_f=sr.f)
-	# 	next = setup_processing!(scheduler, curr)
-	# 	next isa Job || break
-	# 	curr = next
-	# end
-
 	if next === NotValid() # we are waiting for an upstream spec to process
 		w = curr.sr.state.x::Union{Waiting{State}, Processing{State}}
-		# push!(w.downstream, (sr,(dep.sr,dep.op))) # TODO: Make utility function to avoid ugly tuples here
 		push!(w.downstream, sr=>dep)
-		# n_upstream_left += 1
 	end
-
-	# upstream[(dep.sr, dep.op)] = next
-
 	next
 end
 
@@ -528,7 +514,6 @@ end
 # It may also recursively call setup_processing for the dependencies.
 function setup_processing!(scheduler, job)
 	sr, op = job.sr, job.op
-	# add_info_item!(scheduler.progress_display, "setup_processing!: $(sr.f)")
 
 	# Cached forwarding
 	sr.state.x isa Next{State} && return sr.state.x.ref
@@ -554,47 +539,11 @@ function setup_processing!(scheduler, job)
 	end
 
 
-	# @show deps
-	# @show ready_to_call
-
-	# @show sr
-	# @show deps
-	# @show getfield.(deps, :op)
-
-
-	# # Maybe handle get_cached etc here?
-	# if ready_to_call && sr.f == get_cached
-	# 	@info "mmhm."
-	# end
-
-	# # This *might* be needed
-	# if sr.f == get_cached
-	# 	ready_to_call = false
-	# end
-
-
 
 	upstream = IdDict{Job,Any}()
 	n_upstream_left = 0
 	for dep in deps
-		# curr::Job = next = dep
-		# while !(op in (:forward,:prefetch)) || should_forward_child(sr.f, dep.sr.f)
-		# 	# next = setup_dependency!(scheduler, curr.sr, curr.op; parent_f=sr.f)
-		# 	next = setup_processing!(scheduler, curr.sr, curr.op)
-		# 	next isa Job || break
-		# 	curr = next
-		# end
-		
-		# upstream[(dep.sr, dep.op)] = next
-		# if next === NotValid() # we are waiting for an upstream spec to process
-		# 	w = curr.sr.state::Union{SpecWaiting{SpecRun},SpecProcessing{SpecRun}}
-		# 	push!(w.downstream, (sr,(dep.sr,dep.op))) # TODO: Make utility function to avoid ugly tuples here
-		# 	n_upstream_left += 1
-		# end
-
 		next = setup_dependency!(scheduler, sr, ready_to_call, dep)
-		# @show next
-		# @show next === dep
 		if next !== NotValid() # Did we get a value?
 			upstream[dep] = next
 		else
@@ -603,7 +552,7 @@ function setup_processing!(scheduler, job)
 	end
 
 
-	# TESTING - this shows that I was missing forwarding to a spec with all deps :call before actually computing
+	# This is needed to ensure we forward to a spec with all deps :call before actually computing - TODO: Improve readability
 	if !ready_to_call && n_upstream_left == 0 && !is_preprocessing(sr.f)
 		if isempty(upstream)
 			spec_replaced = sr.spec
@@ -615,7 +564,6 @@ function setup_processing!(scheduler, job)
 			return spec_replaced
 		else
 			spec_replaced::Spec
-			# sr_replaced = SpecRun(spec_replaced) # This should surely be deduplicated.
 			sr_replaced = deduplicate!(scheduler.deduplicator, SpecRun(spec_replaced); transfer_ownership=true)
 			new_job = Job(sr_replaced, :call)
 			sr.state = state_next(new_job)
@@ -624,20 +572,8 @@ function setup_processing!(scheduler, job)
 	end
 
 
-	# @show n_upstream_left
 	sr.state = state_waiting(upstream, n_upstream_left, ready_to_call)
-	# n_upstream_left == 0 && push!(scheduler.processing_queue, sr) # ready to be processed
-
-	# DEBUG
-	if n_upstream_left == 0
-		# add_info_item!(scheduler.progress_display, "1: Pushed $(sr.f) to processing queue")
-
-		# @show sr
-		# @show sr.state
-
-		push!(scheduler.processing_queue, sr) # ready to be processed
-	end
-
+	n_upstream_left == 0 && push!(scheduler.processing_queue, sr) # ready to be processed
 
 	return NotValid() # Not yet available (TODO: Use something else to signal this?)
 end
@@ -730,13 +666,15 @@ function _update_downstream!(scheduler::Scheduler, downstream::Vector{Pair{SpecR
 		if res !== NotValid() # Did we get a value?
 			waiting.upstream[dep] = res
 			waiting.n_upstream_left[] -= 1
-			# waiting.n_upstream_left[] == 0 && push!(scheduler.processing_queue, sr) # Ready to process the owning spec
+
+			# Hmm. I surely must check waiting.call here? If it's not ready_to_call, then I must return a Job with :call, instead of pushing to the processing_queue.
+			waiting.n_upstream_left[] == 0 && push!(scheduler.processing_queue, sr) # Ready to process the owning spec
 			
-			# DEBUG
-			if waiting.n_upstream_left[] == 0
-				# add_info_item!(scheduler.progress_display, "2: Pushed $(sr.f) to processing queue")
-				push!(scheduler.processing_queue, sr) # Ready to process the owning spec
-			end
+			# # DEBUG
+			# if waiting.n_upstream_left[] == 0
+			# 	# add_info_item!(scheduler.progress_display, "2: Pushed $(sr.f) to processing queue")
+			# 	push!(scheduler.processing_queue, sr) # Ready to process the owning spec
+			# end
 		end
 	end
 end
@@ -772,7 +710,7 @@ end
 
 
 
-function process_once_new!(scheduler::Scheduler, sr::SpecRun)
+function process_step_new!(scheduler::Scheduler, sr::SpecRun)
 	waiting = sr.state.x::Waiting{State}
 	@assert waiting.n_upstream_left[] == 0
 
@@ -796,12 +734,6 @@ function process_once_new!(scheduler::Scheduler, sr::SpecRun)
 		set_result!(sr, res) # Preprocessing yielded a result, we are done.
 		return res
 	else
-		# Hmm. We currently reach here with uncomputed specs! That was not the intention.
-		# @info "process_once_new!"
-		# sr.f == get_cached && @show spec_replaced
-		# add_info_item!(scheduler.progress_display, "process_once_new!")
-		# sr.f == get_cached && add_info_item!(scheduler.progress_display, string(spec_replaced.f))
-
 		# TODO: Support these (probably during `setup_processing!`?)
 		@assert sr.f != compoundresult_sub
 		@assert sr.f != compoundresult_keys
@@ -829,7 +761,7 @@ function process_new!(scheduler::Scheduler, job::Job; processing_errors_throw=tr
 	_update_gc_display!(scheduler)
 
 
-	# TODO: simplify code, should just be one loop - no nesting
+	# TODO: simplify code?
 	while true
 		res = setup_processing!(scheduler, job)
 
@@ -837,10 +769,7 @@ function process_new!(scheduler::Scheduler, job::Job; processing_errors_throw=tr
 			while !isempty(scheduler.processing_queue)
 				curr_sr = pop!(scheduler.processing_queue) # LIFO
 				# @info "Popped $(curr_sr.f) from processing queue"
-				# add_info_item!(scheduler.progress_display, "Popped $(curr_sr.f) from processing queue")
-				# @show curr_sr.state.n_upstream_left
-				# @show curr_sr.state.upstream
-				res = process_once_new!(scheduler, curr_sr)
+				res = process_step_new!(scheduler, curr_sr)
 				processing_errors_throw && res isa Exception && throw(res)
 			end
 		end
@@ -853,59 +782,13 @@ function process_new!(scheduler::Scheduler, job::Job; processing_errors_throw=tr
 			return res
 		end
 	end
-
-
-	# # TODO: simplify code, should just be one loop - no nesting
-	# while true
-	# 	res = setup_processing!(scheduler, job)
-
-	# 	if res === NotValid()
-	# 		while !isempty(scheduler.processing_queue)
-	# 			curr_sr = pop!(scheduler.processing_queue) # LIFO
-	# 			add_info_item!(scheduler.progress_display, "Popped $(curr_sr.f) from processing queue")
-	# 			add_info_item!(scheduler.progress_display, string(typeof(curr_sr.state.x)))
-	# 			# @show curr_sr.state.n_upstream_left
-	# 			# @show curr_sr.state.upstream
-	# 			res = process_once_new!(scheduler, curr_sr)
-	# 			processing_errors_throw && res isa Exception && throw(res)
-	# 		end
-	# 	end
-
-	# 	if res isa Job
-	# 		job.op == :forward && res.op == :call && return Job(res.sr, :forward) # is this the right stop criterion?
-
-	# 		job = res # TODO: Transfer op from job?
-	# 	else
-	# 		return res
-	# 	end
-	# end
-
-
-	# # TODO: This currently only forwards `spec` once. Fix.
-	# setup_processing!(scheduler, spec)
-
-	# while !isempty(scheduler.processing_queue)
-	# 	curr_sr = pop!(scheduler.processing_queue) # LIFO
-	# 	@info "Popped $(curr_sr.f) from processing queue"
-	# 	# @show typeof(curr_sr.state)
-	# 	# @show curr_sr.state.n_upstream_left
-	# 	# @show curr_sr.state.upstream
-	# 	res = process_once_new!(scheduler, curr_sr)
-	# 	processing_errors_throw && res isa Exception && throw(res)
-	# end
-
-	# # DEBUG
-	# spec.sr.state.x isa SpecNext && return Job(spec.sr.state.x)
-
-
-	# return get_result!(spec.sr) # Hmm. Not good enough. The result might be GCed before this! We need to store it in a fake `upstream` or similar. (I guess it works currently because this spec is processed last and the item will thus be in the LRU.)
 end
 
 fetch_new!(scheduler::Scheduler, job::Job; kwargs...) = process_new!(scheduler, Job(get_sr(job), :fetch); kwargs...)
 forward_new!(scheduler::Scheduler, job::Job; kwargs...) = process_new!(scheduler, Job(get_sr(job), :forward); kwargs...)
 forward_once_new!(scheduler::Scheduler, job::Job; kwargs...) = process_new!(scheduler, Job(get_sr(job), :forward); kwargs..., once=true)
 
-fetch_new!(job::Job; kwargs...) = fetch_new!(get_scheduler(), 0job; kwargs...)
+fetch_new!(job::Job; kwargs...) = fetch_new!(get_scheduler(), job; kwargs...)
 forward_new!(job::Job; kwargs...) = forward_new!(get_scheduler(), job; kwargs...)
 forward_once_new!(job::Job; kwargs...) = forward_once_new!(get_scheduler(), job; kwargs...)
 
