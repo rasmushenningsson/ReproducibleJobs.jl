@@ -709,6 +709,35 @@ function _update_downstream!(scheduler::Scheduler, downstream::Vector{Pair{SpecR
 	end
 end
 
+# Callback version - is it needed?
+# function _update_downstream!(scheduler::Scheduler, downstream::Vector{Pair{Union{SpecRun{State},Function},Job}}, res)
+# 	for (owner,dep) in downstream
+# 		if owner isa SpecRun{State}
+# 			sr = owner::SpecRun{State}
+# 			waiting = sr.state.x::Waiting{State}
+
+# 			# update waiting state, and either continue processing the dep or insert the value (next/result)
+# 			if res isa Job
+# 				res = setup_dependency!(scheduler, sr, waiting.call, res)
+# 			end
+
+# 			if res !== NotValid() # Did we get a value?
+# 				waiting.upstream[dep] = res
+# 				waiting.n_upstream_left[] -= 1
+# 				# waiting.n_upstream_left[] == 0 && push!(scheduler.processing_queue, sr) # Ready to process the owning spec
+
+# 				# DEBUG
+# 				if waiting.n_upstream_left[] == 0
+# 					@info "2: Pushed $(sr.f) to processing queue"
+# 					push!(scheduler.processing_queue, sr) # Ready to process the owning spec
+# 				end
+# 			end
+# 		else
+# 			owner(dep, res)
+# 		end
+# 	end
+# end
+
 
 
 function process_once_new!(scheduler::Scheduler, sr::SpecRun)
@@ -773,8 +802,8 @@ function process_new!(scheduler::Scheduler, job::Job; processing_errors_throw=tr
 		if res === NotValid()
 			while !isempty(scheduler.processing_queue)
 				curr_sr = pop!(scheduler.processing_queue) # LIFO
-				@info "Popped $(curr_sr.f) from processing queue"
-				@show typeof(curr_sr.state.x)
+				add_info_item!(scheduler.progress_display, "Popped $(curr_sr.f) from processing queue")
+				add_info_item!(scheduler.progress_display, string(typeof(curr_sr.state.x)))
 				# @show curr_sr.state.n_upstream_left
 				# @show curr_sr.state.upstream
 				res = process_once_new!(scheduler, curr_sr)
@@ -783,13 +812,38 @@ function process_new!(scheduler::Scheduler, job::Job; processing_errors_throw=tr
 		end
 
 		if res isa Job
-			job.op == :forward && res.op == :call && return Job(res.sr, :forward) # is this the right stop criterion?
-
-			job = res # TODO: Transfer op from job?
+			job.op == :forward && res.op == :call && return res # is this the right stop criterion?
+			job = transfer_op(job, res)
 		else
 			return res
 		end
 	end
+
+
+	# # TODO: simplify code, should just be one loop - no nesting
+	# while true
+	# 	res = setup_processing!(scheduler, job)
+
+	# 	if res === NotValid()
+	# 		while !isempty(scheduler.processing_queue)
+	# 			curr_sr = pop!(scheduler.processing_queue) # LIFO
+	# 			add_info_item!(scheduler.progress_display, "Popped $(curr_sr.f) from processing queue")
+	# 			add_info_item!(scheduler.progress_display, string(typeof(curr_sr.state.x)))
+	# 			# @show curr_sr.state.n_upstream_left
+	# 			# @show curr_sr.state.upstream
+	# 			res = process_once_new!(scheduler, curr_sr)
+	# 			processing_errors_throw && res isa Exception && throw(res)
+	# 		end
+	# 	end
+
+	# 	if res isa Job
+	# 		job.op == :forward && res.op == :call && return Job(res.sr, :forward) # is this the right stop criterion?
+
+	# 		job = res # TODO: Transfer op from job?
+	# 	else
+	# 		return res
+	# 	end
+	# end
 
 
 	# # TODO: This currently only forwards `spec` once. Fix.
@@ -811,6 +865,14 @@ function process_new!(scheduler::Scheduler, job::Job; processing_errors_throw=tr
 
 	# return get_result!(spec.sr) # Hmm. Not good enough. The result might be GCed before this! We need to store it in a fake `upstream` or similar. (I guess it works currently because this spec is processed last and the item will thus be in the LRU.)
 end
+
+fetch_new!(scheduler::Scheduler, job::Job; kwargs...) = process_new!(scheduler, Job(get_sr(job), :fetch); kwargs...)
+forward_new!(scheduler::Scheduler, job::Job; kwargs...) = process_new!(scheduler, Job(get_sr(job), :forward); kwargs...)
+
+fetch_new!(job::Job; kwargs...) = fetch_new!(get_scheduler(), 0job; kwargs...)
+forward_new!(job::Job; kwargs...) = forward_new!(get_scheduler(), job; kwargs...)
+
+
 
 
 
