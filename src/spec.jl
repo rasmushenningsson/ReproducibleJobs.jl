@@ -41,18 +41,15 @@ Base.Broadcast.broadcastable(ref::SpecRef) = Ref(ref)
 struct Initialized end
 
 struct Waiting{T} # Waiting for dependencies to finish
-	# downstream::Vector{Tuple{T,Tuple{T,Symbol}}} # Vector of sr=>(dep.sr,dep.op) pairs - so we know which dep to update in sr.state.upstream.
-	# upstream::IdDict{Tuple{T,Symbol},Any} # (sr,op)=>next/result
 	downstream::Vector{Pair{SpecRun{T}, SpecRef{T}}} # Vector of sr=>dep pairs - so we know which dep to update in sr.state.upstream.
 	upstream::IdDict{SpecRef{T}, Any} # ref=>next/result
 	n_upstream_left::Base.RefValue{Int}
 	call::Bool # If set to true, all deps will be fetched!, and the owning spec will be computed after all deps are processed.
 end
-Waiting(upstream::IdDict{SpecRef{T},Any}, n_upstream_left::Int, call::Bool) where T = Waiting{T}([], upstream, Ref(n_upstream_left), call)
 
-struct Processing{T}
+struct Processing{T} # Running or Preprocessing
 	downstream::Vector{Pair{SpecRun{T}, SpecRef{T}}} # Vector of sr=>dep pairs - so we know which dep to update in sr.state.upstream.
-end # Running or Preprocessing
+end
 
 struct Next{T} # Find a better name? Forward?
 	ref::SpecRef{T}
