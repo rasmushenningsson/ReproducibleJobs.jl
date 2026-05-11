@@ -29,9 +29,10 @@ SpecRef(sr::SpecRun{T}, op=:forward) where T = SpecRef{T}(sr, op)
 
 
 
-Base.Broadcast.broadcastable(spec::Spec) = Ref(spec) # treat as scalar for broadcasting
-Base.Broadcast.broadcastable(sr::SpecRun) = Ref(sr) # treat as scalar for broadcasting
-Base.Broadcast.broadcastable(ref::SpecRef) = Ref(ref) # treat as scalar for broadcasting
+# Treat these as scalars for broadcasting
+Base.Broadcast.broadcastable(spec::Spec) = Ref(spec)
+Base.Broadcast.broadcastable(sr::SpecRun) = Ref(sr)
+Base.Broadcast.broadcastable(ref::SpecRef) = Ref(ref)
 
 
 
