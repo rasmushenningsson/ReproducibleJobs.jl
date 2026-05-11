@@ -26,7 +26,8 @@ export
 	Deduplicator,
 	Cache,
 	Scheduler,
-	Spec,
+	# Spec, ?
+	SpecRef,
 	CompoundResult,
 	AbstractPreprocess,
 	Preprocess,

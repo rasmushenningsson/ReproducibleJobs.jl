@@ -1,26 +1,26 @@
-function is_preprocessing(sa::SpecArgs)
-	@assert sa.f !== nothing
-	is_preprocessing(sa.f, sa)
+function is_preprocessing(sr::SpecRun)
+	@assert sr.f !== nothing
+	is_preprocessing(sr.f, sr)
 end
-is_preprocessing(spec::Spec) = is_preprocessing(get_sa(spec))
+is_preprocessing(ref::SpecRef) = is_preprocessing(get_sr(ref))
 
 # One of these can be customized to tell that a function is preprocessing a spec
-is_preprocessing(f, ::SpecArgs) = is_preprocessing(f)
+is_preprocessing(f, ::SpecRun) = is_preprocessing(f)
 is_preprocessing(f) = false
 
-# function get_dependencies(f::F, sa::SpecArgs) where F
-# 	deps = Spec[]
-# 	visit_dependencies(sa) do dep::Spec
+# function get_dependencies(f::F, sr::SpecRun) where F
+# 	deps = SpecRef[]
+# 	visit_dependencies(sr) do dep::SpecRef
 # 		f(dep) && push!(deps, dep)
 # 	end
 # 	return unique!(deps)
 # end
 
-# get_dependencies(sa::SpecArgs) = get_dependencies(Returns(true), sa)
+# get_dependencies(sr::SpecRun) = get_dependencies(Returns(true), sr)
 
-function get_dependencies(sa::SpecArgs)
-	deps = Spec[]
-	visit_dependencies(sa) do dep::Spec
+function get_dependencies(sr::SpecRun)
+	deps = SpecRef[]
+	visit_dependencies(sr) do dep::SpecRef
 		push!(deps, dep)
 	end
 	return unique!(deps)
