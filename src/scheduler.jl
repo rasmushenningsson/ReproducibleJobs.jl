@@ -1,11 +1,11 @@
 struct WorkCompute
-	sr::SpecRun
+	spec::Spec
 end
 struct WorkPreprocess
-	sr::SpecRun
+	spec::Spec
 end
 struct WorkDeduplicateResult
-	sr::SpecRun
+	spec::Spec
 	obj::Any
 end
 
@@ -138,13 +138,10 @@ process_dependencies!(scheduler, deps; @nospecialize(parent_f)) =
 
 
 
-function propagate_error(sr::SpecRun, vals)::Union{Nothing, ProcessingException}#, InterruptException}
-	# if any(x->x isa InterruptException, vals)
-	# 	return InterruptException()
-	# elseif any(x->x isa ProcessingException, vals)
+function propagate_error(spec::Spec, vals)::Union{Nothing, ProcessingException}#, InterruptException}
 	if any(x->x isa ProcessingException, vals)
 		causes = filter!(x->x isa ProcessingException, collect(vals))
-		return ProcessingException(sr, causes)
+		return ProcessingException(spec, causes)
 	else
 		return nothing
 	end
@@ -175,26 +172,26 @@ end
 function work_run_single(scheduler, work::WorkUnion, result_channel::Channel)
 	progress_display = scheduler.progress_display
 	progress_item = nothing
-	sr = work.sr::SpecRun
+	spec = work.spec::Spec
 
 	local res
 	try
-		f = sr.f
+		f = spec.f
 
 		# NB: Deduplication and thus also Preprocessing are not thread-safe and is thus currently assumed to not happen in parallel
 		if work isa WorkPreprocess
 			progress_item = add_item!(progress_display, ProgressText(styled"{blue:⋅ Preprocessing} " * ReproducibleJobs.styled_function_name(f)))
-			res = f(sr.args...; sr.kwargs...)
+			res = f(spec.args...; spec.kwargs...)
 			@assert res !== nothing "Preprocessing of $f returned nothing"
 			remove_item!(progress_display, progress_item)
 		elseif work isa WorkCompute
 			progress_item = add_item!(progress_display, ProgressText(styled"{blue:⋅ Running} " * ReproducibleJobs.styled_function_name(f)))
 
-			v = _get_kwarg(sr, :__version, nothing)
+			v = _get_kwarg(spec, :__version, nothing)
 			@assert v !== nothing "__version kwarg must be provided for all (non-preprocessing) specs."
 
-			kwargs = Iterators.filter(p->!startswith(string(p[1]),"__"), sr.kwargs)
-			res = f(sr.args...; kwargs...)
+			kwargs = Iterators.filter(p->!startswith(string(p[1]),"__"), spec.kwargs)
+			res = f(spec.args...; kwargs...)
 			@assert res !== nothing "Computation of $f returned nothing"
 			remove_item!(progress_display, progress_item)
 		elseif work isa WorkDeduplicateResult
@@ -214,7 +211,7 @@ function work_run_single(scheduler, work::WorkUnion, result_channel::Channel)
 
 		# Do not show anything/much here, it will be shown later instead.
 		bt = Base.catch_backtrace()
-		res = ProcessingException(sr, e, stacktrace(bt))
+		res = ProcessingException(spec, e, stacktrace(bt))
 	end
 
 	put!(result_channel, res)
@@ -265,46 +262,53 @@ end
 
 # preprocess(::Scheduler, err::Exception) = err
 
-function preprocess(scheduler::Scheduler, sr::SpecRun)
-	res = process_work(scheduler, WorkPreprocess(sr))
-	res = process_work(scheduler, WorkDeduplicateResult(sr, res))
+function preprocess(scheduler::Scheduler, spec::Spec)
+	res = process_work(scheduler, WorkPreprocess(spec))
+	res = process_work(scheduler, WorkDeduplicateResult(spec, res))
 end
 
 
 
 # compute(::Scheduler, err::Exception) = err
 
-function compute(scheduler::Scheduler, sr::SpecRun)
-	res = process_work(scheduler, WorkCompute(sr))
-	res = process_work(scheduler, WorkDeduplicateResult(sr, res))
+function compute(scheduler::Scheduler, spec::Spec)
+	res = process_work(scheduler, WorkCompute(spec))
+	res = process_work(scheduler, WorkDeduplicateResult(spec, res))
 end
 
 
 
 
-function replace_dependencies(sr::SpecRun, upstream::IdDict{SpecRef,Any})
-	err = propagate_error(sr, values(upstream))
+function replace_dependencies(spec::Spec, upstream::IdDict{SpecRef,Any})
+	err = propagate_error(spec, values(upstream))
 	err !== nothing && return err
-	return map_args(x->get(upstream,x,nothing), sr)
+	return map_args(x->get(upstream,x,nothing), spec)
 end
-function replace_dependencies(sr::SpecRun, upstream::IdDict{Tuple{SpecRun,Symbol},Any}) # Ugly def since Julia currently doesn't support mutually recursive types
-	err = propagate_error(sr, values(upstream))
+
+
+# WIP
+function replace_dependencies(spec::Spec, upstream::IdDict{Tuple{SpecRun,Symbol},Any}) # Ugly def since Julia currently doesn't support mutually recursive types
+	err = propagate_error(spec, values(upstream))
 	err !== nothing && return err
-	# return map_args(x->get(upstream, x, nothing), sr)
-	return map_args(x->(x isa SpecRef) ? get(upstream, (x.sr,x.op), nothing) : nothing, sr) # Ugly - See above. TODO: Make less ugly.
+	# return map_args(x->get(upstream, x, nothing), spec)
+	return map_args(x->(x isa SpecRef) ? get(upstream, (x.spec,x.op), nothing) : nothing, spec) # Ugly - See above. TODO: Make less ugly.
 end
+
+
+
 
 function _fetch_and_compute!(scheduler, sr::SpecRun, deps::Vector{SpecRef})
 	# TODO: Check that sr.state is as expected?
 	sr.state = SpecWaiting()
 	fetched_deps = fetch_dependencies!(scheduler, deps)
 
-	sa_replaced = sr
-	if !isempty(fetched_deps)
-		sa_replaced = replace_dependencies(sr, fetched_deps)::Union{SpecRun,ProcessingException,InterruptException}
+	if isempty(fetched_deps)
+		spec_replaced = sr.spec
+	else
+		spec_replaced = replace_dependencies(sr.spec, fetched_deps)::Union{Spec,ProcessingException,InterruptException}
 	end
 	sr.state = SpecProcessing()
-	res = compute(scheduler, sa_replaced)
+	res = compute(scheduler, spec_replaced)
 	@assert !(res isa SpecRef)
 	return res
 end
@@ -392,18 +396,19 @@ function _process_once!(scheduler::Scheduler, sr::SpecRun, deps::Vector{SpecRef}
 	sr.state = SpecWaiting()
 	forwarded_deps = process_dependencies!(scheduler, deps; parent_f=sr.f)
 
-	sr_replaced = sr
-	if !isempty(forwarded_deps)
-		sr_replaced = replace_dependencies(sr, forwarded_deps)::Union{SpecRun,ProcessingException,InterruptException}
+	if isempty(forwarded_deps)
+		spec_replaced = sr.spec
+	else
+		spec_replaced = replace_dependencies(sr.spec, forwarded_deps)::Union{Spec,ProcessingException,InterruptException}
 	end
 
-	sr_replaced isa Exception && return sr_replaced
+	spec_replaced isa Exception && return spec_replaced
 
-	if is_preprocessing(sr_replaced)
+	if is_preprocessing(spec_replaced)
 		sr.state = SpecProcessing()
-		preprocess(scheduler, sr_replaced)
+		preprocess(scheduler, spec_replaced)
 	else
-		sr_replaced = deduplicate!(scheduler.deduplicator, sr_replaced)
+		sr_replaced = deduplicate!(scheduler.deduplicator, SpecRun(spec_replaced))
 		SpecRef(sr_replaced, :call)
 	end
 end

@@ -54,6 +54,20 @@ get_args(spec::Spec) = spec.args
 get_kwargs(spec::Spec) = spec.kwargs
 
 
+function _find_kwarg(key::Symbol, kw::Vector{Pair{Symbol,Any}})
+	for (i,(k,_)) in enumerate(kw)
+		k == key && return i
+	end
+	return nothing
+end
+function _get_kwarg(f, spec::Spec, key::Symbol)
+	i = _find_kwarg(key, spec.kwargs)
+	i === nothing ? f() : spec.kwargs[i].second
+end
+_get_kwarg(spec::Spec, key::Symbol, default) = _get_kwarg(()->default, spec, key)
+_get_kwarg(spec::Spec, key::Symbol) = _get_kwarg(()->throw(KeyError(key)), spec, key)
+
+
 
 # const SpecStateUnion = Union{SpecInitialized, SpecWaiting{SpecRun}, SpecProcessing{SpecRun}, SpecNext{SpecRun}, SpecResult, SpecErrored}
 
@@ -71,6 +85,8 @@ const SpecStateUnion = Union{SpecInitialized, SpecWaiting{SpecRun}, SpecProcessi
 # Base.propertynames(::SpecRun, private::Bool=false) =
 # 	private ? fieldnames(SpecRun) : (:f, :args, :kwargs)
 
+
+get_spec(sr::SpecRun) = sr.spec
 
 # Usually accessed through getproperty
 get_function(sr::SpecRun) = get_function(sr.spec)
@@ -211,24 +227,9 @@ Base.isequal(a::SpecRun, b::SpecRun) = sa_isequal(a, b)
 
 
 
-# Tuple/NamedTuple version
-# _get_kwarg(sr::SpecRun, key::Symbol, default) = get(sr.kwargs, key, default)
-# _get_kwarg(f, sr::SpecRun, key::Symbol) = get(f, sr.kwargs, key)
-# _get_kwarg(sr::SpecRun, key::Symbol) = getindex(sr.kwargs, key)
-
-# Vector{Any}/Vector{Pair{Symbol,Any}} version
-function _find_kwarg(key::Symbol, kw::Vector{Pair{Symbol,Any}})
-	for (i,(k,_)) in enumerate(kw)
-		k == key && return i
-	end
-	return nothing
-end
-function _get_kwarg(f, sr::SpecRun, key::Symbol)
-	i = _find_kwarg(key, sr.kwargs)
-	i === nothing ? f() : sr.kwargs[i].second
-end
-_get_kwarg(sr::SpecRun, key::Symbol, default) = _get_kwarg(()->default, sr, key)
-_get_kwarg(sr::SpecRun, key::Symbol) = _get_kwarg(()->throw(KeyError(key)), sr, key)
+_get_kwarg(f, sr::SpecRun, key::Symbol) = _get_kwarg(f, get_spec(sr), key)
+_get_kwarg(sr::SpecRun, key::Symbol, default) = _get_kwarg(get_spec(sr), key, default)
+_get_kwarg(sr::SpecRun, key::Symbol) = _get_kwarg(get_spec(sr), key)
 
 
 
@@ -298,11 +299,16 @@ Base.Broadcast.broadcastable(ref::SpecRef) = Ref(ref) # treat as scalar for broa
 
 
 
+get_spec(ref::SpecRef) = get_spec(ref.sr)
+get_sr(ref::SpecRef) = ref.sr
+SpecRun(ref::SpecRef) = get_sr(ref)
+
+
 
 # Usually accessed through getproperty
-get_function(ref::SpecRef) = get_function(ref.sr)
-get_args(ref::SpecRef) = get_args(ref.sr)
-get_kwargs(ref::SpecRef) = get_kwargs(ref.sr)
+get_function(ref::SpecRef) = get_function(get_spec(ref))
+get_args(ref::SpecRef) = get_args(get_spec(ref))
+get_kwargs(ref::SpecRef) = get_kwargs(get_spec(ref))
 
 function Base.getproperty(ref::SpecRef, s::Symbol)
 	s === :f && return get_function(ref)
@@ -313,13 +319,11 @@ end
 Base.propertynames(::SpecRef, private::Bool=false) =
 	private ? (:f, :args, :kwargs, :sr) : (:f, :args, :kwargs)
 
-get_sr(ref::SpecRef) = ref.sr
-SpecRun(ref::SpecRef) = get_sr(ref)
 
 
-_get_kwarg(f, ref::SpecRef, key::Symbol) = _get_kwarg(f, get_sr(ref), key)
-_get_kwarg(ref::SpecRef, key::Symbol, default) = _get_kwarg(get_sr(ref), key, default)
-_get_kwarg(ref::SpecRef, key::Symbol) = _get_kwarg(get_sr(ref), key)
+_get_kwarg(f, ref::SpecRef, key::Symbol) = _get_kwarg(f, get_spec(ref), key)
+_get_kwarg(ref::SpecRef, key::Symbol, default) = _get_kwarg(get_spec(ref), key, default)
+_get_kwarg(ref::SpecRef, key::Symbol) = _get_kwarg(get_spec(ref), key)
 
 
 
@@ -379,17 +383,11 @@ Base.isequal(a::SpecRef, b::SpecRef) = isequal(a.op, b.op) && isequal(a.sr, b.sr
 
 
 
-function visit_dependencies(f, sr::SpecRun)
-	# Tuple/NamedTuple version
-	# visit_specs(f, sr.args)
-	# visit_specs(f, sr.kwargs)
-
-	# Vector{Any}/Vector{Pair{Symbol,Any}} version
-	# visit_specs.(Ref(f), sr.args)
-	foreach(sr.args) do x
+function visit_dependencies(f, spec::Spec)
+	foreach(spec.args) do x
 		visit_specs(f, x)
 	end
-	foreach(sr.kwargs) do p
+	foreach(spec.kwargs) do p
 		visit_specs(f, p[2])
 	end
 end
@@ -397,7 +395,7 @@ end
 
 
 # NB: To visit all dependencies of a ref, call visit_dependencies on ref.
-visit_specs(f, sr::SpecRun) = f(sr) # TODO: Get rid of this?
+# visit_specs(f, sr::SpecRun) = f(sr) # TODO: Get rid of this?
 visit_specs(f, ref::SpecRef) = f(ref)
 
 function visit_specs(f, v::AbstractVector{T}) where T
@@ -431,26 +429,21 @@ end
 
 
 # Find a better name?
-function map_args(f::F, sr::SpecRun) where F
-	# Tuple/NamedTuple version
-	# a = map_specs(f, sr.args)
-	# kw = map_specs(f, sr.kwargs)
-
-	# Vector{Any}/Vector{Pair{Symbol,Any}} version
-	a = _map_arg_vec(sr.args) do x
+function map_args(f::F, spec::Spec) where F
+	a = _map_arg_vec(spec.args) do x
 		map_specs(f, x)
 	end
-	kw = _map_arg_vec(sr.kwargs) do p
+	kw = _map_arg_vec(spec.kwargs) do p
 		p[1]=>map_specs(f, p[2])
 	end
 
-	SpecRun(Spec(sr.f, a, kw))
+	Spec(spec.f, a, kw)
 end
 
 
 # Find a better name?
 # NB: To map all args/dependencies of a spec, call map_args on spec.
-map_specs(f::F, sr::SpecRun) where F = @something f(sr) sr # TODO: Get rid of this?
+# map_specs(f::F, sr::SpecRun) where F = @something f(sr) sr # TODO: Get rid of this?
 map_specs(f::F, ref::SpecRef) where F = @something f(ref) ref
 
 function _map_specs(f::F, v::AbstractVector{T}) where {F,T}
