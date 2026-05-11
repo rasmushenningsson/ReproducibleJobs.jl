@@ -299,7 +299,7 @@ end
 
 function _fetch_and_compute!(scheduler, sr::SpecRun, deps::Vector{SpecRef})
 	# TODO: Check that sr.state is as expected?
-	sr.state = SpecWaiting()
+	sr.state = state_waiting()
 	fetched_deps = fetch_dependencies!(scheduler, deps)
 
 	if isempty(fetched_deps)
@@ -307,7 +307,7 @@ function _fetch_and_compute!(scheduler, sr::SpecRun, deps::Vector{SpecRef})
 	else
 		spec_replaced = replace_dependencies(sr.spec, fetched_deps)::Union{Spec,ProcessingException,InterruptException}
 	end
-	sr.state = SpecProcessing()
+	sr.state = state_processing()
 	res = compute(scheduler, spec_replaced)
 	@assert !(res isa SpecRef)
 	return res
@@ -320,7 +320,7 @@ function _fetch_and_compute_cached!(scheduler, sr::SpecRun, deps::Vector{SpecRef
 	inner_deps = get_dependencies(inner_sr)
 	@assert all(s->s.op === :call, inner_deps) # The outer call has enforced all inner specs to be calls has well.
 
-	sr.state = SpecWaiting()
+	sr.state = state_waiting()
 	cache_get!(scheduler.cache, inner_sr) do
 		_fetch_and_compute!(scheduler, inner_sr, inner_deps)
 	end
@@ -335,7 +335,7 @@ function _fetch_and_compute_sub!(scheduler, sr::SpecRun, deps::Vector{SpecRef})
 	cached_deps = get_dependencies(cached_sr)
 	@assert all(s->s.op === :call, cached_deps) # The outer call has enforced all sub-specs to be calls has well.
 
-	sr.state = SpecWaiting()
+	sr.state = state_waiting()
 
 	# Try in this order
 	# 0. (Already done) Is it cached and still valid in sr.result.
@@ -351,17 +351,17 @@ function _fetch_and_compute_sub!(scheduler, sr::SpecRun, deps::Vector{SpecRef})
 	end
 
 
-	if cached_sr.state isa SpecResult
+	if cached_sr.state.x isa Result
 		# 1.
-		if cached_sr.state.result !== NotValid()
-			cr = cached_sr.state.result
+		if cached_sr.state.x.result !== NotValid()
+			cr = cached_sr.state.x.result
 			cr isa Exception && return cr
 			@assert cr isa CompoundResult "Expected CompoundResult, got $(typeof(cr))."
 			return sub === nothing ? get_keys(cr) : get_subresult(cr, sub)
 		end
 
 		# 2.
-		w = cached_sr.state.weak_result
+		w = cached_sr.state.x.weak_result
 		if w !== NotValid()
 			@assert w isa CompoundResult "Expected CompoundResult, got $(typeof(w))."
 			sub === nothing && return get_keys(w)
@@ -393,7 +393,7 @@ end
 
 
 function _process_once!(scheduler::Scheduler, sr::SpecRun, deps::Vector{SpecRef})
-	sr.state = SpecWaiting()
+	sr.state = state_waiting()
 	forwarded_deps = process_dependencies!(scheduler, deps; parent_f=sr.f)
 
 	if isempty(forwarded_deps)
@@ -405,7 +405,7 @@ function _process_once!(scheduler::Scheduler, sr::SpecRun, deps::Vector{SpecRef}
 	spec_replaced isa Exception && return spec_replaced
 
 	if is_preprocessing(spec_replaced)
-		sr.state = SpecProcessing()
+		sr.state = state_processing()
 		preprocess(scheduler, spec_replaced)
 	else
 		sr_replaced = deduplicate!(scheduler.deduplicator, SpecRun(spec_replaced))
@@ -484,7 +484,7 @@ function process_once!(scheduler::Scheduler, sr::SpecRun, op::Symbol)
 	end
 
 	# Cached forwarding
-	sr.state isa SpecNext{SpecRun} && return (SpecRef(sr.state), false)
+	sr.state.x isa Next{State} && return (sr.state.x.ref, false)
 
 	# Cached result
 	res = get_result!(sr)
@@ -493,7 +493,7 @@ function process_once!(scheduler::Scheduler, sr::SpecRun, op::Symbol)
 	# Preprocess
 	res = _process_once!(scheduler, sr, deps)
 	if res isa SpecRef
-		sr.state = SpecNext(res)
+		sr.state = state_next(res)
 		return res, false # Still forwarding, not done.
 	end
 
@@ -517,7 +517,7 @@ function setup_dependency!(scheduler, sr::SpecRun, call::Bool, dep::SpecRef)
 	else
 		# stop before calling
 		next = dep
-		while curr.op !== :call && should_forward_child(sr.f, curr.sr.f)
+		while curr.op !== :call && should_forward_child(sr.f, curr.f)
 			next = setup_processing!(scheduler, curr)
 			next isa SpecRef || break
 			curr = next
@@ -534,8 +534,9 @@ function setup_dependency!(scheduler, sr::SpecRun, call::Bool, dep::SpecRef)
 	# end
 
 	if next === NotValid() # we are waiting for an upstream spec to process
-		w = curr.sr.state::Union{SpecWaiting{SpecRun},SpecProcessing{SpecRun}}
-		push!(w.downstream, (sr,(dep.sr,dep.op))) # TODO: Make utility function to avoid ugly tuples here
+		w = curr.sr.state.x::Union{Waiting{State}, Processing{State}}
+		# push!(w.downstream, (sr,(dep.sr,dep.op))) # TODO: Make utility function to avoid ugly tuples here
+		push!(w.downstream, sr=>dep)
 		# n_upstream_left += 1
 	end
 
@@ -557,7 +558,7 @@ function setup_processing!(scheduler, ref)
 	@info "setup_processing!: $(sr.f)"
 
 	# Cached forwarding
-	sr.state isa SpecNext{SpecRun} && return SpecRef(sr.state)
+	sr.state.x isa Next{State} && return sr.state.x.ref
 
 	if is_preprocessing(sr)
 		# Cached result
@@ -600,7 +601,7 @@ function setup_processing!(scheduler, ref)
 
 
 
-	upstream = IdDict{Tuple{SpecRun,Symbol},Any}()
+	upstream = IdDict{Job,Any}()
 	n_upstream_left = 0
 	for dep in deps
 		# curr::SpecRef = next = dep
@@ -622,7 +623,7 @@ function setup_processing!(scheduler, ref)
 		# @show next
 		# @show next === dep
 		if next !== NotValid() # Did we get a value?
-			upstream[(dep.sr, dep.op)] = next
+			upstream[dep] = next
 		else
 			n_upstream_left += 1
 		end
@@ -631,23 +632,26 @@ function setup_processing!(scheduler, ref)
 
 	# TESTING - this shows that I was missing forwarding to a spec with all deps :call before actually computing
 	if !ready_to_call && n_upstream_left == 0 && !is_preprocessing(sr.f)
-		sa_replaced = sr
-		if !isempty(upstream)
-			sa_replaced = replace_dependencies(sr, upstream)::Union{SpecRun,ProcessingException}
-		end
-		if sa_replaced isa ProcessingException
-			set_result!(sr, sa_replaced)
-			return sa_replaced
+		if isempty(upstream)
+			spec_replaced = sr.spec
 		else
-			sa_replaced::SpecRun
-			sr.state = SpecNext(sa_replaced, op) # Keep the op?
-			return SpecRef(sr.state)
+			spec_replaced = replace_dependencies(sr.spec, upstream)::Union{Spec,ProcessingException}
+		end
+		if spec_replaced isa ProcessingException
+			set_result!(sr, spec_replaced)
+			return spec_replaced
+		else
+			spec_replaced::Spec
+			sr_replaced = SpecRun(spec_replaced) # This should surely be deduplicated.
+			new_ref = SpecRef(sr_replaced, op) # keep the op?
+			sr.state = state_next(new_ref)
+			return new_ref
 		end
 	end
 
 
 	# @show n_upstream_left
-	sr.state = SpecWaiting(upstream, n_upstream_left, ready_to_call)
+	sr.state = state_waiting(upstream, n_upstream_left, ready_to_call)
 	# n_upstream_left == 0 && push!(scheduler.processing_queue, sr) # ready to be processed
 
 	# DEBUG
@@ -709,14 +713,14 @@ function process!(scheduler::Scheduler, sr::SpecRun, op::Symbol; @nospecialize(p
 end
 
 
-function _update_downstream!(scheduler::Scheduler, downstream::Vector{Tuple{SpecRun,Tuple{SpecRun,Symbol}}}, res)
-	for (sr,(dep_sr,dep_op)) in downstream
-		state = sr.state::SpecWaiting
+function _update_downstream!(scheduler::Scheduler, downstream::Vector{Pair{SpecRun{State},Job}}, res)
+	for (sr,dep) in downstream
+		state = sr.state.x::Waiting{State}
 
 		# update state, and either continue processing the dep or insert the value (next/result)
-		next = setup_dependency!(scheduler, sr, state.ready_to_call, SpecRef(dep_sr,dep_op))
+		next = setup_dependency!(scheduler, sr, state.ready_to_call, dep)
 		if next !== NotValid() # Did we get a value?
-			state.upstream[(dep.sr, dep.op)] = next
+			state.upstream[dep] = next
 			state.n_upstream_left[] -= 1
 			# state.n_upstream_left[] == 0 && push!(scheduler.processing_queue, sr) # Ready to process the owning spec
 			
@@ -732,20 +736,21 @@ end
 
 
 function process_once_new!(scheduler::Scheduler, sr::SpecRun)
-	state = sr.state::SpecWaiting
+	state = sr.state.x::Waiting{State}
 	@assert state.n_upstream_left[] == 0
 
-	sa_replaced = sr
-	if !isempty(state.upstream)
-		sa_replaced = replace_dependencies(sr, state.upstream)::Union{SpecRun,ProcessingException}
+	if isempty(state.upstream)
+		spec_replaced = sr.spec
+	else
+		spec_replaced = replace_dependencies(sr.spec, state.upstream)::Union{Spec,ProcessingException}
 	end
-	sa_replaced isa Exception && return sa_replaced
+	spec_replaced isa Exception && return spec_replaced
 
-	sr.state = SpecProcessing(state.downstream)
+	sr.state = state_processing(state.downstream)
 	if is_preprocessing(sr.f)
-		res = preprocess(scheduler, sa_replaced)
+		res = preprocess(scheduler, spec_replaced)
 		if res isa SpecRef
-			sr.state = SpecNext(res)
+			sr.state = state_next(res)
 			return res
 		end
 		set_result!(sr, res) # Preprocessing yielded a result, we are done.
@@ -753,14 +758,14 @@ function process_once_new!(scheduler::Scheduler, sr::SpecRun)
 	else
 		# Hmm. We currently reach here with uncomputed specs! That was not the intention.
 		@info "process_once_new!"
-		sr.f == get_cached && @show sa_replaced
+		sr.f == get_cached && @show spec_replaced
 
 		# TODO: Support these (probably during `setup_processing!`?)
 		@assert sr.f != compoundresult_sub
 		@assert sr.f != compoundresult_keys
 		@assert sr.f != get_cached
 
-		res = compute(scheduler, sa_replaced)
+		res = compute(scheduler, spec_replaced)
 		@assert !(res isa CompoundResult) # Is this a good place to check? Maybe should be ensured earlier.
 		@assert !(res isa SpecRef)
 
@@ -789,8 +794,7 @@ function process_new!(scheduler::Scheduler, ref::SpecRef; processing_errors_thro
 			while !isempty(scheduler.processing_queue)
 				curr_sr = pop!(scheduler.processing_queue) # LIFO
 				@info "Popped $(curr_sr.f) from processing queue"
-				@show typeof(curr_sr.state)
-				# @show typeof(curr_sr.state)
+				@show typeof(curr_sr.state.x)
 				# @show curr_sr.state.n_upstream_left
 				# @show curr_sr.state.upstream
 				res = process_once_new!(scheduler, curr_sr)
@@ -829,8 +833,8 @@ function process_new!(scheduler::Scheduler, ref::SpecRef; processing_errors_thro
 end
 
 
-
 fetch!(scheduler::Scheduler, ref::SpecRef; kwargs...) = process!(scheduler, get_sr(ref), :fetch; kwargs...)
+
 forward!(scheduler::Scheduler, ref::SpecRef; kwargs...) = process!(scheduler, get_sr(ref), :forward; kwargs...)
 process!(scheduler::Scheduler, ref::SpecRef; kwargs...) = process!(scheduler, get_sr(ref), ref.op; kwargs...)
 

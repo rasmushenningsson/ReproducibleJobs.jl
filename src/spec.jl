@@ -1,42 +1,3 @@
-
-struct SpecInitialized end
-
-# TODO: This could be simplified a lot with mutually recursive type definitions. (We could store a SpecRef directly in that case, instead of sr and op.)
-struct SpecWaiting{T} # Waiting for dependencies to finish
-	downstream::Vector{Tuple{T,Tuple{T,Symbol}}} # Vector of sr=>(dep.sr,dep.op) pairs - so we know which dep to update in sr.state.upstream.
-	upstream::IdDict{Tuple{T,Symbol},Any} # (sr,op)=>next/result
-	n_upstream_left::Base.RefValue{Int}
-	call::Bool # If set to true, all deps will be fetched!, and the owning spec will be computed after all deps are processed.
-end
-SpecWaiting(upstream::IdDict{Tuple{T,Symbol},Any}, n_upstream_left::Int, call::Bool) where T = SpecWaiting{T}([], upstream, Ref(n_upstream_left), call)
-SpecWaiting() = SpecWaiting{SpecRun}([],IdDict{Tuple{SpecRun,Symbol},Any}(),Ref(0),false) # DUMMY USED DURING REFACTORING - TODO: Remove
-
-struct SpecProcessing{T}
-	downstream::Vector{Tuple{T,Tuple{T,Symbol}}} # Vector of sr=>(dep.sr,dep.op) pairs - so we know which dep to update in sr.state.upstream.
-end # Running or Preprocessing
-SpecProcessing() = SpecProcessing{SpecRun}([]) # DUMMY USED DURING REFACTORING - TODO: Remove
-
-# TODO: This could be simplified a lot with mutually recursive type definitions. (We could store a SpecRef directly in that case, instead of sr and op.)
-struct SpecNext{T}
-	sr::T # This is always SpecRun, but we need a type parameter to handle the mutually recursive types.
-	op::Symbol
-end
-# See below for constructor taking SpecRef
-
-
-struct SpecResult
-	result::Any
-	weak_result::Any
-end
-SpecResult(result::Any) =
-	SpecResult(result, deconstruct_weak_rec(result))
-
-struct SpecErrored
-	exception::Exception
-end
-
-
-
 struct Spec
 	f::Any
 	args::Vector{Any}
@@ -69,21 +30,91 @@ _get_kwarg(spec::Spec, key::Symbol) = _get_kwarg(()->throw(KeyError(key)), spec,
 
 
 
-# const SpecStateUnion = Union{SpecInitialized, SpecWaiting{SpecRun}, SpecProcessing{SpecRun}, SpecNext{SpecRun}, SpecResult, SpecErrored}
-
-mutable struct SpecRun
+mutable struct SpecRun{T}
 	const spec::Spec
-	state::Union{SpecInitialized, SpecWaiting{SpecRun}, SpecProcessing{SpecRun}, SpecNext{SpecRun}, SpecResult, SpecErrored} # SpecStateUnion, but we cannot define it already because it uses SpecRun
+	state::T
 end
-SpecRun(spec::Spec) = SpecRun(spec, SpecInitialized())
 SpecRun(sr::SpecRun) = sr
 
 
-const SpecStateUnion = Union{SpecInitialized, SpecWaiting{SpecRun}, SpecProcessing{SpecRun}, SpecNext{SpecRun}, SpecResult, SpecErrored}
+struct SpecRef{T}
+	sr::SpecRun{T}
+	op::Symbol # :forward, :call, :fetch or :prefetch
+	function SpecRef{T}(sr::SpecRun{T}, op::Symbol) where T
+		@assert op in (:forward, :call, :fetch, :prefetch)
+		new{T}(sr, op)
+	end
+end
+SpecRef(sr::SpecRun{T}, op=:forward) where T = SpecRef{T}(sr, op)
 
 
-# Base.propertynames(::SpecRun, private::Bool=false) =
-# 	private ? fieldnames(SpecRun) : (:f, :args, :kwargs)
+
+
+
+struct Initialized end
+
+struct Waiting{T} # Waiting for dependencies to finish
+	# downstream::Vector{Tuple{T,Tuple{T,Symbol}}} # Vector of sr=>(dep.sr,dep.op) pairs - so we know which dep to update in sr.state.upstream.
+	# upstream::IdDict{Tuple{T,Symbol},Any} # (sr,op)=>next/result
+	downstream::Vector{Pair{SpecRun{T}, SpecRef{T}}} # Vector of sr=>dep pairs - so we know which dep to update in sr.state.upstream.
+	upstream::IdDict{SpecRef{T}, Any} # ref=>next/result
+	n_upstream_left::Base.RefValue{Int}
+	call::Bool # If set to true, all deps will be fetched!, and the owning spec will be computed after all deps are processed.
+end
+Waiting(upstream::IdDict{SpecRef{T},Any}, n_upstream_left::Int, call::Bool) where T = Waiting{T}([], upstream, Ref(n_upstream_left), call)
+
+struct Processing{T}
+	downstream::Vector{Pair{SpecRun{T}, SpecRef{T}}} # Vector of sr=>dep pairs - so we know which dep to update in sr.state.upstream.
+end # Running or Preprocessing
+
+struct Next{T} # Find a better name? Forward?
+	ref::SpecRef{T}
+end
+
+struct Result
+	result::Any
+	weak_result::Any
+end
+struct Errored
+	exception::Exception
+end
+
+
+# We wrap this union in a struct mostly to avoid crazy long type parameters
+struct State
+	x::Union{Initialized, Waiting{State}, Processing{State}, Next{State}, Result, Errored}
+end
+
+
+const Job = SpecRef{State}
+
+
+state_initialized() = State(Initialized())
+
+state_waiting(upstream::IdDict{Job,Any}, n_upstream_left::Int, call::Bool) = State(Waiting{State}([], upstream, Ref(n_upstream_left), call))
+state_processing(downstream::Vector{Pair{SpecRun{State},Job}}) = State(Processing{State}(downstream))
+
+
+state_waiting() = State(Waiting{State}([],IdDict{Job,Any}(), Ref(0), false)) # DUMMY USED DURING REFACTORING - TODO: Remove
+state_processing() = State(Processing{State}([])) # DUMMY USED DURING REFACTORING - TODO: Remove
+
+state_next(ref::SpecRef) = State(Next{State}(ref))
+
+state_result(res, weak) = State(Result(res, weak))
+state_result(res) = state_result(res, deconstruct_weak_rec(res))
+
+state_errored(ex) = State(Errored(ex))
+
+
+
+SpecRun(spec::Spec) = SpecRun(spec, state_initialized())
+
+
+
+
+
+
+
 
 
 get_spec(sr::SpecRun) = sr.spec
@@ -122,7 +153,7 @@ end
 
 
 
-deduplicate_type(::Type{SpecRun}) = true
+deduplicate_type(::Type{<:SpecRun}) = true
 deduplication_pointer(sr::SpecRun) = pointer_from_objref(sr)
 function deduplicate_children!(d, sr::SpecRun; kwargs...)
 	f = sr.f # TODO: Should this be processed somehow? Probably not.
@@ -235,41 +266,40 @@ _get_kwarg(sr::SpecRun, key::Symbol) = _get_kwarg(get_spec(sr), key)
 
 function set_result!(sr::SpecRun, res)
 	if res isa Exception
-		sr.state = SpecErrored(res)
+		sr.state = state_errored(res)
 	else
-		sr.state = SpecResult(res)
+		sr.state = state_result(res)
 	end
 	sr
 end
 
 
 function get_result!(sr::SpecRun)
-	if sr.state isa SpecResult
-		sr = sr.state
-		sr.result !== NotValid() && return sr.result
-		if sr.weak_result !== NotValid()
+	if sr.state.x isa Result
+		r = sr.state.x
+		r.result !== NotValid() && return r.result
+		wr = r.weak_result
+		if wr !== NotValid()
 			# Attempt to reconstruct from weakly stored reference
-			result = reconstruct_weak_rec(sr.weak_result)
+			result = reconstruct_weak_rec(wr)
 			if result !== NotValid()
-				sr.state = SpecResult(result, sr.weak_result) # successful reconstruction
+				sr.state = state_result(result, wr) # successful reconstruction
 				return result
 			end
-			# sr.state = SpecResult(NotValid(), NotValid()) # failed to reconstruct, so the weak result is no longer relevant
-			sr.state = SpecInitialized() # failed to reconstruct, so the weak result is no longer relevant
+			sr.state = state_initialized() # failed to reconstruct, so the weak result is no longer relevant
 		end
 		return NotValid()
-	elseif sr.state isa SpecErrored
-		return sr.state.exception
+	elseif sr.state.x isa Errored
+		return sr.state.x.exception
 	end
 	return NotValid()
 end
 
 function empty_result!(sr::SpecRun)
-	if sr.state isa SpecResult
-		# sr.state.result = NotValid()
-		sr.state = SpecResult(NotValid(), sr.state.weak_result)
-	elseif sr.state isa SpecErrored
-		sr.state = SpecInitialized()
+	if sr.state.x isa Result
+		sr.state = state_result(NotValid(), sr.state.x.weak_result) # keep the weak result!
+	elseif sr.state.x isa Errored
+		sr.state = state_initialized()
 	end
 	sr
 end
@@ -277,25 +307,15 @@ end
 
 
 
+Base.Broadcast.broadcastable(spec::Spec) = Ref(spec) # treat as scalar for broadcasting
 Base.Broadcast.broadcastable(sr::SpecRun) = Ref(sr) # treat as scalar for broadcasting
-
-
-
-struct SpecRef
-	sr::SpecRun
-	op::Symbol # :forward, :call, :fetch or :prefetch
-	function SpecRef(sr::SpecRun, op::Symbol)
-		@assert op in (:forward, :call, :fetch, :prefetch)
-		new(sr, op)
-	end
-end
-SpecRef(sr) = SpecRef(sr, :forward)
-
-
-SpecNext(ref::SpecRef) = SpecNext{SpecRun}(ref.sr, ref.op) # workaround to handle mutually recursive types
-SpecRef(next::SpecNext{SpecRun}) = SpecRef(next.sr, next.op)
-
 Base.Broadcast.broadcastable(ref::SpecRef) = Ref(ref) # treat as scalar for broadcasting
+
+
+
+
+
+
 
 
 
@@ -338,10 +358,10 @@ end
 
 
 function try_get_result_rec(sr::SpecRun)
-	if sr.state isa SpecResult
-		sr.state.result, sr.state.weak_result
-	elseif sr.state isa SpecNext{SpecRun}
-		try_get_result_rec(sr.state.sr) # recurse
+	if sr.state.x isa Result
+		sr.state.x.result, sr.state.x.weak_result
+	elseif sr.state.x isa Next{State}
+		try_get_result_rec(sr.state.x.ref) # recurse
 	else
 		NotValid(), NotValid()
 	end
@@ -351,12 +371,12 @@ try_get_result_rec(ref::SpecRef) = try_get_result_rec(get_sr(ref))
 
 
 
-deduplicate_type(::Type{<:SpecRef}) = true
-deconstruct_type(::Type{<:SpecRef}) = true
-type_to_tag(::Type{SpecRef}) = TypeTag(:SpecRef)
-tag_to_type(::Val{:SpecRef}) = SpecRef
-deconstruct(ref::SpecRef) = (ref.sr, ref.op)
-reconstruct(::Type{SpecRef}, (sr,op)::Tuple{SpecRun,Symbol}) = SpecRef(sr, op)
+deduplicate_type(::Type{Job}) = true
+deconstruct_type(::Type{Job}) = true
+type_to_tag(::Type{Job}) = TypeTag(:Job)
+tag_to_type(::Val{:Job}) = Job
+deconstruct(ref::Job) = (ref.sr, ref.op)
+reconstruct(::Type{Job}, (sr,op)::Tuple{SpecRun{State},Symbol}) = Job(sr, op)
 
 
 

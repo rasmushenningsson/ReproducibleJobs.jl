@@ -28,6 +28,7 @@ export
 	Scheduler,
 	# Spec, ?
 	SpecRef,
+	Job,
 	CompoundResult,
 	AbstractPreprocess,
 	Preprocess,
