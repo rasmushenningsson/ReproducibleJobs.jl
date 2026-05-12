@@ -566,6 +566,10 @@ function setup_processing!(scheduler, job)
 		res !== NotValid() && return res # Early out for computing specs
 	end
 
+	sr.state.x isa Union{Waiting{State},Processing{State}} && return NotValid() # It has already been setup.
+
+	@assert sr.state.x isa Initialized
+
 	upstream = IdDict{Job,Any}()
 	sr.state = state_waiting(upstream, length(deps), ready_to_call)
 
