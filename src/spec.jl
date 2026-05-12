@@ -41,16 +41,16 @@ Base.Broadcast.broadcastable(ref::SpecRef) = Ref(ref)
 struct Initialized end
 
 struct Waiting{T} # Waiting for dependencies to finish
-	downstream::Vector{Pair{SpecRun{T}, SpecRef{T}}} # Vector of sr=>dep pairs - so we know which dep to update in sr.state.upstream.
-	# downstream::Vector{Pair{Union{SpecRun{T},Function}, SpecRef{T}}} # Vector of sr=>dep pairs - so we know which dep to update in sr.state.upstream. (If sr::Function, this is a top-level call.)
+	# downstream::Vector{Pair{SpecRun{T}, SpecRef{T}}} # Vector of sr=>dep pairs - so we know which dep to update in sr.state.upstream.
+	downstream::Vector{Pair{Union{SpecRun{T},Function}, SpecRef{T}}} # Vector of sr=>dep pairs - so we know which dep to update in sr.state.upstream. (If sr::Function, this is a top-level call.)
 	upstream::IdDict{SpecRef{T}, Any} # ref=>next/result
 	n_upstream_left::Base.RefValue{Int}
 	call::Bool # If set to true, all deps will be fetched!, and the owning spec will be computed after all deps are processed.
 end
 
 struct Processing{T} # Running or Preprocessing
-	downstream::Vector{Pair{SpecRun{T}, SpecRef{T}}} # Vector of sr=>dep pairs - so we know which dep to update in sr.state.upstream.
-	# downstream::Vector{Pair{Union{SpecRun{T},Function}, SpecRef{T}}} # Vector of sr=>dep pairs - so we know which dep to update in sr.state.upstream. (If sr::Function, this is a top-level call.)
+	# downstream::Vector{Pair{SpecRun{T}, SpecRef{T}}} # Vector of sr=>dep pairs - so we know which dep to update in sr.state.upstream.
+	downstream::Vector{Pair{Union{SpecRun{T},Function}, SpecRef{T}}} # Vector of sr=>dep pairs - so we know which dep to update in sr.state.upstream. (If sr::Function, this is a top-level call.)
 end
 
 struct Next{T} # Find a better name? Forward?
@@ -78,8 +78,8 @@ const Job = SpecRef{State}
 state_initialized() = State(Initialized())
 
 state_waiting(upstream::IdDict{Job,Any}, n_upstream_left::Int, call::Bool) = State(Waiting{State}([], upstream, Ref(n_upstream_left), call))
-state_processing(downstream::Vector{Pair{SpecRun{State},Job}}) = State(Processing{State}(downstream))
-# state_processing(downstream::Vector{Pair{Union{SpecRun{State},Function},Job}}) = State(Processing{State}(downstream))
+# state_processing(downstream::Vector{Pair{SpecRun{State},Job}}) = State(Processing{State}(downstream))
+state_processing(downstream::Vector{Pair{Union{SpecRun{State},Function},Job}}) = State(Processing{State}(downstream))
 
 
 state_waiting() = State(Waiting{State}([],IdDict{Job,Any}(), Ref(0), false)) # DUMMY USED DURING REFACTORING - TODO: Remove

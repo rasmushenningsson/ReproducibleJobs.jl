@@ -171,7 +171,8 @@ function _short_exception_string(e::Exception; n::Int=40)
 	n = max(n,3) # need space for ellipsis
 	s = string(e)
 	s = replace(s, r"\r\n|\r|\n" => " ") # replace line breaks with space
-	length(s) > n && (s = s[1:n-3]*"...")
+	# length(s) > n && (s = s[1:n-3]*"...")
+	length(s) > n && (s = s[1:prevind(s,end,3)]*"...") # This version handles UTF8
 	s
 end
 
@@ -543,8 +544,8 @@ function setup_dependency!(scheduler, sr::SpecRun{State}, call::Bool, dep::Job)
 	end
 
 	if next === NotValid() # we are waiting for an upstream spec to process
-		w = curr.sr.state.x::Union{Waiting{State}, Processing{State}}
-		push!(w.downstream, sr=>dep)
+		s = curr.sr.state.x::Union{Waiting{State}, Processing{State}}
+		push!(s.downstream, sr=>dep)
 	end
 	next
 end
@@ -755,18 +756,40 @@ process!(job::Job; kwargs...) = process!(get_scheduler(), job; kwargs...)
 
 
 
-function update_downstream!(scheduler::Scheduler, downstream::Vector{Pair{SpecRun{State},Job}}, res)
+# function update_downstream!(scheduler::Scheduler, downstream::Vector{Pair{SpecRun{State},Job}}, res)
+# 	@assert res !== NotValid()
+
+# 	for (sr, dep) in downstream
+# 		waiting = sr.state.x::Waiting{State}
+
+# 		if res isa Job
+# 			# If res is a forwarded job, continue following the chain before updating
+# 			next = setup_dependency!(scheduler, sr, waiting.call, res)
+# 			next !== NotValid() && update_dependency!(scheduler, sr, dep, next)
+# 		else
+# 			update_dependency!(scheduler, sr, dep, res)
+# 		end
+# 	end
+# end
+
+function update_downstream!(scheduler::Scheduler, downstream::Vector{Pair{Union{SpecRun{State},Function},Job}}, res)
 	@assert res !== NotValid()
 
-	for (sr, dep) in downstream
-		waiting = sr.state.x::Waiting{State}
+	for (owner, dep) in downstream
+		if owner isa SpecRun{State}
+			sr = owner::SpecRun{State}
+			waiting = sr.state.x::Waiting{State}
 
-		if res isa Job
-			# If res is a forwarded job, continue following the chain before updating
-			next = setup_dependency!(scheduler, sr, waiting.call, res)
-			next !== NotValid() && update_dependency!(scheduler, sr, dep, next)
-		else
-			update_dependency!(scheduler, sr, dep, res)
+			if res isa Job
+				# If res is a forwarded job, continue following the chain before updating
+				next = setup_dependency!(scheduler, sr, waiting.call, res)
+				next !== NotValid() && update_dependency!(scheduler, sr, dep, next)
+			else
+				update_dependency!(scheduler, sr, dep, res)
+			end
+		else#if owner isa Function
+			f = owner
+			f(dep, res)
 		end
 	end
 end
@@ -827,26 +850,39 @@ function process_new!(scheduler::Scheduler, job::Job; processing_errors_throw=tr
 	evict_results!(scheduler; evict_all=false)
 	_update_gc_display!(scheduler)
 
+	op = job.op
 
 	# TODO: simplify code?
 	while true
 		res = setup_processing!(scheduler, job)
 
+		new_res = Ref{Any}(nothing)
+
 		if res === NotValid()
+			s = job.sr.state.x::Union{Waiting{State}, Processing{State}}
+			push!(s.downstream, ((j,r)->new_res[] = r)=>job) # register callback!
+
 			while !isempty(scheduler.processing_queue)
 				curr_sr = pop!(scheduler.processing_queue) # LIFO
-				# @info "Popped $(curr_sr.f) from processing queue"
-				res = process_step_new!(scheduler, curr_sr)
-				processing_errors_throw && res isa Exception && throw(res)
+				process_step_new!(scheduler, curr_sr)
+				# Consider early out on error?
+				# x = process_step_new!(scheduler, curr_sr)
+				# processing_errors_throw && x isa Exception && throw(res)
 			end
+
+			# NB: The callback has now modified new_res
+			res = new_res[]
+			@assert res !== NotValid()
 		end
 
+		res isa Exception && throw(res)
+
 		if res isa Job
-			job.op == :forward && res.op == :call && return res # is this the right stop criterion?
-			job = transfer_op(job, res)
-			once && return job
+			once && return res # Only take one step
+			op in (:forward,:prefetch) && res.op === :call && return res
+			job = transfer_op(job, res) # continue processing
 		else
-			return res
+			return res # result
 		end
 	end
 end
