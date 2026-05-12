@@ -505,13 +505,12 @@ function setup_dependency!(scheduler, sr::SpecRun{State}, call::Bool, dep::Job)
 end
 
 
-# Find a better name
-function update_dependency!(scheduler, sr::SpecRun{State}, dep::Job, resolved)
-	resolved !== NotValid() || return NotValid()
+function update_dependency!(scheduler, sr::SpecRun{State}, dep::Job, res)
+	@assert res !== NotValid()
 
 	waiting = sr.state.x::Waiting
 
-	waiting.upstream[dep] = resolved
+	waiting.upstream[dep] = res
 	waiting.n_upstream_left[] -= 1
 	waiting.n_upstream_left[] == 0 || return NotValid()
 
@@ -572,8 +571,10 @@ function setup_processing!(scheduler, job)
 
 	for dep in deps
 		next = setup_dependency!(scheduler, sr, ready_to_call, dep)
-		res = update_dependency!(scheduler, sr, dep, next)
-		res !== NotValid() && return res
+		if next !== NotValid()
+			res = update_dependency!(scheduler, sr, dep, next)
+			res !== NotValid() && return res
+		end
 	end
 
 	isempty(deps) && push!(scheduler.processing_queue, sr) # no deps — ready immediately
@@ -657,11 +658,18 @@ process!(job::Job; kwargs...) = process!(get_scheduler(), job; kwargs...)
 
 
 function update_downstream!(scheduler::Scheduler, downstream::Vector{Pair{SpecRun{State},Job}}, res)
+	@assert res !== NotValid()
+
 	for (sr, dep) in downstream
 		waiting = sr.state.x::Waiting{State}
-		# If res is a forwarded job, continue following the chain before delivering
-		resolved = res isa Job ? setup_dependency!(scheduler, sr, waiting.call, res) : res
-		update_dependency!(scheduler, sr, dep, resolved)
+
+		if res isa Job
+			# If res is a forwarded job, continue following the chain before updating
+			next = setup_dependency!(scheduler, sr, waiting.call, res)
+			next !== NotValid() && update_dependency!(scheduler, sr, dep, next)
+		else
+			update_dependency!(scheduler, sr, dep, res)
+		end
 	end
 end
 
