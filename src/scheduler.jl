@@ -505,6 +505,38 @@ function setup_dependency!(scheduler, sr::SpecRun{State}, call::Bool, dep::Job)
 end
 
 
+# Find a better name
+function update_dependency!(scheduler, sr::SpecRun{State}, dep::Job, resolved)
+	resolved !== NotValid() || return NotValid()
+
+	waiting = sr.state.x::Waiting
+
+	waiting.upstream[dep] = resolved
+	waiting.n_upstream_left[] -= 1
+	waiting.n_upstream_left[] == 0 || return NotValid()
+
+	if waiting.call || is_preprocessing(sr)
+		push!(scheduler.processing_queue, sr)
+		return NotValid()
+	else
+		# All deps forwarded — replace dep args with forwarded jobs, create new :call spec
+		downstream = waiting.downstream
+		spec_replaced = replace_dependencies(sr.spec, waiting.upstream)::Union{Spec,ProcessingException}
+		if spec_replaced isa ProcessingException
+			set_result!(sr, spec_replaced)
+			update_downstream!(scheduler, downstream, spec_replaced)
+			return spec_replaced
+		else
+			sr_replaced = deduplicate!(scheduler.deduplicator, SpecRun(spec_replaced); transfer_ownership=true)
+			new_job = Job(sr_replaced, :call)
+			sr.state = state_next(new_job)
+			update_downstream!(scheduler, downstream, new_job)
+			return new_job
+		end
+	end
+end
+
+
 # WIP
 # This function will do one of the following:
 # 1. return the preprocessed spec/result if there is one cached
@@ -525,12 +557,9 @@ function setup_processing!(scheduler, job)
 	end
 
 	deps = get_dependencies(sr)
-
 	ready_to_call = !is_preprocessing(sr) && all(x->x.op === :call, deps)
 
-	if op === :forward && ready_to_call
-		return Job(sr, :call) # We cannot forward any further (Hmm. Should we ever get here? I think we want to prevent this case at an earlier step.)
-	end
+	op === :forward && ready_to_call && return Job(sr, :call) # We cannot forward any further (Hmm. Should we ever get here? I think we want to prevent this case at an earlier step.)
 
 	if !is_preprocessing(sr)
 		# Cached result
@@ -538,44 +567,17 @@ function setup_processing!(scheduler, job)
 		res !== NotValid() && return res # Early out for computing specs
 	end
 
-
-
 	upstream = IdDict{Job,Any}()
-	n_upstream_left = 0
+	sr.state = state_waiting(upstream, length(deps), ready_to_call)
+
 	for dep in deps
 		next = setup_dependency!(scheduler, sr, ready_to_call, dep)
-		if next !== NotValid() # Did we get a value?
-			upstream[dep] = next
-		else
-			n_upstream_left += 1
-		end
+		res = update_dependency!(scheduler, sr, dep, next)
+		res !== NotValid() && return res
 	end
 
-
-	# This is needed to ensure we forward to a spec with all deps :call before actually computing - TODO: Improve readability
-	if !ready_to_call && n_upstream_left == 0 && !is_preprocessing(sr.f)
-		if isempty(upstream)
-			spec_replaced = sr.spec
-		else
-			spec_replaced = replace_dependencies(sr.spec, upstream)::Union{Spec,ProcessingException}
-		end
-		if spec_replaced isa ProcessingException
-			set_result!(sr, spec_replaced)
-			return spec_replaced
-		else
-			spec_replaced::Spec
-			sr_replaced = deduplicate!(scheduler.deduplicator, SpecRun(spec_replaced); transfer_ownership=true)
-			new_job = Job(sr_replaced, :call)
-			sr.state = state_next(new_job)
-			return new_job
-		end
-	end
-
-
-	sr.state = state_waiting(upstream, n_upstream_left, ready_to_call)
-	n_upstream_left == 0 && push!(scheduler.processing_queue, sr) # ready to be processed
-
-	return NotValid() # Not yet available (TODO: Use something else to signal this?)
+	isempty(deps) && push!(scheduler.processing_queue, sr) # no deps — ready immediately
+	return NotValid()
 end
 
 
@@ -654,59 +656,14 @@ process!(job::Job; kwargs...) = process!(get_scheduler(), job; kwargs...)
 
 
 
-function _update_downstream!(scheduler::Scheduler, downstream::Vector{Pair{SpecRun{State},Job}}, res)
-	for (sr,dep) in downstream
+function update_downstream!(scheduler::Scheduler, downstream::Vector{Pair{SpecRun{State},Job}}, res)
+	for (sr, dep) in downstream
 		waiting = sr.state.x::Waiting{State}
-
-		# update waiting state, and either continue processing the dep or insert the value (next/result)
-		if res isa Job
-			res = setup_dependency!(scheduler, sr, waiting.call, res)
-		end
-
-		if res !== NotValid() # Did we get a value?
-			waiting.upstream[dep] = res
-			waiting.n_upstream_left[] -= 1
-
-			# Hmm. I surely must check waiting.call here? If it's not ready_to_call, then I must return a Job with :call, instead of pushing to the processing_queue.
-			waiting.n_upstream_left[] == 0 && push!(scheduler.processing_queue, sr) # Ready to process the owning spec
-			
-			# # DEBUG
-			# if waiting.n_upstream_left[] == 0
-			# 	# add_info_item!(scheduler.progress_display, "2: Pushed $(sr.f) to processing queue")
-			# 	push!(scheduler.processing_queue, sr) # Ready to process the owning spec
-			# end
-		end
+		# If res is a forwarded job, continue following the chain before delivering
+		resolved = res isa Job ? setup_dependency!(scheduler, sr, waiting.call, res) : res
+		update_dependency!(scheduler, sr, dep, resolved)
 	end
 end
-
-# Callback version - is it needed?
-# function _update_downstream!(scheduler::Scheduler, downstream::Vector{Pair{Union{SpecRun{State},Function},Job}}, res)
-# 	for (owner,dep) in downstream
-# 		if owner isa SpecRun{State}
-# 			sr = owner::SpecRun{State}
-# 			waiting = sr.state.x::Waiting{State}
-
-# 			# update waiting state, and either continue processing the dep or insert the value (next/result)
-# 			if res isa Job
-# 				res = setup_dependency!(scheduler, sr, waiting.call, res)
-# 			end
-
-# 			if res !== NotValid() # Did we get a value?
-# 				waiting.upstream[dep] = res
-# 				waiting.n_upstream_left[] -= 1
-# 				# waiting.n_upstream_left[] == 0 && push!(scheduler.processing_queue, sr) # Ready to process the owning spec
-
-# 				# DEBUG
-# 				if waiting.n_upstream_left[] == 0
-# 					@info "2: Pushed $(sr.f) to processing queue"
-# 					push!(scheduler.processing_queue, sr) # Ready to process the owning spec
-# 				end
-# 			end
-# 		else
-# 			owner(dep, res)
-# 		end
-# 	end
-# end
 
 
 
@@ -725,13 +682,12 @@ function process_step_new!(scheduler::Scheduler, sr::SpecRun)
 	sr.state = state_processing(downstream)
 	if is_preprocessing(sr.f)
 		res = preprocess(scheduler, spec_replaced)
-		_update_downstream!(scheduler, downstream, res)
-
 		if res isa Job
 			sr.state = state_next(res)
-			return res
+		else
+			set_result!(sr, res) # Preprocessing yielded a result, we are done.
 		end
-		set_result!(sr, res) # Preprocessing yielded a result, we are done.
+		update_downstream!(scheduler, downstream, res)
 		return res
 	else
 		# TODO: Support these (probably during `setup_processing!`?)
@@ -746,8 +702,8 @@ function process_step_new!(scheduler::Scheduler, sr::SpecRun)
 		lru_touch!(scheduler.lru, sr) do
 			Base.summarysize(res)
 		end
-		_update_downstream!(scheduler, downstream, res)
 		set_result!(sr, res)
+		update_downstream!(scheduler, downstream, res)
 		return res
 	end
 end
