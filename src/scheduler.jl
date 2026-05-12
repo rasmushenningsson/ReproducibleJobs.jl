@@ -12,8 +12,11 @@ struct WorkCacheGet
 	sr::SpecRun
 	inner_res::Any
 end
+struct WorkSubGet
+	sr::SpecRun # compoundresult_sub or compoundresult_keys sr
+end
 
-const WorkUnion = Union{WorkCompute, WorkPreprocess, WorkDeduplicateResult, WorkCacheGet}
+const WorkUnion = Union{WorkCompute, WorkPreprocess, WorkDeduplicateResult, WorkCacheGet, WorkSubGet}
 
 
 mutable struct Scheduler{H}
@@ -212,6 +215,14 @@ function work_run_single(scheduler, work::WorkUnion, result_channel::Channel)
 			res = cache_get!(scheduler.cache, work.sr) do
 				work.inner_res # If we get here, the inner call was performed and the value replaced, so this is the result from the inner spec.
 			end
+		elseif work isa WorkSubGet
+			spec = work.sr.spec
+			cached_sr = get_sr(spec.args[1]::Job)
+			f = cached_sr.spec.args[1].f # This is the inner `f`
+			sub = work.sr.f === compoundresult_sub ? spec.args[2]::String : nothing
+			progress_item = add_item!(progress_display, ProgressText(styled"{blue:⋅ Cache load} " * ReproducibleJobs.styled_function_name(f))) # TODO: print sub/keys
+			res = cache_try_get_compoundresult(scheduler.cache, cached_sr; sub, return_keys=sub===nothing)
+			@assert res !== NotValid() "Expected CompoundResult on disk but not found"
 		end
 		progress_item !== nothing && remove_item!(progress_display, progress_item)
 	catch e
@@ -296,6 +307,16 @@ end
 
 function process_get_cached(scheduler, sr::SpecRun, inner_res)
 	process_work(scheduler, WorkCacheGet(sr, inner_res))
+end
+
+function process_sub_get(scheduler, sr::SpecRun, inner_cr)
+	if inner_cr === NotValid()
+		process_work(scheduler, WorkSubGet(sr))
+	else
+		inner_cr isa CompoundResult || throw(ArgumentError("Tried to retrieve sub-result from result that was not a CompoundResult."))
+		sub = sr.f === compoundresult_sub ? sr.spec.args[2]::String : nothing
+		sub === nothing ? get_keys(inner_cr) : get_subresult(inner_cr, sub)
+	end
 end
 
 
@@ -510,9 +531,11 @@ function setup_dependency!(scheduler, sr::SpecRun{State}, call::Bool, dep::Job)
 		@assert curr.op == :call
 		next = setup_processing!(scheduler, curr)
 	else
-		# stop before calling
+		# stop before calling (but allow fetch/prefetch to call)
 		next = dep
-		while curr.op !== :call && should_forward_child(sr.f, curr.f)
+
+		override = dep.op === :fetch || (dep.op === :prefetch && !is_preprocessing(sr))
+		while override || (curr.op !== :call && should_forward_child(sr.f, curr.f))
 			next = setup_processing!(scheduler, curr)
 			next isa Job || break
 			curr = next
@@ -531,7 +554,6 @@ function update_dependency!(scheduler, sr::SpecRun{State}, dep::Job, res)
 	@assert res !== NotValid()
 
 	waiting = sr.state.x::Waiting
-
 	waiting.upstream[dep] = res
 	waiting.n_upstream_left[] -= 1
 	waiting.n_upstream_left[] == 0 || return NotValid()
@@ -593,13 +615,51 @@ function setup_processing!(scheduler, job)
 	@assert sr.state.x isa Initialized
 
 
-	# Experimental handling of get_cached
+	# Experimental handling of get_cached, compoundresult_sub, compoundresult_keys.
 	# Further handling in process_step_new!().
 	if ready_to_call
 		if sr.f === get_cached
-			if cache_haskey(scheduler.cache, sr)
+			if cache_haskey(scheduler.cache, sr) # TODO: Use inner spec as key instead
 				empty!(deps) # Do not process the deps - we will load from disk!
 			end
+		elseif sr.f === compoundresult_sub || sr.f === compoundresult_keys
+			cached_sr = get_sr(sr.spec.args[1]::Job)
+			sub = sr.f === compoundresult_sub ? sr.spec.args[2]::String : nothing
+
+			# 1. In-memory result of get_cached
+			if cached_sr.state.x isa Result && cached_sr.state.x.result !== NotValid()
+				cr = cached_sr.state.x.result
+				cr isa Exception && return cr # TODO: Must call set_result!
+				cr isa CompoundResult || throw(ArgumentError("Expected CompoundResult, got $(typeof(cr))"))
+				res = sub === nothing ? get_keys(cr) : get_subresult(cr, sub)
+				set_result!(sr, res)
+				return res
+			end
+
+			# 2. Weak result of get_cached
+			if cached_sr.state.x isa Result
+				w = cached_sr.state.x.weak_result
+				if w !== NotValid()
+					w isa CompoundResult || throw(ArgumentError("Expected CompoundResult, got $(typeof(w))"))
+					if sub === nothing
+						res = get_keys(w)
+						set_result!(sr, res)
+						return res
+					end
+					v = reconstruct_weak_rec(get_subresult(w, sub))
+					if v !== NotValid()
+						set_result!(sr, v)
+						return v
+					end
+				end
+			end
+
+			# 3. Disk partial load — WorkSubGet handles it in work_run_single
+			if cache_haskey(scheduler.cache, cached_sr) # TODO: Use inner spec as key instead
+				empty!(deps) # Do not process the deps - we will load from disk!
+			end
+
+			# 4. Fall through — process get_cached dep normally
 		end
 	end
 
@@ -726,7 +786,7 @@ function process_step_new!(scheduler::Scheduler, sr::SpecRun)
 
 	downstream = waiting.downstream
 	sr.state = state_processing(downstream)
-	if is_preprocessing(sr.f)
+	if is_preprocessing(sr)
 		res = preprocess(scheduler, spec_replaced)
 		if res isa Job
 			sr.state = state_next(res)
@@ -736,16 +796,12 @@ function process_step_new!(scheduler::Scheduler, sr::SpecRun)
 		update_downstream!(scheduler, downstream, res)
 		return res
 	else
-		# TODO: Support these (probably during `setup_processing!`?)
-		@assert sr.f != compoundresult_sub
-		@assert sr.f != compoundresult_keys
-		# @assert sr.f != get_cached
-
-		# Experimental handling of get_cached
 		if sr.f === get_cached
-			# res = process_get_cached(scheduler, sr, spec_replaced)
 			inner_res = isempty(waiting.upstream) ? NotValid() : spec_replaced.args[1]
 			res = process_get_cached(scheduler, sr, inner_res)
+		elseif sr.f === compoundresult_sub || sr.f === compoundresult_keys
+			inner_cr = isempty(waiting.upstream) ? NotValid() : spec_replaced.args[1]
+			res = process_sub_get(scheduler, sr, inner_cr)
 		else
 			res = compute(scheduler, spec_replaced)
 		end
