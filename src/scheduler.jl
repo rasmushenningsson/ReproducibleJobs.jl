@@ -8,8 +8,12 @@ struct WorkDeduplicateResult
 	spec::Spec
 	obj::Any
 end
+struct WorkCacheGet
+	sr::SpecRun
+	inner_res::Any
+end
 
-const WorkUnion = Union{WorkCompute, WorkPreprocess, WorkDeduplicateResult}
+const WorkUnion = Union{WorkCompute, WorkPreprocess, WorkDeduplicateResult, WorkCacheGet}
 
 
 mutable struct Scheduler{H}
@@ -172,19 +176,21 @@ end
 function work_run_single(scheduler, work::WorkUnion, result_channel::Channel)
 	progress_display = scheduler.progress_display
 	progress_item = nothing
-	spec = work.spec::Spec
 
+	local spec::Spec
 	local res
 	try
-		f = spec.f
 
 		# NB: Deduplication and thus also Preprocessing are not thread-safe and is thus currently assumed to not happen in parallel
 		if work isa WorkPreprocess
+			spec = work.spec
+			f = spec.f
 			progress_item = add_item!(progress_display, ProgressText(styled"{blue:⋅ Preprocessing} " * ReproducibleJobs.styled_function_name(f)))
 			res = f(spec.args...; spec.kwargs...)
 			@assert res !== nothing "Preprocessing of $f returned nothing"
-			remove_item!(progress_display, progress_item)
 		elseif work isa WorkCompute
+			spec = work.spec
+			f = spec.f
 			progress_item = add_item!(progress_display, ProgressText(styled"{blue:⋅ Running} " * ReproducibleJobs.styled_function_name(f)))
 
 			v = _get_kwarg(spec, :__version, nothing)
@@ -193,13 +199,21 @@ function work_run_single(scheduler, work::WorkUnion, result_channel::Channel)
 			kwargs = Iterators.filter(p->!startswith(string(p[1]),"__"), spec.kwargs)
 			res = f(spec.args...; kwargs...)
 			@assert res !== nothing "Computation of $f returned nothing"
-			remove_item!(progress_display, progress_item)
 		elseif work isa WorkDeduplicateResult
-			# TODO: Only show deduplication message if it takes time (>0.1s).
-			progress_item = add_item!(progress_display, ProgressText(styled"{blue:⋅ Deduplicating }" * ReproducibleJobs.styled_function_name(f); type=:pending))
+			spec = work.spec
+			f = spec.f
+			progress_item = add_item!(progress_display, ProgressText(styled"{blue:⋅ Deduplicating} " * ReproducibleJobs.styled_function_name(f); type=:pending))
 			res = deduplicate!(scheduler.deduplicator, work.obj; transfer_ownership=true) # Since it is a result, we know that we own the data
-			remove_item!(progress_display, progress_item)
+		elseif work isa WorkCacheGet
+			spec = work.sr.spec
+			f = spec.args[1].f # This is the inner `f`
+			action = work.inner_res === NotValid() ? "load"	: "save"
+			progress_item = add_item!(progress_display, ProgressText(styled"{blue:⋅ Cache $action} " * ReproducibleJobs.styled_function_name(f)))
+			res = cache_get!(scheduler.cache, work.sr) do
+				work.inner_res # If we get here, the inner call was performed and the value replaced, so this is the result from the inner spec.
+			end
 		end
+		progress_item !== nothing && remove_item!(progress_display, progress_item)
 	catch e
 		exception_text = _short_exception_string(e)
 		progress_item !== nothing && remove_item!(progress_display, progress_item, styled"{red:$exception_text}")
@@ -256,6 +270,9 @@ function process_work(scheduler, work::WorkUnion)
 		end
 	end
 
+	# Temp. Better to add a print_display at the very end of the external call.
+	print_display(progress_display)
+
 	res
 end
 
@@ -274,6 +291,11 @@ end
 function compute(scheduler::Scheduler, spec::Spec)
 	res = process_work(scheduler, WorkCompute(spec))
 	res = process_work(scheduler, WorkDeduplicateResult(spec, res))
+end
+
+
+function process_get_cached(scheduler, sr::SpecRun, inner_res)
+	process_work(scheduler, WorkCacheGet(sr, inner_res))
 end
 
 
@@ -570,6 +592,18 @@ function setup_processing!(scheduler, job)
 
 	@assert sr.state.x isa Initialized
 
+
+	# Experimental handling of get_cached
+	# Further handling in process_step_new!().
+	if ready_to_call
+		if sr.f === get_cached
+			if cache_haskey(scheduler.cache, sr)
+				empty!(deps) # Do not process the deps - we will load from disk!
+			end
+		end
+	end
+
+
 	upstream = IdDict{Job,Any}()
 	sr.state = state_waiting(upstream, length(deps), ready_to_call)
 
@@ -705,9 +739,18 @@ function process_step_new!(scheduler::Scheduler, sr::SpecRun)
 		# TODO: Support these (probably during `setup_processing!`?)
 		@assert sr.f != compoundresult_sub
 		@assert sr.f != compoundresult_keys
-		@assert sr.f != get_cached
+		# @assert sr.f != get_cached
 
-		res = compute(scheduler, spec_replaced)
+		# Experimental handling of get_cached
+		if sr.f === get_cached
+			# res = process_get_cached(scheduler, sr, spec_replaced)
+			inner_res = isempty(waiting.upstream) ? NotValid() : spec_replaced.args[1]
+			res = process_get_cached(scheduler, sr, inner_res)
+		else
+			res = compute(scheduler, spec_replaced)
+		end
+
+		# res = compute(scheduler, spec_replaced)
 		@assert !(res isa CompoundResult) # Is this a good place to check? Maybe should be ensured earlier.
 		@assert !(res isa Job)
 

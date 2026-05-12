@@ -455,12 +455,16 @@ function _save_file(cache::Cache{K}, key::K, fp, result) where K
 end
 
 
+cache_haskey(cache::Cache{K}, key::K) where K = isfile(key2path(cache, key))
+
+
 function cache_get!(f, cache::Cache{K}, key::K) where K
 	# Check on-disk cache
 	fp = key2path(cache, key)
 	isfile(fp) && return _load_file(cache, key, fp) # This should deduplicate already
 
 	result = f()
+	@assert result !== NotValid()
 	# result isa CompoundResult && throw(ArgumentError("Cannot retrieve CompoundResult directly from cache. You must specify sub-result(s) using cached(key,sub...)."))
 	result = deduplicate!(cache.deduplicator, result; transfer_ownership=true)
 	!(result isa Exception) && _save_file(cache, key, fp, result)
