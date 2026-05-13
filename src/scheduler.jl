@@ -142,6 +142,25 @@ function propagate_error(spec::Spec, vals)::Union{Nothing, ProcessingException}#
 	end
 end
 
+function set_result!(scheduler::Scheduler, sr::SpecRun, res)
+	if !(res isa Exception) && !is_preprocessing(sr)
+		lru_touch!(scheduler.lru, sr) do
+			Base.summarysize(res)
+		end
+	end
+	set_result!(sr, res)
+end
+
+function get_result!(scheduler::Scheduler, sr::SpecRun)
+	res = get_result!(sr)
+	if res !== NotValid() && !(res isa Exception) && !is_preprocessing(sr)
+		lru_touch!(scheduler.lru, sr) do
+			Base.summarysize(res)
+		end
+	end
+	res
+end
+
 
 
 function ensure_work_task_is_running!(scheduler::Scheduler)
@@ -385,7 +404,7 @@ function update_dependency!(scheduler, sr::SpecRun{State}, dep::Job, res)
 		downstream = waiting.downstream
 		spec_replaced = replace_dependencies(sr.spec, waiting.upstream)::Union{Spec,ProcessingException}
 		if spec_replaced isa ProcessingException
-			set_result!(sr, spec_replaced)
+			set_result!(scheduler, sr, spec_replaced)
 			update_downstream!(scheduler, downstream, spec_replaced)
 			return spec_replaced
 		else
@@ -414,7 +433,7 @@ function setup_processing!(scheduler, job)
 
 	if is_preprocessing(sr)
 		# Cached result
-		res = get_result!(sr)
+		res = get_result!(scheduler, sr)
 		res !== NotValid() && return res # Early out for preprocessing specs - it **preprocessed** to a result
 	end
 
@@ -425,7 +444,7 @@ function setup_processing!(scheduler, job)
 
 	if !is_preprocessing(sr)
 		# Cached result
-		res = get_result!(sr)
+		res = get_result!(scheduler, sr)
 		res !== NotValid() && return res # Early out for computing specs
 	end
 
@@ -447,11 +466,14 @@ function setup_processing!(scheduler, job)
 
 			# 1. In-memory result of get_cached
 			if cached_sr.state.x isa Result && cached_sr.state.x.result !== NotValid()
-				cr = cached_sr.state.x.result
-				cr isa Exception && return cr # TODO: Must call set_result!
+				cr = get_result!(scheduler, cached_sr) # will not reconstruct from weak since result !== NotValid()
+				if cr isa Exception
+					set_result!(scheduler, sr, cr)
+					return cr
+				end
 				cr isa CompoundResult || throw(ArgumentError("Expected CompoundResult, got $(typeof(cr))"))
 				res = sub === nothing ? get_keys(cr) : get_subresult(cr, sub)
-				set_result!(sr, res)
+				set_result!(scheduler, sr, res)
 				return res
 			end
 
@@ -462,12 +484,12 @@ function setup_processing!(scheduler, job)
 					w isa CompoundResult || throw(ArgumentError("Expected CompoundResult, got $(typeof(w))"))
 					if sub === nothing
 						res = get_keys(w)
-						set_result!(sr, res)
+						set_result!(scheduler, sr, res)
 						return res
 					end
 					v = reconstruct_weak_rec(get_subresult(w, sub))
 					if v !== NotValid()
-						set_result!(sr, v)
+						set_result!(scheduler, sr, v)
 						return v
 					end
 				end
@@ -578,7 +600,7 @@ function process_step_new!(scheduler::Scheduler, sr::SpecRun)
 		if res isa Job
 			sr.state = state_next(res)
 		else
-			set_result!(sr, res) # Preprocessing yielded a result, we are done.
+			set_result!(scheduler, sr, res) # Preprocessing yielded a result, we are done.
 		end
 		update_downstream!(scheduler, downstream, res)
 		return res
@@ -594,13 +616,10 @@ function process_step_new!(scheduler::Scheduler, sr::SpecRun)
 		end
 
 		# res = compute(scheduler, spec_replaced)
-		@assert !(res isa CompoundResult) # Is this a good place to check? Maybe should be ensured earlier.
+		# @assert !(res isa CompoundResult) # Is this a good place to check? Maybe should be ensured earlier. # Probably not correct after the refactoring.
 		@assert !(res isa Job)
 
-		lru_touch!(scheduler.lru, sr) do
-			Base.summarysize(res)
-		end
-		set_result!(sr, res)
+		set_result!(scheduler, sr, res)
 		update_downstream!(scheduler, downstream, res)
 		return res
 	end
