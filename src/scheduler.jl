@@ -593,6 +593,9 @@ function process_step_new!(scheduler::Scheduler, sr::SpecRun)
 	end
 	spec_replaced isa Exception && return spec_replaced
 
+	# CompoundResults are only allowed as inputs to get_cached, because the whole point is to allow partial loading from disk.
+	@assert sr.f === get_cached || !any(v -> v isa CompoundResult, values(waiting.upstream))
+
 	downstream = waiting.downstream
 	sr.state = state_processing(downstream)
 	if is_preprocessing(sr)
@@ -665,6 +668,7 @@ function process_new!(scheduler::Scheduler, job::Job; processing_errors_throw=tr
 			op in (:forward,:prefetch) && res.op === :call && return res
 			job = transfer_op(job, res) # continue processing
 		else
+			@assert !(res isa CompoundResult)
 			return res # result
 		end
 	end
