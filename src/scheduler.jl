@@ -131,18 +131,6 @@ function Base.empty!(scheduler::Scheduler)
 end
 
 
-# old
-fetch_dependencies!(scheduler, deps) = IdDict{Job,Any}(dep=>fetch!(scheduler, dep; external_call=false) for dep in deps)
-
-# old
-function process_dependency!(scheduler, dep; @nospecialize(parent_f))
-	dep.op === :call && return dep # Already preprocessed as far as it gets
-	process!(scheduler, dep; parent_f, processing_errors_throw=false, external_call=false)
-end
-process_dependencies!(scheduler, deps; @nospecialize(parent_f)) =
-	IdDict{Job,Any}(dep=>process_dependency!(scheduler, dep; parent_f) for dep in deps)
-
-
 
 
 function propagate_error(spec::Spec, vals)::Union{Nothing, ProcessingException}#, InterruptException}
@@ -331,125 +319,6 @@ end
 
 
 
-function _fetch_and_compute!(scheduler, sr::SpecRun, deps::Vector{Job})
-	# TODO: Check that sr.state is as expected?
-	sr.state = state_waiting()
-	fetched_deps = fetch_dependencies!(scheduler, deps)
-
-	if isempty(fetched_deps)
-		spec_replaced = sr.spec
-	else
-		spec_replaced = replace_dependencies(sr.spec, fetched_deps)::Union{Spec,ProcessingException,InterruptException}
-	end
-	sr.state = state_processing()
-	res = compute(scheduler, spec_replaced)
-	@assert !(res isa Job)
-	return res
-end
-
-
-function _fetch_and_compute_cached!(scheduler, sr::SpecRun, deps::Vector{Job})
-	inner_spec = sr.args[1]::Job
-	inner_sr = get_sr(inner_spec)
-	inner_deps = get_dependencies(inner_sr)
-	@assert all(s->s.op === :call, inner_deps) # The outer call has enforced all inner specs to be calls has well.
-
-	sr.state = state_waiting()
-	cache_get!(scheduler.cache, inner_sr) do
-		_fetch_and_compute!(scheduler, inner_sr, inner_deps)
-	end
-end
-
-# TODO: Simplify code
-function _fetch_and_compute_sub!(scheduler, sr::SpecRun, deps::Vector{Job})
-	@assert sr.f in (compoundresult_sub, compoundresult_keys)
-
-	cached_sr = get_sr(sr.args[1]::Job)
-	@assert cached_sr.f == get_cached
-	cached_deps = get_dependencies(cached_sr)
-	@assert all(s->s.op === :call, cached_deps) # The outer call has enforced all sub-specs to be calls has well.
-
-	sr.state = state_waiting()
-
-	# Try in this order
-	# 0. (Already done) Is it cached and still valid in sr.result.
-	# 1. Is the cached_sr result still valid? Then return subresult from that.
-	# 2. Can we reconstruct from the cached_sr weak_result?
-	# 3. Is the cached_sr cached to disk? Then load the subresult (only) from disk.
-	# 4. Compute compoundresult and return sub.
-
-	if sr.f == compoundresult_sub
-		sub = sr.args[2]::String
-	else #if sr.f == compoundresult_keys
-		sub = nothing
-	end
-
-
-	if cached_sr.state.x isa Result
-		# 1.
-		if cached_sr.state.x.result !== NotValid()
-			cr = cached_sr.state.x.result
-			cr isa Exception && return cr
-			@assert cr isa CompoundResult "Expected CompoundResult, got $(typeof(cr))."
-			return sub === nothing ? get_keys(cr) : get_subresult(cr, sub)
-		end
-
-		# 2.
-		w = cached_sr.state.x.weak_result
-		if w !== NotValid()
-			@assert w isa CompoundResult "Expected CompoundResult, got $(typeof(w))."
-			sub === nothing && return get_keys(w)
-			v = reconstruct_weak_rec(get_subresult(w, sub))
-			v !== NotValid() && return v
-		end
-	end
-
-
-	# 3.
-	inner_sr = get_sr(cached_sr.args[1])
-	v = cache_try_get_compoundresult(scheduler.cache, inner_sr; sub, return_keys=sub===nothing)
-	v !== NotValid() && return v
-
-	cr = _fetch_and_compute_cached!(scheduler, cached_sr, cached_deps)
-	set_result!(cached_sr, cr)
-
-	cr isa Exception && return cr
-
-	lru_touch!(scheduler.lru, inner_sr) do
-		Base.summarysize(cr)
-	end
-
-	cr isa CompoundResult || throw(ArgumentError("Tried to retrieve sub-result from result that was not a CompoundResult."))
-
-	return sub === nothing ? get_keys(cr) : get_subresult(cr, sub)
-end
-
-
-
-function _process_once!(scheduler::Scheduler, sr::SpecRun, deps::Vector{Job})
-	sr.state = state_waiting()
-	forwarded_deps = process_dependencies!(scheduler, deps; parent_f=sr.f)
-
-	if isempty(forwarded_deps)
-		spec_replaced = sr.spec
-	else
-		spec_replaced = replace_dependencies(sr.spec, forwarded_deps)::Union{Spec,ProcessingException,InterruptException}
-	end
-
-	spec_replaced isa Exception && return spec_replaced
-
-	if is_preprocessing(spec_replaced)
-		sr.state = state_processing()
-		preprocess(scheduler, spec_replaced)
-	else
-		sr_replaced = deduplicate!(scheduler.deduplicator, SpecRun(spec_replaced))
-		Job(sr_replaced, :call)
-	end
-end
-
-
-
-
 
 # TODO: Move these somewhere else?
 # These functions are actually never called. We just use them as singleton values to show that something is using the on-disk cache.
@@ -473,73 +342,22 @@ end
 
 
 
-# Return tuple with result and Bool telling if it's done (TODO: Make code more clear)
-function process_once!(scheduler::Scheduler, sr::SpecRun{State}, op::Symbol)
-	deps = get_dependencies(sr)
-
-	if !is_preprocessing(sr) && all(x->x.op === :call, deps)
-		# ready to call
-
-		# Stop if we are forwarding, nothing left to do
-		op === :forward && return (Job(sr, :call), true)
-
-		# Already computed?
-		res = get_result!(sr)
-		res !== NotValid() && return (res, true)
-
-		if sr.f == compoundresult_sub || sr.f == compoundresult_keys
-			res = _fetch_and_compute_sub!(scheduler, sr, deps)
-		elseif sr.f == get_cached
-			res = _fetch_and_compute_cached!(scheduler, sr, deps)
-		else
-			res = _fetch_and_compute!(scheduler, sr, deps)
-		end
-
-		@assert !(res isa CompoundResult) # Is this a good place to check? Maybe should be ensured earlier.
-		@assert !(res isa Job)
-
-		lru_touch!(scheduler.lru, sr) do
-			Base.summarysize(res)
-		end
-
-		set_result!(sr, res)
-		return res, true
-	end
-
-	# Cached forwarding
-	sr.state.x isa Next{State} && return (sr.state.x.ref, false)
-
-	# Cached result
-	res = get_result!(sr)
-	res !== NotValid() && return (res, true)
-
-	# Preprocess
-	res = _process_once!(scheduler, sr, deps)
-	if res isa Job
-		sr.state = state_next(res)
-		return res, false # Still forwarding, not done.
-	end
-
-	set_result!(sr, res) # Preprocessing yielded a result, we are done.
-	return res, true
-end
-
-
-
-function setup_dependency!(scheduler, sr::SpecRun{State}, call::Bool, dep::Job)
-	curr::Job = dep
+function setup_dependency!(scheduler, sr::SpecRun{State}, call::Bool, dep::Job, curr::Job)
+	# curr::Job = dep
 	if call
 		@assert curr.op == :call
 		next = setup_processing!(scheduler, curr)
 	else
 		# stop before calling (but allow fetch/prefetch to call)
-		next = dep
+		next = curr
 
 		override = dep.op === :fetch || (dep.op === :prefetch && !is_preprocessing(sr))
 		while override || (curr.op !== :call && should_forward_child(sr.f, curr.f))
+			# @show override, sr.f, curr.f, curr.op
 			next = setup_processing!(scheduler, curr)
 			next isa Job || break
-			curr = next
+			# @show override, sr.f, curr.f, curr.op, next.op
+			curr = next # transfer op?? Nah. I don't think so.
 		end
 	end
 
@@ -669,7 +487,7 @@ function setup_processing!(scheduler, job)
 	sr.state = state_waiting(upstream, length(deps), ready_to_call)
 
 	for dep in deps
-		next = setup_dependency!(scheduler, sr, ready_to_call, dep)
+		next = setup_dependency!(scheduler, sr, ready_to_call, dep, dep)
 		if next !== NotValid()
 			res = update_dependency!(scheduler, sr, dep, next)
 			res !== NotValid() && return res
@@ -695,61 +513,6 @@ function _update_gc_display!(scheduler::Scheduler)
 	# More stuff? E.g. time since last full/incremental sweep. And max memory usage.
 	set_text!(scheduler.progress_display, scheduler.gc_display_item[], styled"{blue:⋅ GC:} $live live")
 end
-
-
-# Old
-# TODO: Avoid passing parent_f which can have many different types and just pass sufficient info to make this decision? Then we can get rid of @nospecialize...
-function process!(scheduler::Scheduler, sr::SpecRun, op::Symbol; @nospecialize(parent_f=nothing), processing_errors_throw=true, external_call=true)
-	if external_call
-		ensure_work_task_is_running!(scheduler)
-		_reset_progress_display!(scheduler, sr)
-	end
-	evict_results!(scheduler; evict_all=false)
-	_update_gc_display!(scheduler)
-
-	while true
-		if parent_f !== nothing && op in (:forward,:prefetch) && !should_forward_child(parent_f, sr.f)
-			return Job(sr, op) # processing done, we shouldn't forward anymore
-		end
-
-		res, done = process_once!(scheduler, sr, op)
-		# done && return res
-		if done
-			processing_errors_throw && res isa Exception && throw(res)
-			return res
-		end
-		res::Job
-		sr = get_sr(res)
-		# NB: Keep the op
-	end
-end
-
-
-
-
-fetch!(scheduler::Scheduler, job::Job; kwargs...) = process!(scheduler, get_sr(job), :fetch; kwargs...)
-forward!(scheduler::Scheduler, job::Job; kwargs...) = process!(scheduler, get_sr(job), :forward; kwargs...)
-process!(scheduler::Scheduler, job::Job; kwargs...) = process!(scheduler, get_sr(job), job.op; kwargs...)
-
-
-function forward_once!(scheduler::Scheduler, job::Job; processing_errors_throw=true, external_call=true)
-	sr = get_sr(job)
-	if external_call
-		ensure_work_task_is_running!(scheduler)
-		_reset_progress_display!(scheduler, sr)
-	end
-	evict_results!(scheduler; evict_all=false)
-	_update_gc_display!(scheduler)
-	res, _ = process_once!(scheduler, sr, :forward)
-	processing_errors_throw && res isa Exception && throw(res)
-	res
-end
-
-
-fetch!(job::Job; kwargs...) = fetch!(get_scheduler(), job; kwargs...)
-forward!(job::Job; kwargs...) = forward!(get_scheduler(), job; kwargs...)
-forward_once!(job::Job; kwargs...) = forward_once!(get_scheduler(), job; kwargs...)
-process!(job::Job; kwargs...) = process!(get_scheduler(), job; kwargs...)
 
 
 
@@ -782,7 +545,8 @@ function update_downstream!(scheduler::Scheduler, downstream::Vector{Pair{Union{
 
 			if res isa Job
 				# If res is a forwarded job, continue following the chain before updating
-				next = setup_dependency!(scheduler, sr, waiting.call, res)
+				# next = setup_dependency!(scheduler, sr, waiting.call, res)
+				next = setup_dependency!(scheduler, sr, waiting.call, dep, res)
 				next !== NotValid() && update_dependency!(scheduler, sr, dep, next)
 			else
 				update_dependency!(scheduler, sr, dep, res)

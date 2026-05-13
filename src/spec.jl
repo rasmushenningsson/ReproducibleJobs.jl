@@ -82,9 +82,6 @@ state_waiting(upstream::IdDict{Job,Any}, n_upstream_left::Int, call::Bool) = Sta
 state_processing(downstream::Vector{Pair{Union{SpecRun{State},Function},Job}}) = State(Processing{State}(downstream))
 
 
-state_waiting() = State(Waiting{State}([],IdDict{Job,Any}(), Ref(0), false)) # DUMMY USED DURING REFACTORING - TODO: Remove
-state_processing() = State(Processing{State}([])) # DUMMY USED DURING REFACTORING - TODO: Remove
-
 state_next(ref::SpecRef) = State(Next{State}(ref))
 
 state_result(res, weak) = State(Result(res, weak))

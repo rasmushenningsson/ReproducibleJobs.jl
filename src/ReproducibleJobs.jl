@@ -99,6 +99,7 @@ include("preprocess.jl")
 include("processing_exception.jl")
 include("lru_cache.jl")
 include("scheduler.jl")
+include("scheduler_old.jl") # will be removed
 
 include("paths.jl")
 
