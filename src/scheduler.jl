@@ -594,8 +594,8 @@ function process_step_new!(scheduler::Scheduler, sr::SpecRun)
 	end
 
 	if spec_replaced isa ProcessingException
-		set_result!(scheduler, sr, spec_replace) # Preprocessing yielded an exception, we are done.
-		update_downstream!(scheduler, downstream, spec_replace)
+		set_result!(scheduler, sr, spec_replaced) # Preprocessing yielded an exception, we are done.
+		update_downstream!(scheduler, downstream, spec_replaced)
 		return spec_replaced
 	end
 
