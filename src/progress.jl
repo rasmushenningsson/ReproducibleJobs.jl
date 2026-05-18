@@ -190,12 +190,11 @@ end
 
 
 
-function print_display(io, pd::ProgressDisplay)
-	move_cursor_up(io, pd.nlines)
-
+function print_display(io, pd::ProgressDisplay; final=false)
 	t = time()
 
 	# Process item updates (isempty!+take! works since we only have one consumer task)
+	# Removed items and info messages print here and stay permanently above the active display.
 	while !isempty(pd.channel)
 		msg = take!(pd.channel)
 		if msg isa ProgressMessageAddItem
@@ -227,8 +226,13 @@ function print_display(io, pd::ProgressDisplay)
 		curr = curr.next
 	end
 	pd.nlines = nlines
+
+	# Move cursor back to the top of the active display so the next call
+	# overwrites it in place. Skipped on the final call so the cursor stays
+	# below the display and subsequent output appears underneath.
+	final || move_cursor_up(io, nlines)
 end
-print_display(pd::ProgressDisplay) = print_display(stdout, pd)
+print_display(pd::ProgressDisplay; kwargs...) = print_display(stdout, pd; kwargs...)
 
 
 

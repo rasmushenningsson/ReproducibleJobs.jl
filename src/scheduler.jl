@@ -585,18 +585,23 @@ end
 function process_step_new!(scheduler::Scheduler, sr::SpecRun)
 	waiting = sr.state.x::Waiting{State}
 	@assert waiting.n_upstream_left[] == 0
+	downstream = waiting.downstream
 
 	if isempty(waiting.upstream)
 		spec_replaced = sr.spec
 	else
 		spec_replaced = replace_dependencies(sr.spec, waiting.upstream)::Union{Spec,ProcessingException}
 	end
-	spec_replaced isa Exception && return spec_replaced
+
+	if spec_replaced isa ProcessingException
+		set_result!(scheduler, sr, spec_replace) # Preprocessing yielded an exception, we are done.
+		update_downstream!(scheduler, downstream, spec_replace)
+		return spec_replaced
+	end
 
 	# CompoundResults are only allowed as inputs to get_cached, because the whole point is to allow partial loading from disk.
 	@assert sr.f === get_cached || !any(v -> v isa CompoundResult, values(waiting.upstream))
 
-	downstream = waiting.downstream
 	sr.state = state_processing(downstream)
 	if is_preprocessing(sr)
 		res = preprocess(scheduler, spec_replaced)
@@ -618,10 +623,7 @@ function process_step_new!(scheduler::Scheduler, sr::SpecRun)
 			res = compute(scheduler, spec_replaced)
 		end
 
-		# res = compute(scheduler, spec_replaced)
-		# @assert !(res isa CompoundResult) # Is this a good place to check? Maybe should be ensured earlier. # Probably not correct after the refactoring.
-		@assert !(res isa Job)
-
+		@assert !(res isa Job) # compute isn't allow to return jobs
 		set_result!(scheduler, sr, res)
 		update_downstream!(scheduler, downstream, res)
 		return res
@@ -637,6 +639,7 @@ function process_new!(scheduler::Scheduler, job::Job; processing_errors_throw=tr
 	_update_gc_display!(scheduler)
 
 	op = job.op
+	local res
 
 	# TODO: simplify code?
 	while true
@@ -664,14 +667,18 @@ function process_new!(scheduler::Scheduler, job::Job; processing_errors_throw=tr
 		res isa Exception && throw(res)
 
 		if res isa Job
-			once && return res # Only take one step
-			op in (:forward,:prefetch) && res.op === :call && return res
+			if once || (op in (:forward,:prefetch) && res.op === :call)
+				break # Only take one step / forward is done
+			end
 			job = transfer_op(job, res) # continue processing
 		else
 			@assert !(res isa CompoundResult)
-			return res # result
+			break # result
 		end
 	end
+
+	external_call && print_display(scheduler.progress_display; final=true)
+	return res
 end
 
 fetch_new!(scheduler::Scheduler, job::Job; kwargs...) = process_new!(scheduler, Job(get_sr(job), :fetch); kwargs...)
