@@ -9,6 +9,7 @@ include("hash.jl")
 include("deduplicator.jl")
 include("cache.jl")
 include("spec.jl")
+include("scheduler.jl")
 
 @testset "ReproducibleJobs" begin
 	run_hash_tests()
@@ -19,4 +20,5 @@ include("spec.jl")
 		run_cache_tests()
 	end
 	run_spec_tests()
+	run_scheduler_tests()
 end
