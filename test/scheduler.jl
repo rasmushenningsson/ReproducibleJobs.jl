@@ -3,7 +3,7 @@
 
 using Test
 using ReproducibleJobs
-using ReproducibleJobs: create_spec, with_scheduler, Preprocessing
+using ReproducibleJobs: create_spec, with_scheduler, Preprocessing, ProcessingException, cached
 import ReproducibleJobs: fetch_new!, forward_new!, forward_once_new!
 
 
@@ -55,18 +55,52 @@ end
 t7_bad(x; __version=v"1.0.0")    = error("intentional failure")
 t7_parent(x; __version=v"1.0.0") = x + 1
 
+# Test 8 — DAG sharing
+t_dag_fn(x; __version=v"1.0.0") = (_C(:t_dag); x + 1)
+
+# Test 9 — fetched dep computed before preprocessing
+t_fetched_dep_fn(x; __version=v"1.0.0") = (_C(:t_fetched_dep); x * 5)
+const t_fetched_dep_was_value = Ref(false)
+function t_fetched_preproc_fn(::Preprocessing, dep)
+	_C(:t_fetched_preproc)
+	t_fetched_dep_was_value[] = !(dep isa Job)
+	create_spec(my_double, dep; __version=v"1.0.0")
+end
+
+# Test 10 — Preprocess{false} runs after Preprocess{true}
+t_late_early_fn(::Preprocessing, x_job) = (_C(:t_late_early); create_spec(my_double, x_job; __version=v"1.0.0"))
+function t_late_late_fn(::Preprocessing, x_job)
+	_C(:t_late_late)
+	create_spec(my_add, x_job, 10; __version=v"1.0.0")
+end
+
+# Test 11 — error in preprocessing
+t_bad_preproc_fn(::Preprocessing, x) = error("preproc failure")
+
+# Test 13 — forward_once_new! stepping (uses t7_bad for ProcessingException; test 12 has no new fns)
+t_step_inner(::Preprocessing, x_job) = (_C(:t_step_inner); create_spec(my_double, x_job; __version=v"1.0.0"))
+t_step_outer(::Preprocessing, x_job) = (_C(:t_step_outer); create_spec(Preprocess(t_step_inner), x_job))
+
+# Tests 14–15 — on-disk caching
+t_cached_fn(x; __version=v"1.0.0")   = (_C(:t_cached); x * 3)
+t_compound_fn(x; __version=v"1.0.0") = (_C(:t_compound); CompoundResult(; a=x*2, b=x*3))
+
+# Tests 16–17 — file path types
+t_read_tfp(fp; __version=v"1.0.0") = (_C(:t_read_tfp); read(fp.path, String))
+t_read_cfp(fp; __version=v"1.0.0") = (_C(:t_read_cfp); read(fp.path, String))
+
 
 function run_scheduler_tests()
 	@testset "Scheduler" begin
 		let tmp = mktempdir()
 			with_scheduler(Scheduler(; dir=tmp)) do
-				_run_scheduler_tests()
+				_run_scheduler_tests(tmp)
 			end
 		end
 	end
 end
 
-function _run_scheduler_tests()
+function _run_scheduler_tests(dir)
 	scheduler = ReproducibleJobs.get_scheduler()
 
 
@@ -173,5 +207,176 @@ function _run_scheduler_tests()
 		parent_job = create_spec(t7_parent, dep_job; __version=v"1.0.0")
 
 		@test_throws "intentional failure" fetch_new!(scheduler, parent_job)
+	end
+
+
+	@testset "DAG sharing — shared dep computed once" begin
+		_CALLS[:t_dag] = 0
+		leaf    = create_spec(my_val, 100; __version=v"1.0.0")
+		dep     = create_spec(t_dag_fn, leaf; __version=v"1.0.0")
+		parent1 = create_spec(my_add, dep, 0; __version=v"1.0.0")
+		parent2 = create_spec(my_add, dep, 1000; __version=v"1.0.0")
+
+		r1 = fetch_new!(scheduler, parent1)
+		r2 = fetch_new!(scheduler, parent2)
+		@test r1 == 101    # t_dag_fn(100) + 0 = 101
+		@test r2 == 1101   # t_dag_fn(100) + 1000 = 1101
+		@test _N(:t_dag) == 1   # shared dep computed only once
+	end
+
+
+	@testset "fetched dep is computed before preprocessing runs" begin
+		_CALLS[:t_fetched_dep] = _CALLS[:t_fetched_preproc] = 0
+		t_fetched_dep_was_value[] = false
+		leaf = create_spec(my_val, 11; __version=v"1.0.0")
+		dep  = create_spec(t_fetched_dep_fn, leaf; __version=v"1.0.0")
+		job  = create_spec(Preprocess(t_fetched_preproc_fn), fetched(dep))
+
+		# During forwarding, the fetched dep is computed; preprocessing receives its VALUE
+		fwd = forward_new!(scheduler, job)
+		@test fwd isa Job && fwd.op === :call
+		@test _N(:t_fetched_dep) == 1
+		@test _N(:t_fetched_preproc) == 1
+		@test t_fetched_dep_was_value[]   # received a value, not a Job
+
+		result = fetch_new!(scheduler, job)
+		@test result == 2 * (11 * 5)   # my_double(t_fetched_dep_fn(11)) = 2*55 = 110
+	end
+
+
+	@testset "Preprocess{false} runs after Preprocess{true}" begin
+		_CALLS[:t_late_early] = _CALLS[:t_late_late] = 0
+		leaf      = create_spec(my_val, 30; __version=v"1.0.0")
+		early_job = create_spec(Preprocess(t_late_early_fn), leaf)          # early: doubles x
+		job       = create_spec(Preprocess{false}(t_late_late_fn), early_job)  # late: adds 10
+
+		fwd = forward_new!(scheduler, job)
+		@test fwd isa Job && fwd.op === :call
+		@test _N(:t_late_early) == 1 && _N(:t_late_late) == 1
+
+		result = fetch_new!(scheduler, job)
+		@test result == my_double(30) + 10   # 60 + 10 = 70
+	end
+
+
+	@testset "Error in preprocessing" begin
+		dep_job = create_spec(my_val, 200; __version=v"1.0.0")
+		job     = create_spec(Preprocess(t_bad_preproc_fn), dep_job)
+		@test_throws "preproc failure" fetch_new!(scheduler, job)
+	end
+
+
+	@testset "ProcessingException structure" begin
+		dep_job    = create_spec(t7_bad, 99; __version=v"1.0.0")
+		parent_job = create_spec(t7_parent, dep_job; __version=v"1.0.0")
+		exc = nothing
+		try
+			fetch_new!(scheduler, parent_job)
+		catch e
+			exc = e
+		end
+		@test exc isa ProcessingException
+		@test exc.inner isa ErrorException
+		@test occursin("intentional failure", exc.inner.msg)
+		@test length(exc.stack) >= 1
+	end
+
+
+	@testset "forward_once_new! stepping" begin
+		_CALLS[:t_step_inner] = _CALLS[:t_step_outer] = 0
+		leaf = create_spec(my_val, 42; __version=v"1.0.0")
+		job  = create_spec(Preprocess(t_step_outer), leaf)
+
+		# step 1: outer runs, inner does not
+		fwd1 = forward_once_new!(scheduler, job)
+		@test fwd1 isa Job && fwd1.op === :forward
+		@test _N(:t_step_outer) == 1 && _N(:t_step_inner) == 0
+
+		# advance to :call; outer is not repeated
+		fwd_final = forward_new!(scheduler, job)
+		@test fwd_final isa Job && fwd_final.op === :call
+		@test _N(:t_step_outer) == 1 && _N(:t_step_inner) == 1
+
+		# forward_once on the fully-forwarded result is idempotent
+		fwd_again = forward_once_new!(scheduler, fwd_final)
+		@test fwd_again === fwd_final
+
+		@test fetch_new!(scheduler, job) == 84   # my_double(42) = 84
+	end
+
+
+	@testset "Cached on-disk — second scheduler finds result" begin
+		_CALLS[:t_cached] = 0
+		inner = create_spec(t_cached_fn, 7; __version=v"1.0.0")
+		job   = cached(inner)
+
+		r1 = fetch_new!(scheduler, job)
+		@test r1 == 21       # 7 * 3
+		@test _N(:t_cached) == 1
+
+		# A fresh scheduler with the same cache dir should hit the on-disk result
+		with_scheduler(Scheduler(; dir=dir)) do
+			sched2 = ReproducibleJobs.get_scheduler()
+			r2 = fetch_new!(sched2, job)
+			@test r2 == 21
+			@test _N(:t_cached) == 1   # not recomputed
+		end
+	end
+
+
+	@testset "Cached CompoundResult sub-results" begin
+		_CALLS[:t_compound] = 0
+		inner = create_spec(t_compound_fn, 5; __version=v"1.0.0")
+		sub_a = cached(inner, "a")
+		sub_b = cached(inner, "b")
+
+		@test fetch_new!(scheduler, sub_a) == 10   # 5*2
+		@test fetch_new!(scheduler, sub_b) == 15   # 5*3
+		@test _N(:t_compound) == 1   # compound fn called once for both sub-results
+	end
+
+
+	@testset "TimestampedFilePath — mtime change creates distinct spec" begin
+		_CALLS[:t_read_tfp] = 0
+		fp  = joinpath(dir, "ts_test.txt")
+		write(fp, "version1")
+		ts1  = TimestampedFilePath(fp)
+		job1 = create_spec(t_read_tfp, ts1; __version=v"1.0.0")
+		@test fetch_new!(scheduler, job1) == "version1"
+		@test _N(:t_read_tfp) == 1
+
+		# Artificially different timestamp → different spec → must recompute
+		ts2  = TimestampedFilePath(ts1.path, ts1.timestamp + 1.0)
+		job2 = create_spec(t_read_tfp, ts2; __version=v"1.0.0")
+		@test job2 !== job1
+		@test fetch_new!(scheduler, job2) == "version1"   # same file, different spec
+		@test _N(:t_read_tfp) == 2
+	end
+
+
+	@testset "ChecksummedFilePath — same checksum deduplicated, different checksum distinct" begin
+		_CALLS[:t_read_cfp] = 0
+		fp   = joinpath(dir, "cfp_test.txt")
+		write(fp, "stable content")
+		cfp1 = ChecksummedFilePath(fp)
+		job1 = create_spec(t_read_cfp, cfp1; __version=v"1.0.0")
+		@test fetch_new!(scheduler, job1) == "stable content"
+		@test _N(:t_read_cfp) == 1
+
+		# Same checksum, different timestamp → same spec (hash is checksum-only)
+		cfp2 = ChecksummedFilePath(cfp1.path, cfp1.timestamp + 100.0, cfp1.checksum)
+		@test isequal(cfp1, cfp2)   # isequal by checksum
+		job2 = create_spec(t_read_cfp, cfp2; __version=v"1.0.0")
+		@test job2 === job1   # deduplicated to the same Job
+		@test _N(:t_read_cfp) == 1   # not recomputed
+
+		# Different content → different checksum → different spec → must recompute
+		write(fp, "new content")
+		cfp3 = ChecksummedFilePath(fp)
+		@test !isequal(cfp1, cfp3)
+		job3 = create_spec(t_read_cfp, cfp3; __version=v"1.0.0")
+		@test job3 !== job1
+		@test fetch_new!(scheduler, job3) == "new content"
+		@test _N(:t_read_cfp) == 2
 	end
 end

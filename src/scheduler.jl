@@ -599,8 +599,8 @@ function process_step_new!(scheduler::Scheduler, sr::SpecRun)
 		return spec_replaced
 	end
 
-	# CompoundResults are only allowed as inputs to get_cached, because the whole point is to allow partial loading from disk.
-	@assert sr.f === get_cached || !any(v -> v isa CompoundResult, values(waiting.upstream))
+	# CompoundResults are only allowed as inputs to get_cached and related, because the whole point is to allow partial loading from disk.
+	@assert sr.f in (get_cached,compoundresult_sub,compoundresult_keys) || !any(v -> v isa CompoundResult, values(waiting.upstream))
 
 	sr.state = state_processing(downstream)
 	if is_preprocessing(sr)
