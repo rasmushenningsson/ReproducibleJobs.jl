@@ -10,7 +10,7 @@ struct WorkDeduplicateResult
 end
 struct WorkCacheGet
 	sr::SpecRun
-	inner_res::Any
+	res::Any
 end
 struct WorkSubGet
 	sr::SpecRun # compoundresult_sub or compoundresult_keys sr
@@ -194,13 +194,13 @@ function work_run_single(scheduler, work::WorkUnion, result_channel::Channel)
 
 		# NB: Deduplication and thus also Preprocessing are not thread-safe and is thus currently assumed to not happen in parallel
 		if work isa WorkPreprocess
-			spec = work.spec
+			spec = work.spec # used in catch below
 			f = spec.f
 			progress_item = add_item!(progress_display, ProgressText(styled"{blue:⋅ Preprocessing} " * ReproducibleJobs.styled_function_name(f)))
 			res = f(spec.args...; spec.kwargs...)
 			@assert res !== nothing "Preprocessing of $f returned nothing"
 		elseif work isa WorkCompute
-			spec = work.spec
+			spec = work.spec # used in catch below
 			f = spec.f
 			progress_item = add_item!(progress_display, ProgressText(styled"{blue:⋅ Running} " * ReproducibleJobs.styled_function_name(f)))
 
@@ -211,25 +211,28 @@ function work_run_single(scheduler, work::WorkUnion, result_channel::Channel)
 			res = f(spec.args...; kwargs...)
 			@assert res !== nothing "Computation of $f returned nothing"
 		elseif work isa WorkDeduplicateResult
-			spec = work.spec
+			spec = work.spec # used in catch below
 			f = spec.f
 			progress_item = add_item!(progress_display, ProgressText(styled"{blue:⋅ Deduplicating} " * ReproducibleJobs.styled_function_name(f); type=:pending))
 			res = deduplicate!(scheduler.deduplicator, work.obj; transfer_ownership=true) # Since it is a result, we know that we own the data
 		elseif work isa WorkCacheGet
-			spec = work.sr.spec
-			f = spec.args[1].f # This is the inner `f`
-			action = work.inner_res === NotValid() ? "load"	: "save"
+			spec = work.sr.spec # used in catch below
+			f = spec.f
+			action = work.res === NotValid() ? "load"	: "save"
 			progress_item = add_item!(progress_display, ProgressText(styled"{blue:⋅ Cache $action} " * ReproducibleJobs.styled_function_name(f)))
 			res = cache_get!(scheduler.cache, work.sr) do
-				work.inner_res # If we get here, the inner call was performed and the value replaced, so this is the result from the inner spec.
+				work.res # If we get here, the inner call was performed and the value replaced, so this is the result from the inner spec.
 			end
 		elseif work isa WorkSubGet
-			spec = work.sr.spec
+			spec = work.sr.spec # used in catch below
 			cached_sr = get_sr(spec.args[1]::Job)
-			f = cached_sr.spec.args[1].f # This is the inner `f`
-			sub = work.sr.f === compoundresult_sub ? spec.args[2]::String : nothing
-			progress_item = add_item!(progress_display, ProgressText(styled"{blue:⋅ Cache load} " * ReproducibleJobs.styled_function_name(f))) # TODO: print sub/keys
-			res = cache_try_get_compoundresult(scheduler.cache, cached_sr; sub, return_keys=sub===nothing)
+			inner_sr = get_sr(cached_sr.args[1])
+			f = inner_sr.f
+			sub = spec.f === compoundresult_sub ? spec.args[2]::String : nothing
+			sub_str = sub !== nothing ? styled"{italic: \"$sub\"}" : styled"{italic: keys}"
+			# progress_item = add_item!(progress_display, ProgressText(styled"{blue:⋅ Cache load} " * ReproducibleJobs.styled_function_name(f))) # TODO: print sub/keys
+			progress_item = add_item!(progress_display, ProgressText(styled"{blue:⋅ Cache load} " * ReproducibleJobs.styled_function_name(f) * sub_str))
+			res = cache_try_get_compoundresult(scheduler.cache, inner_sr; sub, return_keys=sub===nothing)
 			@assert res !== NotValid() "Expected CompoundResult on disk but not found"
 		end
 		progress_item !== nothing && remove_item!(progress_display, progress_item)
@@ -313,8 +316,8 @@ function compute(scheduler::Scheduler, spec::Spec)
 end
 
 
-function process_get_cached(scheduler, sr::SpecRun, inner_res)
-	process_work(scheduler, WorkCacheGet(sr, inner_res))
+function process_get_cached(scheduler, sr::SpecRun, res)
+	process_work(scheduler, WorkCacheGet(sr, res))
 end
 
 function process_sub_get(scheduler, sr::SpecRun, inner_cr)
@@ -454,10 +457,11 @@ function setup_processing!(scheduler, job)
 
 
 	# Experimental handling of get_cached, compoundresult_sub, compoundresult_keys.
-	# Further handling in process_step_new!().
+	# Further handling in process_step!().
 	if ready_to_call
 		if sr.f === get_cached
-			if cache_haskey(scheduler.cache, sr) # TODO: Use inner spec as key instead
+			inner_sr = get_sr(sr.args[1])
+			if cache_haskey(scheduler.cache, inner_sr)
 				empty!(deps) # Do not process the deps - we will load from disk!
 			end
 		elseif sr.f === compoundresult_sub || sr.f === compoundresult_keys
@@ -496,7 +500,8 @@ function setup_processing!(scheduler, job)
 			end
 
 			# 3. Disk partial load — WorkSubGet handles it in work_run_single
-			if cache_haskey(scheduler.cache, cached_sr) # TODO: Use inner spec as key instead
+			inner_sr = get_sr(cached_sr.args[1])
+			if cache_haskey(scheduler.cache, inner_sr)
 				empty!(deps) # Do not process the deps - we will load from disk!
 			end
 
@@ -582,7 +587,7 @@ end
 
 
 
-function process_step_new!(scheduler::Scheduler, sr::SpecRun)
+function process_step!(scheduler::Scheduler, sr::SpecRun)
 	waiting = sr.state.x::Waiting{State}
 	@assert waiting.n_upstream_left[] == 0
 	downstream = waiting.downstream
@@ -615,7 +620,7 @@ function process_step_new!(scheduler::Scheduler, sr::SpecRun)
 	else
 		if sr.f === get_cached
 			inner_res = isempty(waiting.upstream) ? NotValid() : spec_replaced.args[1]
-			res = process_get_cached(scheduler, sr, inner_res)
+			res = process_get_cached(scheduler, get_sr(sr.args[1]), inner_res)
 		elseif sr.f === compoundresult_sub || sr.f === compoundresult_keys
 			inner_cr = isempty(waiting.upstream) ? NotValid() : spec_replaced.args[1]
 			res = process_sub_get(scheduler, sr, inner_cr)
@@ -630,7 +635,7 @@ function process_step_new!(scheduler::Scheduler, sr::SpecRun)
 	end
 end
 
-function process_new!(scheduler::Scheduler, job::Job; processing_errors_throw=true, external_call=true, once=false)
+function process!(scheduler::Scheduler, job::Job; processing_errors_throw=true, external_call=true, once=false)
 	if external_call
 		ensure_work_task_is_running!(scheduler)
 		_reset_progress_display!(scheduler, job.sr)
@@ -653,9 +658,9 @@ function process_new!(scheduler::Scheduler, job::Job; processing_errors_throw=tr
 
 			while !isempty(scheduler.processing_queue)
 				curr_sr = pop!(scheduler.processing_queue) # LIFO
-				process_step_new!(scheduler, curr_sr)
+				process_step!(scheduler, curr_sr)
 				# Consider early out on error?
-				# x = process_step_new!(scheduler, curr_sr)
+				# x = process_step!(scheduler, curr_sr)
 				# processing_errors_throw && x isa Exception && throw(res)
 			end
 
@@ -681,13 +686,13 @@ function process_new!(scheduler::Scheduler, job::Job; processing_errors_throw=tr
 	return res
 end
 
-fetch_new!(scheduler::Scheduler, job::Job; kwargs...) = process_new!(scheduler, Job(get_sr(job), :fetch); kwargs...)
-forward_new!(scheduler::Scheduler, job::Job; kwargs...) = process_new!(scheduler, Job(get_sr(job), :forward); kwargs...)
-forward_once_new!(scheduler::Scheduler, job::Job; kwargs...) = process_new!(scheduler, Job(get_sr(job), :forward); kwargs..., once=true)
+fetch!(scheduler::Scheduler, job::Job; kwargs...) = process!(scheduler, Job(get_sr(job), :fetch); kwargs...)
+forward!(scheduler::Scheduler, job::Job; kwargs...) = process!(scheduler, Job(get_sr(job), :forward); kwargs...)
+forward_once!(scheduler::Scheduler, job::Job; kwargs...) = process!(scheduler, Job(get_sr(job), :forward); kwargs..., once=true)
 
-fetch_new!(job::Job; kwargs...) = fetch_new!(get_scheduler(), job; kwargs...)
-forward_new!(job::Job; kwargs...) = forward_new!(get_scheduler(), job; kwargs...)
-forward_once_new!(job::Job; kwargs...) = forward_once_new!(get_scheduler(), job; kwargs...)
+fetch!(job::Job; kwargs...) = fetch!(get_scheduler(), job; kwargs...)
+forward!(job::Job; kwargs...) = forward!(get_scheduler(), job; kwargs...)
+forward_once!(job::Job; kwargs...) = forward_once!(get_scheduler(), job; kwargs...)
 
 
 

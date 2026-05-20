@@ -1,12 +1,9 @@
-function move_cursor_up(io, n; clear=true)
-	if clear
-		print(io, "\e[A\e[2K" ^ n)
-	else
-		print(io, "\r\u1b[A" ^ n) # less flickering - but requires us to print over all chars (i.e. fill with " " until prev length of a line)
-	end
+function move_cursor_up(io, n)
+	# print(io, "\e[A\e[2K" ^ n) # This version also clears when moving up
+	print(io, "\r\u1b[A" ^ n) # This only moves up
 end
-move_cursor_up(n; kwargs...) = move_cursor_up(stdout, n; kwargs...)
 
+erase_to_eol(io) = print(io, "\e[K")
 
 
 abstract type AbstractProgressItem end
@@ -146,6 +143,7 @@ function print_item(io, item::ProgressText, t; finish_time=nothing, finish_text=
 
 	item.type === :timed && print_duration(io, run_time)
 	finish_text !== nothing && print(io, finish_text)
+	erase_to_eol(io)
 	println(io)
 	return true
 end
@@ -184,6 +182,7 @@ function print_item(io, item::ProgressBarItem, t; finish_time=nothing, finish_te
 		print(io, finish_text)
 	end
 
+	erase_to_eol(io)
 	println(io)
 	return true
 end
@@ -205,8 +204,10 @@ function print_display(io, pd::ProgressDisplay; final=false)
 			_set_finished!(msg.item) # mark for removal
 			print_item(io, msg.item, t; finish_time=msg.t, finish_text=msg.text) # print removed items first (in order of removal)
 		else#if msg isa ProgressMessageInfo
-			msg::ProgressMessageInfo
-			println(io, msg.text) # one-off
+			msg::ProgressMessageInfo # a one-off message
+			print(io, msg.text)
+			erase_to_eol(io)
+			println(io)
 		end
 	end
 

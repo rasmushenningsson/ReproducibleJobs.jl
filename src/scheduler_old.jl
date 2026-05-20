@@ -188,7 +188,7 @@ end
 
 
 # TODO: Avoid passing parent_f which can have many different types and just pass sufficient info to make this decision? Then we can get rid of @nospecialize...
-function process!(scheduler::Scheduler, sr::SpecRun, op::Symbol; @nospecialize(parent_f=nothing), processing_errors_throw=true, external_call=true)
+function process_old!(scheduler::Scheduler, sr::SpecRun, op::Symbol; @nospecialize(parent_f=nothing), processing_errors_throw=true, external_call=true)
 	if external_call
 		ensure_work_task_is_running!(scheduler)
 		_reset_progress_display!(scheduler, sr)
@@ -198,12 +198,14 @@ function process!(scheduler::Scheduler, sr::SpecRun, op::Symbol; @nospecialize(p
 
 	while true
 		if parent_f !== nothing && op in (:forward,:prefetch) && !should_forward_child(parent_f, sr.f)
+			external_call && print_display(scheduler.progress_display; final=true)
 			return Job(sr, op) # processing done, we shouldn't forward anymore
 		end
 
 		res, done = process_once!(scheduler, sr, op)
 		# done && return res
 		if done
+			external_call && print_display(scheduler.progress_display; final=true)
 			processing_errors_throw && res isa Exception && throw(res)
 			return res
 		end
@@ -216,12 +218,12 @@ end
 
 
 
-fetch!(scheduler::Scheduler, job::Job; kwargs...) = process!(scheduler, get_sr(job), :fetch; kwargs...)
-forward!(scheduler::Scheduler, job::Job; kwargs...) = process!(scheduler, get_sr(job), :forward; kwargs...)
-process!(scheduler::Scheduler, job::Job; kwargs...) = process!(scheduler, get_sr(job), job.op; kwargs...)
+fetch_old!(scheduler::Scheduler, job::Job; kwargs...) = process_old!(scheduler, get_sr(job), :fetch; kwargs...)
+forward_old!(scheduler::Scheduler, job::Job; kwargs...) = process_old!(scheduler, get_sr(job), :forward; kwargs...)
+process_old!(scheduler::Scheduler, job::Job; kwargs...) = process_old!(scheduler, get_sr(job), job.op; kwargs...)
 
 
-function forward_once!(scheduler::Scheduler, job::Job; processing_errors_throw=true, external_call=true)
+function forward_once_old!(scheduler::Scheduler, job::Job; processing_errors_throw=true, external_call=true)
 	sr = get_sr(job)
 	if external_call
 		ensure_work_task_is_running!(scheduler)
@@ -230,14 +232,15 @@ function forward_once!(scheduler::Scheduler, job::Job; processing_errors_throw=t
 	evict_results!(scheduler; evict_all=false)
 	_update_gc_display!(scheduler)
 	res, _ = process_once!(scheduler, sr, :forward)
+	external_call && print_display(scheduler.progress_display; final=true)
 	processing_errors_throw && res isa Exception && throw(res)
 	res
 end
 
 
-fetch!(job::Job; kwargs...) = fetch!(get_scheduler(), job; kwargs...)
-forward!(job::Job; kwargs...) = forward!(get_scheduler(), job; kwargs...)
-forward_once!(job::Job; kwargs...) = forward_once!(get_scheduler(), job; kwargs...)
-process!(job::Job; kwargs...) = process!(get_scheduler(), job; kwargs...)
+fetch_old!(job::Job; kwargs...) = fetch_old!(get_scheduler(), job; kwargs...)
+forward_old!(job::Job; kwargs...) = forward_old!(get_scheduler(), job; kwargs...)
+forward_once_old!(job::Job; kwargs...) = forward_once_old!(get_scheduler(), job; kwargs...)
+process_old!(job::Job; kwargs...) = process_old!(get_scheduler(), job; kwargs...)
 
 
