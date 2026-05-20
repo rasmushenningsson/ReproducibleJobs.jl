@@ -231,7 +231,6 @@ function work_run_single(scheduler, work::WorkUnion, result_channel::Channel)
 			f = inner_sr.f
 			sub = spec.f === compoundresult_sub ? spec.args[2]::String : nothing
 			sub_str = sub !== nothing ? styled"{italic: \"$sub\"}" : styled"{italic: keys}"
-			# progress_item = add_item!(progress_display, ProgressText(styled"{blue:⋅ Cache load} " * ReproducibleJobs.styled_function_name(f))) # TODO: print sub/keys
 			progress_item = add_item!(progress_display, ProgressText(styled"{blue:⋅ Cache load} " * ReproducibleJobs.styled_function_name(f) * sub_str))
 			res = cache_try_get_compoundresult(scheduler.cache, inner_sr; sub, return_keys=sub===nothing)
 			@assert res !== NotValid() "Expected CompoundResult on disk but not found"
