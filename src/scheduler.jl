@@ -635,9 +635,8 @@ function process!(scheduler::Scheduler, job::Job; processing_errors_throw=true, 
 	if external_call
 		ensure_work_task_is_running!(scheduler)
 		_reset_progress_display!(scheduler, job.sr)
+		evict_results!(scheduler; evict_all=false)
 	end
-	evict_results!(scheduler; evict_all=false)
-	_update_gc_display!(scheduler)
 
 	op = job.op
 	local res
@@ -654,6 +653,11 @@ function process!(scheduler::Scheduler, job::Job; processing_errors_throw=true, 
 
 			while !isempty(scheduler.processing_queue)
 				curr_sr = pop!(scheduler.processing_queue) # LIFO
+
+				# TODO: Is this the right place? Or should we do it inside process_step!?
+				evict_results!(scheduler; evict_all=false)
+				_update_gc_display!(scheduler) # Should this be even more regular than evict_results?
+
 				process_step!(scheduler, curr_sr)
 				# Consider early out on error?
 				# x = process_step!(scheduler, curr_sr)
