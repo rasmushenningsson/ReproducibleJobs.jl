@@ -10,7 +10,7 @@ struct WorkDeduplicateResult
 end
 struct WorkCacheGet
 	sr::SpecRun
-	res::Any
+	inner_res::Any
 end
 struct WorkSubGet
 	sr::SpecRun # compoundresult_sub or compoundresult_keys sr
@@ -217,11 +217,12 @@ function work_run_single(scheduler, work::WorkUnion, result_channel::Channel)
 			res = deduplicate!(scheduler.deduplicator, work.obj; transfer_ownership=true) # Since it is a result, we know that we own the data
 		elseif work isa WorkCacheGet
 			spec = work.sr.spec # used in catch below
-			f = spec.f
-			action = work.res === NotValid() ? "load"	: "save"
+			inner_sr = get_sr(work.sr.args[1]::Job)
+			f = inner_sr.f
+			action = work.inner_res === NotValid() ? "load"	: "save"
 			progress_item = add_item!(progress_display, ProgressText(styled"{blue:⋅ Cache $action} " * ReproducibleJobs.styled_function_name(f)))
-			res = cache_get!(scheduler.cache, work.sr) do
-				work.res # If we get here, the inner call was performed and the value replaced, so this is the result from the inner spec.
+			res = cache_get!(scheduler.cache, inner_sr) do
+				work.inner_res # If we get here, the inner call was performed and the value replaced, so this is the result from the inner spec.
 			end
 		elseif work isa WorkSubGet
 			spec = work.sr.spec # used in catch below
@@ -316,8 +317,8 @@ function compute(scheduler::Scheduler, spec::Spec)
 end
 
 
-function process_get_cached(scheduler, sr::SpecRun, res)
-	process_work(scheduler, WorkCacheGet(sr, res))
+function process_get_cached(scheduler, sr::SpecRun, inner_res)
+	process_work(scheduler, WorkCacheGet(sr, inner_res))
 end
 
 function process_sub_get(scheduler, sr::SpecRun, inner_cr)
@@ -620,7 +621,7 @@ function process_step!(scheduler::Scheduler, sr::SpecRun)
 	else
 		if sr.f === get_cached
 			inner_res = isempty(waiting.upstream) ? NotValid() : spec_replaced.args[1]
-			res = process_get_cached(scheduler, get_sr(sr.args[1]), inner_res)
+			res = process_get_cached(scheduler, sr, inner_res)
 		elseif sr.f === compoundresult_sub || sr.f === compoundresult_keys
 			inner_cr = isempty(waiting.upstream) ? NotValid() : spec_replaced.args[1]
 			res = process_sub_get(scheduler, sr, inner_cr)
