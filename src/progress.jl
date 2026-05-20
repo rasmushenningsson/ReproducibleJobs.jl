@@ -3,7 +3,7 @@ function move_cursor_up(io, n)
 	print(io, "\r\u1b[A" ^ n) # This only moves up
 end
 
-erase_to_eol(io) = print(io, "\e[K")
+println_clear(io) = println(io, "\e[K") # clear the rest of the line
 
 
 abstract type AbstractProgressItem end
@@ -80,16 +80,23 @@ mutable struct ProgressDisplay
 	head::ListNode{ProgressItemUnion} # dummy item, we always ignore the first item in the list
 	tail::ListNode{ProgressItemUnion}
 	channel::Channel{ProgressMessageUnion}
+	start_time::Float64
+	last_print_time::Float64
+	min_display_time::Float64 # suppress all output (except info messages at final) if elapsed < this
+	print_interval::Float64   # minimum time between redraws of the active display
 end
-function ProgressDisplay()
+function ProgressDisplay(; min_display_time=0.1, print_interval=0.05)
 	head = ListNode(ProgressItemUnion, ProgressText())
-	ProgressDisplay(0, head, head, Channel{ProgressMessageUnion}(Inf))
+	ProgressDisplay(0, head, head, Channel{ProgressMessageUnion}(Inf), time(), -Inf, min_display_time, print_interval)
 end
 
 function Base.empty!(pd::ProgressDisplay)
 	pd.nlines = 0
 	pd.head = pd.tail = ListNode(ProgressItemUnion, ProgressText())
 	empty!(pd.channel)
+	pd.start_time = time()
+	pd.last_print_time = -Inf
+	pd
 end
 
 # Inserts at the front - because this gives the correct print order.
@@ -143,8 +150,7 @@ function print_item(io, item::ProgressText, t; finish_time=nothing, finish_text=
 
 	item.type === :timed && print_duration(io, run_time)
 	finish_text !== nothing && print(io, finish_text)
-	erase_to_eol(io)
-	println(io)
+	println_clear(io)
 	return true
 end
 
@@ -182,8 +188,7 @@ function print_item(io, item::ProgressBarItem, t; finish_time=nothing, finish_te
 		print(io, finish_text)
 	end
 
-	erase_to_eol(io)
-	println(io)
+	println_clear(io)
 	return true
 end
 
@@ -191,9 +196,18 @@ end
 
 function print_display(io, pd::ProgressDisplay; final=false)
 	t = time()
+	suppress_output = t - pd.start_time < pd.min_display_time
+
+	# Don't touch the channel until we're final or past the threshold.
+	# This keeps messages queued so info messages are never silently dropped.
+	if !final
+		suppress_output && return
+		t - pd.last_print_time < pd.print_interval && return # rate-limit redraws
+	end
 
 	# Process item updates (isempty!+take! works since we only have one consumer task)
 	# Removed items and info messages print here and stay permanently above the active display.
+	# Removed items are only printed if beyond threshold; info messages are always printed.
 	while !isempty(pd.channel)
 		msg = take!(pd.channel)
 		if msg isa ProgressMessageAddItem
@@ -202,16 +216,19 @@ function print_display(io, pd::ProgressDisplay; final=false)
 			_set_text!(msg.item, msg.text)
 		elseif msg isa ProgressMessageRemoveItem
 			_set_finished!(msg.item) # mark for removal
-			print_item(io, msg.item, t; finish_time=msg.t, finish_text=msg.text) # print removed items first (in order of removal)
+			suppress_output || print_item(io, msg.item, t; finish_time=msg.t, finish_text=msg.text) # print removed items first (in order of removal)
 		else#if msg isa ProgressMessageInfo
 			msg::ProgressMessageInfo # a one-off message
 			print(io, msg.text)
-			erase_to_eol(io)
-			println(io)
+			println_clear(io)
 		end
 	end
 
-	# Print remaining items
+	suppress_output && return # skip active items for fast calls
+
+	pd.last_print_time = t
+
+	# Print remaining items and get rid of removed ones
 	nlines = 0
 	prev = pd.head
 	curr = prev.next

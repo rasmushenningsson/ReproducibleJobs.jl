@@ -285,15 +285,11 @@ function process_work(scheduler, work::WorkUnion)
 		end
 
 		res = take!(scheduler.result_channel)
-		if res === nothing # Timed out
-			print_display(progress_display)
-		else
+		print_display(progress_display)
+		if res !== nothing
 			done = true
 		end
 	end
-
-	# Temp. Better to add a print_display at the very end of the external call.
-	print_display(progress_display)
 
 	res
 end
