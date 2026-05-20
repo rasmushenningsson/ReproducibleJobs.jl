@@ -3,7 +3,7 @@ function move_cursor_up(io, n)
 	print(io, "\r\u1b[A" ^ n) # This only moves up
 end
 
-println_clear(io) = println(io, "\e[K") # clear the rest of the line
+println_clear(io::IO, args...) = println(io, args..., "\e[K") # clear the rest of the line
 
 
 abstract type AbstractProgressItem end
@@ -218,9 +218,8 @@ function print_display(io, pd::ProgressDisplay; final=false)
 			_set_finished!(msg.item) # mark for removal
 			suppress_output || print_item(io, msg.item, t; finish_time=msg.t, finish_text=msg.text) # print removed items first (in order of removal)
 		else#if msg isa ProgressMessageInfo
-			msg::ProgressMessageInfo # a one-off message
-			print(io, msg.text)
-			println_clear(io)
+			msg::ProgressMessageInfo
+			println_clear(io, msg.text) # a one-off message
 		end
 	end
 
@@ -230,6 +229,13 @@ function print_display(io, pd::ProgressDisplay; final=false)
 
 	# Print remaining items and get rid of removed ones
 	nlines = 0
+
+
+	# # Add this to print a separating line between done and active items
+	# println_clear(io, styled"{blue:↓ Active}")
+	# nlines += 1
+
+
 	prev = pd.head
 	curr = prev.next
 	while curr !== nothing
