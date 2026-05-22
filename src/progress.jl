@@ -127,13 +127,8 @@ remove_item!(pd::ProgressDisplay, item::ProgressItemUnion, text=styled"{bright_b
 
 add_info_item!(pd::ProgressDisplay, text::Union{String,AnnotatedString}) = (put!(pd.channel, ProgressMessageInfo(text)); nothing)
 
-function cancel_item!(pd::ProgressDisplay, item::ProgressText)
-	if item.type in (:timed, :pending)
-		remove_item!(pd, item, styled"{red:Cancelled}")
-	elseif item.type == :header
-		set_text!(pd, item, item.text * styled"{red: Cancelling}")
-	end
-end
+cancel_item!(pd::ProgressDisplay, item::ProgressText) =
+	item.type in (:timed, :pending) && remove_item!(pd, item, styled"{red:Cancelled}")
 cancel_item!(pd::ProgressDisplay, item::ProgressBarItem) =
 	remove_item!(pd, item, styled"{red:Cancelled}")
 

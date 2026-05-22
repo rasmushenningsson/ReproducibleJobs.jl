@@ -3,13 +3,14 @@ module ReproducibleJobs
 
 using StableHashTraits
 using ReadOnlyArrays
-import TupleTools # for sorting of tuples
 using JLD2: JLD2, jldopen, ZstdFilter
 
 using Preferences # For persisting cache dir
 
 using DataStructures: DataStructures, MutableBinaryMinHeap # For LRU functionality
 using SHA
+
+using ScopedValues # for cancellation
 
 using LinearAlgebra # For handling copy_arg(transposed)
 
@@ -46,7 +47,8 @@ export
 	ifelse_spec,
 	error_spec,
 	checksummedfilepath_spec,
-	is_cancelled
+	is_cancelled,
+	throw_if_cancelled
 
 # Use public keyword in Julia versions where it is available
 if VERSION >= v"1.11.0-DEV.469"

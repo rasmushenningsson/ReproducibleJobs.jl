@@ -18,6 +18,12 @@ end
 
 const WorkUnion = Union{WorkCompute, WorkPreprocess, WorkDeduplicateResult, WorkCacheGet, WorkSubGet}
 
+const CANCELLED = ScopedValue(Threads.Atomic{Bool}(false))
+is_cancelled() = CANCELLED[][]
+throw_if_cancelled() = is_cancelled() && throw(CancelledException())
+_cancel!() = CANCELLED[][] = true
+
+
 mutable struct Scheduler{H}
 	deduplicator::Deduplicator{H}
 
@@ -28,7 +34,6 @@ mutable struct Scheduler{H}
 	work_task::Union{Task,Nothing}
 	work_channel::Channel{WorkUnion}
 	result_channel::Channel{Any} # later maybe change to Tuple{SpecRun,Any} if we have multiple worker tasks
-	@atomic cancelled::Bool # set on Ctrl+C; checked by is_cancelled() in user functions - TODO: Change to Int counter instead to be able to handle stray worker tasks that failed to finish?
 
 	lru_item_capacity::Base.RefValue{Int} # How many items the LRU is allowed to store
 	lru_mem_capacity::Base.RefValue{Int} # How many bytes the LRU is allowed to store (if not low on memory)
@@ -37,6 +42,7 @@ mutable struct Scheduler{H}
 
 	# Progress display and related
 	progress_display::ProgressDisplay
+	main_display_item::Base.RefValue{Union{ProgressText,Nothing}}
 	lru_display_item::Base.RefValue{Union{ProgressText,Nothing}}
 	gc_display_item::Base.RefValue{Union{ProgressText,Nothing}}
 	# preprocess_display_item::Base.RefValue{Union{ProgressText,Nothing}} # We reuse a single display item for preprocessing, to avoid flooding the terminal
@@ -54,7 +60,7 @@ function Scheduler(cache::Cache{SpecRun,H};
 	work_channel = Channel{WorkUnion}(Inf)
 	result_channel = Channel{Any}(Inf)
 
-	scheduler = Scheduler{H}(cache.deduplicator, cache, SpecRun[], nothing, work_channel, result_channel, false, Ref(lru_item_capacity), Ref(lru_mem_capacity), Ref(lru_mem_fraction), LRUCache{SpecRun}(), ProgressDisplay(), Ref{Union{ProgressText,Nothing}}(nothing), Ref{Union{ProgressText,Nothing}}(nothing))
+	scheduler = Scheduler{H}(cache.deduplicator, cache, SpecRun[], nothing, work_channel, result_channel, Ref(lru_item_capacity), Ref(lru_mem_capacity), Ref(lru_mem_fraction), LRUCache{SpecRun}(), ProgressDisplay(), Ref{Union{ProgressText,Nothing}}(nothing), Ref{Union{ProgressText,Nothing}}(nothing), Ref{Union{ProgressText,Nothing}}(nothing))
 
 	# Move to inner constructor?
     finalizer(scheduler) do s
@@ -112,9 +118,6 @@ function evict_results!(scheduler::Scheduler; evict_all=true)
 	scheduler
 end
 evict_results!(; kwargs...) = evict_results!(get_scheduler(); kwargs...)
-
-is_cancelled(scheduler::Scheduler) = @atomic scheduler.cancelled
-is_cancelled() = is_cancelled(get_scheduler())
 
 function Base.empty!(scheduler::Scheduler)
 	evict_results!(scheduler)
@@ -544,10 +547,11 @@ end
 
 
 
+_main_display_text(f) = styled"{blue:Scheduler: }" * ReproducibleJobs.styled_function_name(f)
 
 function _reset_progress_display!(scheduler, sr::SpecRun)
 	empty!(scheduler.progress_display)
-	add_item!(scheduler.progress_display, ProgressText(styled"{blue:Scheduler: }" * ReproducibleJobs.styled_function_name(sr.f); type=:header))
+	scheduler.main_display_item[] = add_item!(scheduler.progress_display, ProgressText(_main_display_text(sr.f); type=:header))
 	scheduler.gc_display_item[] = add_item!(scheduler.progress_display, ProgressText(styled"{blue:⋅ GC:}"; type=:text))
 	scheduler.lru_display_item[] = add_item!(scheduler.progress_display, ProgressText(styled"{blue:⋅ LRU:}"; type=:text))
 end
@@ -665,7 +669,7 @@ function process_queue!(scheduler::Scheduler)
 		catch e
 			if e isa InterruptException
 				# Interrupt all jobs but keep processing so that all SpecRuns end up in a good state
-				@atomic scheduler.cancelled = true
+				_cancel!()
 				e = CancelledException() # We use this for cancellation internally (Is there any need for that? Should we just use InterruptException?)
 				s = curr_sr.state.x
 				set_result!(scheduler, curr_sr, e)
@@ -722,28 +726,36 @@ function process!(scheduler::Scheduler, job::Job; once=false)
 	scheduler.work_channel = Channel{WorkUnion}(Inf)
 	scheduler.result_channel = Channel{Any}(Inf)
 
-	@atomic scheduler.cancelled = false
 	_reset_progress_display!(scheduler, job.sr)
 	evict_results!(scheduler; evict_all=false)
 
-	try
-		res = process_job!(scheduler, job; once)
-		res isa CancelledException && throw(InterruptException())
-		res isa Exception && throw(res) # Do we want to throw CancelledException/InterruptException? Or just return nothing in that case?
-		return res
-	catch e
-		if e isa InterruptException # Maybe do this for all exceptions?
-			@atomic scheduler.cancelled = true
-			process_queue!(scheduler) # drain remaining items — quick since cancelled=true
-			cancel_items!(scheduler.progress_display)
+	with(CANCELLED => Threads.Atomic{Bool}(false)) do
+		try
+			res = process_job!(scheduler, job; once)
+			res isa CancelledException && throw(InterruptException())
+			res isa Exception && throw(res) # Do we want to throw CancelledException/InterruptException? Or just return nothing in that case?
+			return res
+		catch e
+			if e isa InterruptException # Maybe do this for all exceptions?
+				_cancel!()
+				process_queue!(scheduler) # drain remaining items — quick since cancelled=true
+				cancel_items!(scheduler.progress_display)
+				set_text!(scheduler.progress_display, scheduler.main_display_item[], _main_display_text(job.f) * styled"{red: Cancelling}")
+			end
+			rethrow()
+		finally
+			print_display(scheduler.progress_display; final=true)
+			# Close channels so the work_task exits and any stale results are discarded
+			close(scheduler.work_channel)
+			close(scheduler.result_channel)
+			work_task = scheduler.work_task
+			scheduler.work_task = nothing
+			if work_task !== nothing && !istaskdone(work_task)
+				wait_for = 0.5
+				work_task_status = timedwait(() -> istaskdone(work_task), wait_for)
+				work_task_status === :timed_out && println(styled"{red:Failed to stop worker task within $(wait_for)s.}")
+			end
 		end
-		rethrow()
-	finally
-		print_display(scheduler.progress_display; final=true)
-		# Close channels so the work_task exits and any stale results are discarded
-		close(scheduler.work_channel)
-		close(scheduler.result_channel)
-		scheduler.work_task = nothing
 	end
 end
 
