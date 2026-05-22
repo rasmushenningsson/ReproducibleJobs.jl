@@ -175,7 +175,7 @@ end
 
 
 function ensure_work_task_is_running!(scheduler::Scheduler)
-	if scheduler.work_task === nothing || istaskdone(scheduler.work_task) || istaskfailed(scheduler.work_task) || Base.get_world_counter() != scheduler.work_task_world_age
+	if scheduler.work_task === nothing || istaskdone(scheduler.work_task) || Base.get_world_counter() != scheduler.work_task_world_age
 		empty!(scheduler.work_channel)
 		empty!(scheduler.result_channel)
 		scheduler.work_task_world_age = Base.get_world_counter()
@@ -728,35 +728,30 @@ end
 
 
 
-function process!(scheduler::Scheduler, job::Job; external_call=true, once=false)
-	if external_call
-		ensure_work_task_is_running!(scheduler)
+function process!(scheduler::Scheduler, job::Job; once=false)
+	ensure_work_task_is_running!(scheduler)
+	@atomic scheduler.cancelled = false
+	_reset_progress_display!(scheduler, job.sr)
+	evict_results!(scheduler; evict_all=false)
 
-		@atomic scheduler.cancelled = false
-		_reset_progress_display!(scheduler, job.sr)
-		evict_results!(scheduler; evict_all=false)
-
-		try
-			res = process_job!(scheduler, job; once)
-			res isa CancelledException && throw(InterruptException())
-			res isa Exception && throw(res) # Do we want to throw CancelledException/InterruptException? Or just return nothing in that case?
-			return res
-		catch e
-			if e isa InterruptException # Maybe do this for all exceptions?
-				@atomic scheduler.cancelled = true
-				process_queue!(scheduler) # drain remaining items — quick since cancelled=true
-				cancel_items!(scheduler.progress_display)
-			end
-			rethrow()
-		finally
-			print_display(scheduler.progress_display; final=true)
-
-			# If we were cancelled or got another exception, we need to ensure no work remains in the queues
-			empty!(scheduler.work_channel)
-			empty!(scheduler.result_channel)
+	try
+		res = process_job!(scheduler, job; once)
+		res isa CancelledException && throw(InterruptException())
+		res isa Exception && throw(res) # Do we want to throw CancelledException/InterruptException? Or just return nothing in that case?
+		return res
+	catch e
+		if e isa InterruptException # Maybe do this for all exceptions?
+			@atomic scheduler.cancelled = true
+			process_queue!(scheduler) # drain remaining items — quick since cancelled=true
+			cancel_items!(scheduler.progress_display)
 		end
-	else
-		return process_job!(scheduler, job; once)
+		rethrow()
+	finally
+		print_display(scheduler.progress_display; final=true)
+
+		# If we were cancelled or got another exception, we need to ensure no work remains in the queues
+		empty!(scheduler.work_channel)
+		empty!(scheduler.result_channel)
 	end
 end
 
