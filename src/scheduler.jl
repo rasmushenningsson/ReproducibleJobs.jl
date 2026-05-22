@@ -18,7 +18,6 @@ end
 
 const WorkUnion = Union{WorkCompute, WorkPreprocess, WorkDeduplicateResult, WorkCacheGet, WorkSubGet}
 
-
 mutable struct Scheduler{H}
 	deduplicator::Deduplicator{H}
 
@@ -26,7 +25,6 @@ mutable struct Scheduler{H}
 
 	processing_queue::Vector{SpecRun} # lifo queue of specs ready to be posted to the work_channel
 
-	work_task_world_age::UInt64 # world_age when work_task was started (so we can restart it if world age has changed)
 	work_task::Union{Task,Nothing}
 	work_channel::Channel{WorkUnion}
 	result_channel::Channel{Any} # later maybe change to Tuple{SpecRun,Any} if we have multiple worker tasks
@@ -56,7 +54,7 @@ function Scheduler(cache::Cache{SpecRun,H};
 	work_channel = Channel{WorkUnion}(Inf)
 	result_channel = Channel{Any}(Inf)
 
-	scheduler = Scheduler{H}(cache.deduplicator, cache, SpecRun[], UInt64(0), nothing, work_channel, result_channel, false, Ref(lru_item_capacity), Ref(lru_mem_capacity), Ref(lru_mem_fraction), LRUCache{SpecRun}(), ProgressDisplay(), Ref{Union{ProgressText,Nothing}}(nothing), Ref{Union{ProgressText,Nothing}}(nothing))
+	scheduler = Scheduler{H}(cache.deduplicator, cache, SpecRun[], nothing, work_channel, result_channel, false, Ref(lru_item_capacity), Ref(lru_mem_capacity), Ref(lru_mem_fraction), LRUCache{SpecRun}(), ProgressDisplay(), Ref{Union{ProgressText,Nothing}}(nothing), Ref{Union{ProgressText,Nothing}}(nothing))
 
 	# Move to inner constructor?
     finalizer(scheduler) do s
@@ -174,16 +172,6 @@ end
 
 
 
-function ensure_work_task_is_running!(scheduler::Scheduler)
-	if scheduler.work_task === nothing || istaskdone(scheduler.work_task) || Base.get_world_counter() != scheduler.work_task_world_age
-		empty!(scheduler.work_channel)
-		empty!(scheduler.result_channel)
-		scheduler.work_task_world_age = Base.get_world_counter()
-		# @info "Spawning work task"
-		scheduler.work_task = Threads.@spawn work_runner(scheduler, scheduler.work_channel, scheduler.result_channel)
-	end
-	scheduler
-end
 
 function _short_exception_string(e::Exception; n::Int=40)
 	n = max(n,3) # need space for ellipsis
@@ -286,6 +274,8 @@ end
 
 function process_work(scheduler, work::WorkUnion)
 	is_cancelled() && return CancelledException() # early out
+
+	scheduler.work_task === nothing && (scheduler.work_task = Threads.@spawn work_runner(scheduler, scheduler.work_channel, scheduler.result_channel))
 
 	put!(scheduler.work_channel, work)
 
@@ -729,7 +719,9 @@ end
 
 
 function process!(scheduler::Scheduler, job::Job; once=false)
-	ensure_work_task_is_running!(scheduler)
+	scheduler.work_channel = Channel{WorkUnion}(Inf)
+	scheduler.result_channel = Channel{Any}(Inf)
+
 	@atomic scheduler.cancelled = false
 	_reset_progress_display!(scheduler, job.sr)
 	evict_results!(scheduler; evict_all=false)
@@ -748,10 +740,10 @@ function process!(scheduler::Scheduler, job::Job; once=false)
 		rethrow()
 	finally
 		print_display(scheduler.progress_display; final=true)
-
-		# If we were cancelled or got another exception, we need to ensure no work remains in the queues
-		empty!(scheduler.work_channel)
-		empty!(scheduler.result_channel)
+		# Close channels so the work_task exits and any stale results are discarded
+		close(scheduler.work_channel)
+		close(scheduler.result_channel)
+		scheduler.work_task = nothing
 	end
 end
 
