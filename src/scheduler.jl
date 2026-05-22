@@ -30,6 +30,7 @@ mutable struct Scheduler{H}
 	work_task::Union{Task,Nothing}
 	work_channel::Channel{WorkUnion}
 	result_channel::Channel{Any} # later maybe change to Tuple{SpecRun,Any} if we have multiple worker tasks
+	@atomic cancelled::Bool # set on Ctrl+C; checked by is_cancelled() in user functions - TODO: Change to Int counter instead to be able to handle stray worker tasks that failed to finish?
 
 	lru_item_capacity::Base.RefValue{Int} # How many items the LRU is allowed to store
 	lru_mem_capacity::Base.RefValue{Int} # How many bytes the LRU is allowed to store (if not low on memory)
@@ -55,7 +56,7 @@ function Scheduler(cache::Cache{SpecRun,H};
 	work_channel = Channel{WorkUnion}(Inf)
 	result_channel = Channel{Any}(Inf)
 
-	scheduler = Scheduler{H}(cache.deduplicator, cache, SpecRun[], UInt64(0), nothing, work_channel, result_channel, Ref(lru_item_capacity), Ref(lru_mem_capacity), Ref(lru_mem_fraction), LRUCache{SpecRun}(), ProgressDisplay(), Ref{Union{ProgressText,Nothing}}(nothing), Ref{Union{ProgressText,Nothing}}(nothing))
+	scheduler = Scheduler{H}(cache.deduplicator, cache, SpecRun[], UInt64(0), nothing, work_channel, result_channel, false, Ref(lru_item_capacity), Ref(lru_mem_capacity), Ref(lru_mem_fraction), LRUCache{SpecRun}(), ProgressDisplay(), Ref{Union{ProgressText,Nothing}}(nothing), Ref{Union{ProgressText,Nothing}}(nothing))
 
 	# Move to inner constructor?
     finalizer(scheduler) do s
@@ -114,6 +115,9 @@ function evict_results!(scheduler::Scheduler; evict_all=true)
 end
 evict_results!(; kwargs...) = evict_results!(get_scheduler(); kwargs...)
 
+is_cancelled(scheduler::Scheduler) = @atomic scheduler.cancelled
+is_cancelled() = is_cancelled(get_scheduler())
+
 function Base.empty!(scheduler::Scheduler)
 	evict_results!(scheduler)
 	force_empty!(scheduler.lru)
@@ -133,8 +137,11 @@ end
 
 
 
-function propagate_error(spec::Spec, vals)::Union{Nothing, ProcessingException}#, InterruptException}
-	if any(x->x isa ProcessingException, vals)
+function propagate_error(spec::Spec, vals)::Union{Nothing, ProcessingException, CancelledException}
+	# TODO: Probably let ProcessingExceptions take priority here. An error is a true result that wouldn't be fixed by a rerun of a cancelled job.
+	if any(x->x isa CancelledException, vals)
+		return CancelledException()
+	elseif any(x->x isa ProcessingException, vals)
 		causes = filter!(x->x isa ProcessingException, collect(vals))
 		return ProcessingException(spec, causes)
 	else
@@ -143,6 +150,10 @@ function propagate_error(spec::Spec, vals)::Union{Nothing, ProcessingException}#
 end
 
 function set_result!(scheduler::Scheduler, sr::SpecRun, res)
+	if res isa CancelledException
+		sr.state = state_initialized() # reset so the job can be re-run
+		return sr
+	end
 	if !(res isa Exception) && !is_preprocessing(sr)
 		lru_touch!(scheduler.lru, sr) do
 			Base.summarysize(res)
@@ -185,6 +196,11 @@ end
 
 
 function work_run_single(scheduler, work::WorkUnion, result_channel::Channel)
+	if is_cancelled()
+		put!(result_channel, CancelledException())
+		return
+	end
+
 	progress_display = scheduler.progress_display
 	progress_item = nothing
 
@@ -237,17 +253,23 @@ function work_run_single(scheduler, work::WorkUnion, result_channel::Channel)
 		end
 		progress_item !== nothing && remove_item!(progress_display, progress_item)
 	catch e
-		exception_text = _short_exception_string(e)
-		progress_item !== nothing && remove_item!(progress_display, progress_item, styled"{red:$exception_text}")
-		# TODO: Where to show error?
-		# io = IOBuffer()
-		# Base.showerror(IOContext(io, :color=>true), e)
-		# message = String(take!(io))
-		# @warn message
+		if e isa CancelledException
+			# progress_item !== nothing && remove_item!(progress_display, progress_item, styled"{red:Cancelled}")
+			progress_item !== nothing && cancel_item!(progress_display, progress_item)
+			res = e
+		else
+			exception_text = _short_exception_string(e)
+			progress_item !== nothing && remove_item!(progress_display, progress_item, styled"{red:$exception_text}")
+			# TODO: Where to show error?
+			# io = IOBuffer()
+			# Base.showerror(IOContext(io, :color=>true), e)
+			# message = String(take!(io))
+			# @warn message
 
-		# Do not show anything/much here, it will be shown later instead.
-		bt = Base.catch_backtrace()
-		res = ProcessingException(spec, e, stacktrace(bt))
+			# Do not show anything/much here, it will be shown later instead.
+			bt = Base.catch_backtrace()
+			res = ProcessingException(spec, e, stacktrace(bt))
+		end
 	end
 
 	put!(result_channel, res)
@@ -263,35 +285,40 @@ end
 
 
 function process_work(scheduler, work::WorkUnion)
-	progress_display = scheduler.progress_display
+	is_cancelled() && return CancelledException() # early out
+
 	put!(scheduler.work_channel, work)
 
 	done = false
 	# Ensure the channel receives items periodically so we can display updates
-	@async begin
-		while !done
-			put!(scheduler.result_channel, nothing) # Maybe use something else than nothing to signal the timeout
-			sleep(0.05)
+	timeout_task = @async begin
+		try
+			while !done
+				put!(scheduler.result_channel, nothing) # nothing signals timeout
+				sleep(0.05)
+			end
+		finally
+			isempty(scheduler.result_channel) && put!(scheduler.result_channel, nothing)
 		end
 	end
 
-	local res
+	try
+		while true
+			if istaskdone(scheduler.work_task)
+				fetch(scheduler.work_task) # will throw if the task threw an exception
+				error("Unknown work_task failure")
+			end
 
-	while !done
-		if istaskfailed(scheduler.work_task) || istaskdone(scheduler.work_task)
-			done = true
-			fetch(scheduler.work_task) # will throw if the task threw an exception
-			error("Unknown work_task failure")
-		end
+			res = take!(scheduler.result_channel)
+			print_display(scheduler.progress_display)
+			is_cancelled() && return CancelledException()
+			res !== nothing && return res
 
-		res = take!(scheduler.result_channel)
-		print_display(progress_display)
-		if res !== nothing
-			done = true
+			istaskfailed(timeout_task) && fetch(timeout_task) # rethrow exceptions from the timeout_task (e.g. InterruptException)
 		end
+	finally
+		done = true
 	end
-
-	res
 end
 
 
@@ -299,6 +326,7 @@ end
 
 function preprocess(scheduler::Scheduler, spec::Spec)
 	res = process_work(scheduler, WorkPreprocess(spec))
+	res isa CancelledException && return res
 	res = process_work(scheduler, WorkDeduplicateResult(spec, res))
 end
 
@@ -308,6 +336,7 @@ end
 
 function compute(scheduler::Scheduler, spec::Spec)
 	res = process_work(scheduler, WorkCompute(spec))
+	res isa CancelledException && return res
 	res = process_work(scheduler, WorkDeduplicateResult(spec, res))
 end
 
@@ -390,6 +419,8 @@ end
 function update_dependency!(scheduler, sr::SpecRun{State}, dep::Job, res)
 	@assert res !== NotValid()
 
+	# TODO: If res is an exception, we should not wait for other upstream jobs to finish.
+
 	waiting = sr.state.x::Waiting
 	waiting.upstream[dep] = res
 	waiting.n_upstream_left[] -= 1
@@ -401,8 +432,8 @@ function update_dependency!(scheduler, sr::SpecRun{State}, dep::Job, res)
 	else
 		# All deps forwarded — replace dep args with forwarded jobs, create new :call spec
 		downstream = waiting.downstream
-		spec_replaced = replace_dependencies(sr.spec, waiting.upstream)::Union{Spec,ProcessingException}
-		if spec_replaced isa ProcessingException
+		spec_replaced = replace_dependencies(sr.spec, waiting.upstream)::Union{Spec,ProcessingException,CancelledException}
+		if spec_replaced isa Union{ProcessingException,CancelledException}
 			set_result!(scheduler, sr, spec_replaced)
 			update_downstream!(scheduler, downstream, spec_replaced)
 			return spec_replaced
@@ -526,7 +557,7 @@ end
 
 function _reset_progress_display!(scheduler, sr::SpecRun)
 	empty!(scheduler.progress_display)
-	add_item!(scheduler.progress_display, ProgressText(styled"{blue:Scheduler: }" * ReproducibleJobs.styled_function_name(sr.f)))
+	add_item!(scheduler.progress_display, ProgressText(styled"{blue:Scheduler: }" * ReproducibleJobs.styled_function_name(sr.f); type=:header))
 	scheduler.gc_display_item[] = add_item!(scheduler.progress_display, ProgressText(styled"{blue:⋅ GC:}"; type=:text))
 	scheduler.lru_display_item[] = add_item!(scheduler.progress_display, ProgressText(styled"{blue:⋅ LRU:}"; type=:text))
 end
@@ -564,7 +595,7 @@ function update_downstream!(scheduler::Scheduler, downstream::Vector{Pair{Union{
 	for (owner, dep) in downstream
 		if owner isa SpecRun{State}
 			sr = owner::SpecRun{State}
-			waiting = sr.state.x::Waiting{State}
+			waiting = sr.state.x::Waiting{State} # Do we need to handle other states here? (Due to cancellation - I don't think so, we should handle it earlier, but I'm not 100% sure.)
 
 			if res isa Job
 				# If res is a forwarded job, continue following the chain before updating
@@ -591,11 +622,11 @@ function process_step!(scheduler::Scheduler, sr::SpecRun)
 	if isempty(waiting.upstream)
 		spec_replaced = sr.spec
 	else
-		spec_replaced = replace_dependencies(sr.spec, waiting.upstream)::Union{Spec,ProcessingException}
+		spec_replaced = replace_dependencies(sr.spec, waiting.upstream)::Union{Spec,ProcessingException,CancelledException}
 	end
 
-	if spec_replaced isa ProcessingException
-		set_result!(scheduler, sr, spec_replaced) # Preprocessing yielded an exception, we are done.
+	if spec_replaced isa Union{ProcessingException,CancelledException}
+		set_result!(scheduler, sr, spec_replaced)
 		update_downstream!(scheduler, downstream, spec_replaced)
 		return spec_replaced
 	end
@@ -631,13 +662,33 @@ function process_step!(scheduler::Scheduler, sr::SpecRun)
 	end
 end
 
-function process!(scheduler::Scheduler, job::Job; processing_errors_throw=true, external_call=true, once=false)
-	if external_call
-		ensure_work_task_is_running!(scheduler)
-		_reset_progress_display!(scheduler, job.sr)
-		evict_results!(scheduler; evict_all=false)
-	end
 
+function process_queue!(scheduler::Scheduler)
+	while !isempty(scheduler.processing_queue)
+		# TODO: Is this the right place? Or should we do it inside process_step!?
+		evict_results!(scheduler; evict_all=false)
+		_update_gc_display!(scheduler) # Should this be even more regular than evict_results?
+
+		curr_sr = pop!(scheduler.processing_queue) # LIFO
+		try
+			process_step!(scheduler, curr_sr)
+		catch e
+			if e isa InterruptException
+				# Interrupt all jobs but keep processing so that all SpecRuns end up in a good state
+				@atomic scheduler.cancelled = true
+				e = CancelledException() # We use this for cancellation internally (Is there any need for that? Should we just use InterruptException?)
+				s = curr_sr.state.x
+				set_result!(scheduler, curr_sr, e)
+				s isa Union{Waiting{State}, Processing{State}} && update_downstream!(scheduler, s.downstream, e)
+			else
+				rethrow()
+			end
+		end
+	end
+end
+
+
+function process_job!(scheduler::Scheduler, job::Job; once=false)
 	op = job.op
 	local res
 
@@ -645,31 +696,20 @@ function process!(scheduler::Scheduler, job::Job; processing_errors_throw=true, 
 	while true
 		res = setup_processing!(scheduler, job)
 
-		new_res = Ref{Any}(nothing)
+		callback_res = Ref{Any}(NotValid())
 
 		if res === NotValid()
 			s = job.sr.state.x::Union{Waiting{State}, Processing{State}}
-			push!(s.downstream, ((j,r)->new_res[] = r)=>job) # register callback!
+			push!(s.downstream, ((j,r)->callback_res[] = r)=>job) # register callback!
 
-			while !isempty(scheduler.processing_queue)
-				curr_sr = pop!(scheduler.processing_queue) # LIFO
+			process_queue!(scheduler)
 
-				# TODO: Is this the right place? Or should we do it inside process_step!?
-				evict_results!(scheduler; evict_all=false)
-				_update_gc_display!(scheduler) # Should this be even more regular than evict_results?
-
-				process_step!(scheduler, curr_sr)
-				# Consider early out on error?
-				# x = process_step!(scheduler, curr_sr)
-				# processing_errors_throw && x isa Exception && throw(res)
-			end
-
-			# NB: The callback has now modified new_res
-			res = new_res[]
+			# NB: The callback has now modified callback_res
+			res = callback_res[]
 			@assert res !== NotValid()
 		end
 
-		res isa Exception && throw(res)
+		# res isa Exception && throw(res)
 
 		if res isa Job
 			if once || (op in (:forward,:prefetch) && res.op === :call)
@@ -682,8 +722,42 @@ function process!(scheduler::Scheduler, job::Job; processing_errors_throw=true, 
 		end
 	end
 
-	external_call && print_display(scheduler.progress_display; final=true)
-	return res
+	res
+end
+
+
+
+
+function process!(scheduler::Scheduler, job::Job; external_call=true, once=false)
+	if external_call
+		ensure_work_task_is_running!(scheduler)
+
+		@atomic scheduler.cancelled = false
+		_reset_progress_display!(scheduler, job.sr)
+		evict_results!(scheduler; evict_all=false)
+
+		try
+			res = process_job!(scheduler, job; once)
+			res isa CancelledException && throw(InterruptException())
+			res isa Exception && throw(res) # Do we want to throw CancelledException/InterruptException? Or just return nothing in that case?
+			return res
+		catch e
+			if e isa InterruptException # Maybe do this for all exceptions?
+				@atomic scheduler.cancelled = true
+				process_queue!(scheduler) # drain remaining items — quick since cancelled=true
+				cancel_items!(scheduler.progress_display)
+			end
+			rethrow()
+		finally
+			print_display(scheduler.progress_display; final=true)
+
+			# If we were cancelled or got another exception, we need to ensure no work remains in the queues
+			empty!(scheduler.work_channel)
+			empty!(scheduler.result_channel)
+		end
+	else
+		return process_job!(scheduler, job; once)
+	end
 end
 
 fetch!(scheduler::Scheduler, job::Job; kwargs...) = process!(scheduler, Job(get_sr(job), :fetch); kwargs...)

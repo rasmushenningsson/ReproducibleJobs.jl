@@ -11,16 +11,16 @@ abstract type AbstractProgressItem end
 
 
 mutable struct ProgressText <: AbstractProgressItem
-	type::Symbol # One of :text, :timed, :pending
+	type::Symbol # One of :header, :text, :timed, :pending
 	text::Union{String,AnnotatedString}
 	const start_time::Float64
 	finished::Bool
-	function ProgressText(type, text, start_time, finished)
-		@assert type in (:text, :timed, :pending)
-		new(type, text, start_time, finished)
+	function ProgressText(type, text)
+		@assert type in (:header, :text, :timed, :pending)
+		new(type, text, time(), false)
 	end
 end
-ProgressText(text; type=:timed) = ProgressText(type, text, time(), false)
+ProgressText(text; type=:timed) = ProgressText(type, text)
 ProgressText(; kwargs...) = ProgressText(""; kwargs...)
 
 
@@ -32,8 +32,11 @@ mutable struct ProgressBarItem <: AbstractProgressItem
 	@atomic i::Int # Current pos in 0:n
 	const start_time::Float64
 	finished::Bool
+	function ProgressBarItem(text, n_chars, n, i)
+		new(text, n_chars, n, i, time(), false)
+	end
 end
-ProgressBarItem(text, n; n_chars=40) = ProgressBarItem(text, n_chars, n, 0, time(), false)
+ProgressBarItem(text, n; n_chars=40) = ProgressBarItem(text, n_chars, n, 0)
 
 next!(item::ProgressBarItem) = @atomic item.i += 1
 
@@ -113,11 +116,35 @@ add_item!(pd::ProgressDisplay, item::ProgressItemUnion) = (put!(pd.channel, Prog
 _set_text!(item::ProgressItemUnion, text::Union{String,AnnotatedString}) = item.text = text
 set_text!(pd::ProgressDisplay, item::ProgressItemUnion, text::Union{String,AnnotatedString}) = (put!(pd.channel, ProgressMessageSetText(item, text)); nothing)
 
-_set_finished!(item::ProgressItemUnion) = item.finished = true
+# returns true if it was already finished before
+function _set_finished!(item::ProgressItemUnion)
+	old = item.finished
+	item.finished = true
+	old
+end
 remove_item!(pd::ProgressDisplay, item::ProgressItemUnion, text=styled"{bright_black:Done}") =
 	(put!(pd.channel, ProgressMessageRemoveItem(item, time(), text)); nothing)
 
 add_info_item!(pd::ProgressDisplay, text::Union{String,AnnotatedString}) = (put!(pd.channel, ProgressMessageInfo(text)); nothing)
+
+function cancel_item!(pd::ProgressDisplay, item::ProgressText)
+	if item.type in (:timed, :pending)
+		remove_item!(pd, item, styled"{red:Cancelled}")
+	elseif item.type == :header
+		set_text!(pd, item, item.text * styled"{red: Cancelling}")
+	end
+end
+cancel_item!(pd::ProgressDisplay, item::ProgressBarItem) =
+	remove_item!(pd, item, styled"{red:Cancelled}")
+
+# Must be called from the same thread that is doing print_display
+function cancel_items!(pd::ProgressDisplay)
+	curr = pd.head.next
+	while curr !== nothing
+		curr.item.finished || cancel_item!(pd, curr.item)
+		curr = curr.next
+	end
+end
 
 
 
@@ -148,7 +175,7 @@ function print_item(io, item::ProgressText, t; finish_time=nothing, finish_text=
 
 	isempty(item.text) || print(io, item.text, " ")
 
-	item.type === :timed && print_duration(io, run_time)
+	item.type in (:timed,:header) && print_duration(io, run_time)
 	finish_text !== nothing && print(io, finish_text)
 	println_clear(io)
 	return true
@@ -158,7 +185,7 @@ end
 function print_item(io, item::ProgressBarItem, t; finish_time=nothing, finish_text=nothing)
 	run_time = @something(finish_time, t) - item.start_time
 
-	# run_time < 0.05 && return false # TODO: Enable - only display if some time did pass
+	# run_time < 0.05 && return false # TODO: Enable - only display if some time did pass (caveat: if it did display once, we should print it at finish time even if the actual run_time was below the threshold)
 
 	isempty(item.text) || print(io, item.text, " ")
 
@@ -181,12 +208,11 @@ function print_item(io, item::ProgressBarItem, t; finish_time=nothing, finish_te
 		# str * " ETA: " * duration_string(eta)
 		print(io, "ETA: ")
 		print_duration(io, eta; min_s = 0.0)
+	else
+		print_duration(io, run_time)
 	end
 
-	if finish_text !== nothing
-		print_duration(io, run_time)
-		print(io, finish_text)
-	end
+	finish_text !== nothing && print(io, finish_text)
 
 	println_clear(io)
 	return true
@@ -215,8 +241,8 @@ function print_display(io, pd::ProgressDisplay; final=false)
 		elseif msg isa ProgressMessageSetText
 			_set_text!(msg.item, msg.text)
 		elseif msg isa ProgressMessageRemoveItem
-			_set_finished!(msg.item) # mark for removal
-			suppress_output || print_item(io, msg.item, t; finish_time=msg.t, finish_text=msg.text) # print removed items first (in order of removal)
+			suppress_finished = _set_finished!(msg.item) # mark for removal
+			suppress_output || suppress_finished || print_item(io, msg.item, t; finish_time=msg.t, finish_text=msg.text) # print removed items first (in order of removal) (guard against multiple remove calls)
 		else#if msg isa ProgressMessageInfo
 			msg::ProgressMessageInfo
 			println_clear(io, msg.text) # a one-off message

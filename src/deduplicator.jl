@@ -141,6 +141,8 @@ end
 
 function insert_item!(d::Deduplicator, p, x, h)
 	@assert ismutable(x)
+
+	# TODO: Ensure no InterruptException can happen in the when insterting?
 	w = WeakRef(x)
 	# finalizer(..., x) # TODO: Add a finalizer to be able to track when cleanup is needed
 	d.pointer2obj[p] = (w,h)

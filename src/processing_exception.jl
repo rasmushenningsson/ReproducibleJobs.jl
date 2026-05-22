@@ -1,3 +1,5 @@
+struct CancelledException <: Exception end
+
 struct ProcessingException{T} <: Exception
 	inner::T
 	inner_backtrace::Vector{Base.StackTraces.StackFrame}

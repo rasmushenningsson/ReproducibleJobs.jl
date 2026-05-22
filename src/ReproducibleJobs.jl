@@ -45,7 +45,8 @@ export
 	prefetched,
 	ifelse_spec,
 	error_spec,
-	checksummedfilepath_spec
+	checksummedfilepath_spec,
+	is_cancelled
 
 # Use public keyword in Julia versions where it is available
 if VERSION >= v"1.11.0-DEV.469"
