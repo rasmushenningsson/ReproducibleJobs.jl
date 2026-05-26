@@ -3,6 +3,7 @@ module ReproducibleJobs
 
 using StableHashTraits
 using ReadOnlyArrays
+import TupleTools # for sorting of tuples
 using JLD2: JLD2, jldopen, ZstdFilter
 
 using Preferences # For persisting cache dir
