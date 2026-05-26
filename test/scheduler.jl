@@ -4,7 +4,6 @@
 using Test
 using ReproducibleJobs
 using ReproducibleJobs: create_spec, with_scheduler, Preprocessing, ProcessingException, cached
-import ReproducibleJobs: fetch_new!, forward_new!, forward_once_new!
 
 
 # All test functions must be at module scope (named, non-closure) so the
@@ -77,7 +76,7 @@ end
 # Test 11 — error in preprocessing
 t_bad_preproc_fn(::Preprocessing, x) = error("preproc failure")
 
-# Test 13 — forward_once_new! stepping (uses t7_bad for ProcessingException; test 12 has no new fns)
+# Test 13 — forward_once! stepping (uses t7_bad for ProcessingException; test 12 has no new fns)
 t_step_inner(::Preprocessing, x_job) = (_C(:t_step_inner); create_spec(my_double, x_job; __version=v"1.0.0"))
 t_step_outer(::Preprocessing, x_job) = (_C(:t_step_outer); create_spec(Preprocess(t_step_inner), x_job))
 
@@ -109,15 +108,15 @@ function _run_scheduler_tests(dir)
 		job = create_spec(t1_f, 5; __version=v"1.0.0")
 
 		# forward returns :call immediately — nothing to preprocess
-		fwd = forward_new!(scheduler, job)
+		fwd = forward!(scheduler, job)
 		@test fwd isa Job && fwd.op === :call
 		@test _N(:t1_f) == 0  # compute hasn't run yet
 
-		res = fetch_new!(scheduler, job)
+		res = fetch!(scheduler, job)
 		@test res == 10
 		@test _N(:t1_f) == 1
 
-		fetch_new!(scheduler, job)  # second fetch uses cache
+		fetch!(scheduler, job)  # second fetch uses cache
 		@test _N(:t1_f) == 1
 	end
 
@@ -127,15 +126,15 @@ function _run_scheduler_tests(dir)
 		leaf      = create_spec(my_val, 7; __version=v"1.0.0")
 		chain_job = create_spec(Preprocess(t2_step1), leaf)
 
-		fwd1 = forward_once_new!(scheduler, chain_job)
+		fwd1 = forward_once!(scheduler, chain_job)
 		@test fwd1 isa Job
 		@test _N(:t2_step1) == 1 && _N(:t2_double) == 0  # preproc ran; compute did not
 
-		fwd2 = forward_new!(scheduler, chain_job)
+		fwd2 = forward!(scheduler, chain_job)
 		@test fwd2 isa Job && fwd2.op === :call
 		@test _N(:t2_step1) == 1  # cached, not repeated
 
-		res = fetch_new!(scheduler, chain_job)
+		res = fetch!(scheduler, chain_job)
 		@test res == 14
 		@test _N(:t2_double) == 1
 	end
@@ -147,16 +146,16 @@ function _run_scheduler_tests(dir)
 		job  = create_spec(Preprocess(t3_outer), leaf)
 
 		# one step: outer runs, inner does not
-		fwd1 = forward_once_new!(scheduler, job)
+		fwd1 = forward_once!(scheduler, job)
 		@test fwd1 isa Job && fwd1.op === :forward
 		@test _N(:t3_outer) == 1 && _N(:t3_inner) == 0
 
 		# full forward: both levels run
-		fwd2 = forward_new!(scheduler, job)
+		fwd2 = forward!(scheduler, job)
 		@test fwd2 isa Job && fwd2.op === :call
 		@test _N(:t3_outer) == 1 && _N(:t3_inner) == 1  # outer not repeated
 
-		@test fetch_new!(scheduler, job) == 6
+		@test fetch!(scheduler, job) == 6
 	end
 
 
@@ -165,7 +164,7 @@ function _run_scheduler_tests(dir)
 		data_job = create_spec(my_val, [1, 2, 3, 4]; __version=v"1.0.0")
 		job      = create_spec(Preprocess(t4_make_len_spec), data_job)
 
-		@test fetch_new!(scheduler, job) == 40   # use_len(length([1,2,3,4])) = 4*10
+		@test fetch!(scheduler, job) == 40   # use_len(length([1,2,3,4])) = 4*10
 		@test _N(:t4_get_len) == 1 && _N(:t4_use_len) == 1
 	end
 
@@ -177,11 +176,11 @@ function _run_scheduler_tests(dir)
 		parent_job  = create_spec(my_add, preproc_job, 1; __version=v"1.0.0")
 
 		# forwarding the parent triggers forwarding of the preprocessing dep
-		fwd = forward_new!(scheduler, parent_job)
+		fwd = forward!(scheduler, parent_job)
 		@test fwd isa Job && fwd.op === :call
 		@test _N(:t5_preproc) == 1 && _N(:t5_double) == 0
 
-		@test fetch_new!(scheduler, parent_job) == 11   # my_add(t5_double(5), 1) = 11
+		@test fetch!(scheduler, parent_job) == 11   # my_add(t5_double(5), 1) = 11
 		@test _N(:t5_double) == 1
 	end
 
@@ -192,12 +191,12 @@ function _run_scheduler_tests(dir)
 		dep_job = create_spec(t6_dep_fn, 4; __version=v"1.0.0")
 		job     = create_spec(Preprocess(t6_preproc), dep_job)
 
-		forward_new!(scheduler, job)
+		forward!(scheduler, job)
 		@test _N(:t6_preproc) == 1
 		@test t6_dep_was_job[]      # preprocessing received dep as Job, not a value
 		@test _N(:t6_dep) == 0       # dep NOT computed during forward
 
-		@test fetch_new!(scheduler, job) == 24   # my_double(t6_dep_fn(4)) = 24
+		@test fetch!(scheduler, job) == 24   # my_double(t6_dep_fn(4)) = 24
 		@test _N(:t6_dep) == 1
 	end
 
@@ -206,7 +205,7 @@ function _run_scheduler_tests(dir)
 		dep_job    = create_spec(t7_bad, 0; __version=v"1.0.0")
 		parent_job = create_spec(t7_parent, dep_job; __version=v"1.0.0")
 
-		@test_throws "intentional failure" fetch_new!(scheduler, parent_job)
+		@test_throws "intentional failure" fetch!(scheduler, parent_job)
 	end
 
 
@@ -217,8 +216,8 @@ function _run_scheduler_tests(dir)
 		parent1 = create_spec(my_add, dep, 0; __version=v"1.0.0")
 		parent2 = create_spec(my_add, dep, 1000; __version=v"1.0.0")
 
-		r1 = fetch_new!(scheduler, parent1)
-		r2 = fetch_new!(scheduler, parent2)
+		r1 = fetch!(scheduler, parent1)
+		r2 = fetch!(scheduler, parent2)
 		@test r1 == 101    # t_dag_fn(100) + 0 = 101
 		@test r2 == 1101   # t_dag_fn(100) + 1000 = 1101
 		@test _N(:t_dag) == 1   # shared dep computed only once
@@ -233,13 +232,13 @@ function _run_scheduler_tests(dir)
 		job  = create_spec(Preprocess(t_fetched_preproc_fn), fetched(dep))
 
 		# During forwarding, the fetched dep is computed; preprocessing receives its VALUE
-		fwd = forward_new!(scheduler, job)
+		fwd = forward!(scheduler, job)
 		@test fwd isa Job && fwd.op === :call
 		@test _N(:t_fetched_dep) == 1
 		@test _N(:t_fetched_preproc) == 1
 		@test t_fetched_dep_was_value[]   # received a value, not a Job
 
-		result = fetch_new!(scheduler, job)
+		result = fetch!(scheduler, job)
 		@test result == 2 * (11 * 5)   # my_double(t_fetched_dep_fn(11)) = 2*55 = 110
 	end
 
@@ -250,11 +249,11 @@ function _run_scheduler_tests(dir)
 		early_job = create_spec(Preprocess(t_late_early_fn), leaf)          # early: doubles x
 		job       = create_spec(Preprocess{false}(t_late_late_fn), early_job)  # late: adds 10
 
-		fwd = forward_new!(scheduler, job)
+		fwd = forward!(scheduler, job)
 		@test fwd isa Job && fwd.op === :call
 		@test _N(:t_late_early) == 1 && _N(:t_late_late) == 1
 
-		result = fetch_new!(scheduler, job)
+		result = fetch!(scheduler, job)
 		@test result == my_double(30) + 10   # 60 + 10 = 70
 	end
 
@@ -262,7 +261,7 @@ function _run_scheduler_tests(dir)
 	@testset "Error in preprocessing" begin
 		dep_job = create_spec(my_val, 200; __version=v"1.0.0")
 		job     = create_spec(Preprocess(t_bad_preproc_fn), dep_job)
-		@test_throws "preproc failure" fetch_new!(scheduler, job)
+		@test_throws "preproc failure" fetch!(scheduler, job)
 	end
 
 
@@ -271,7 +270,7 @@ function _run_scheduler_tests(dir)
 		parent_job = create_spec(t7_parent, dep_job; __version=v"1.0.0")
 		exc = nothing
 		try
-			fetch_new!(scheduler, parent_job)
+			fetch!(scheduler, parent_job)
 		catch e
 			exc = e
 		end
@@ -282,26 +281,26 @@ function _run_scheduler_tests(dir)
 	end
 
 
-	@testset "forward_once_new! stepping" begin
+	@testset "forward_once! stepping" begin
 		_CALLS[:t_step_inner] = _CALLS[:t_step_outer] = 0
 		leaf = create_spec(my_val, 42; __version=v"1.0.0")
 		job  = create_spec(Preprocess(t_step_outer), leaf)
 
 		# step 1: outer runs, inner does not
-		fwd1 = forward_once_new!(scheduler, job)
+		fwd1 = forward_once!(scheduler, job)
 		@test fwd1 isa Job && fwd1.op === :forward
 		@test _N(:t_step_outer) == 1 && _N(:t_step_inner) == 0
 
 		# advance to :call; outer is not repeated
-		fwd_final = forward_new!(scheduler, job)
+		fwd_final = forward!(scheduler, job)
 		@test fwd_final isa Job && fwd_final.op === :call
 		@test _N(:t_step_outer) == 1 && _N(:t_step_inner) == 1
 
 		# forward_once on the fully-forwarded result is idempotent
-		fwd_again = forward_once_new!(scheduler, fwd_final)
+		fwd_again = forward_once!(scheduler, fwd_final)
 		@test fwd_again === fwd_final
 
-		@test fetch_new!(scheduler, job) == 84   # my_double(42) = 84
+		@test fetch!(scheduler, job) == 84   # my_double(42) = 84
 	end
 
 
@@ -310,14 +309,14 @@ function _run_scheduler_tests(dir)
 		inner = create_spec(t_cached_fn, 7; __version=v"1.0.0")
 		job   = cached(inner)
 
-		r1 = fetch_new!(scheduler, job)
+		r1 = fetch!(scheduler, job)
 		@test r1 == 21       # 7 * 3
 		@test _N(:t_cached) == 1
 
 		# A fresh scheduler with the same cache dir should hit the on-disk result
 		with_scheduler(Scheduler(; dir=dir)) do
 			sched2 = ReproducibleJobs.get_scheduler()
-			r2 = fetch_new!(sched2, job)
+			r2 = fetch!(sched2, job)
 			@test r2 == 21
 			@test _N(:t_cached) == 1   # not recomputed
 		end
@@ -330,8 +329,8 @@ function _run_scheduler_tests(dir)
 		sub_a = cached(inner, "a")
 		sub_b = cached(inner, "b")
 
-		@test fetch_new!(scheduler, sub_a) == 10   # 5*2
-		@test fetch_new!(scheduler, sub_b) == 15   # 5*3
+		@test fetch!(scheduler, sub_a) == 10   # 5*2
+		@test fetch!(scheduler, sub_b) == 15   # 5*3
 		@test _N(:t_compound) == 1   # compound fn called once for both sub-results
 	end
 
@@ -342,14 +341,14 @@ function _run_scheduler_tests(dir)
 		write(fp, "version1")
 		ts1  = TimestampedFilePath(fp)
 		job1 = create_spec(t_read_tfp, ts1; __version=v"1.0.0")
-		@test fetch_new!(scheduler, job1) == "version1"
+		@test fetch!(scheduler, job1) == "version1"
 		@test _N(:t_read_tfp) == 1
 
 		# Artificially different timestamp → different spec → must recompute
 		ts2  = TimestampedFilePath(ts1.path, ts1.timestamp + 1.0)
 		job2 = create_spec(t_read_tfp, ts2; __version=v"1.0.0")
 		@test job2 !== job1
-		@test fetch_new!(scheduler, job2) == "version1"   # same file, different spec
+		@test fetch!(scheduler, job2) == "version1"   # same file, different spec
 		@test _N(:t_read_tfp) == 2
 	end
 
@@ -360,7 +359,7 @@ function _run_scheduler_tests(dir)
 		write(fp, "stable content")
 		cfp1 = ChecksummedFilePath(fp)
 		job1 = create_spec(t_read_cfp, cfp1; __version=v"1.0.0")
-		@test fetch_new!(scheduler, job1) == "stable content"
+		@test fetch!(scheduler, job1) == "stable content"
 		@test _N(:t_read_cfp) == 1
 
 		# Same checksum, different timestamp → same spec (hash is checksum-only)
@@ -376,7 +375,7 @@ function _run_scheduler_tests(dir)
 		@test !isequal(cfp1, cfp3)
 		job3 = create_spec(t_read_cfp, cfp3; __version=v"1.0.0")
 		@test job3 !== job1
-		@test fetch_new!(scheduler, job3) == "new content"
+		@test fetch!(scheduler, job3) == "new content"
 		@test _N(:t_read_cfp) == 2
 	end
 end
