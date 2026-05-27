@@ -202,14 +202,13 @@ function cache_save(cache::Cache, io, name, f::F) where F<:Function
 	g = JLD2.Group(io, name)
 	g["type"] = "Function"
 	g["module"] = string(mod)
-	g["uuid"] = pkgid.uuid === nothing ? "" : string(pkgid.uuid)
+	pkgid.uuid !== nothing && (g["uuid"] = string(pkgid.uuid))
 	g["name"] = string(nameof(f))
 	nothing
 end
 
-function _get_module(mod_name::String, uuid_str::String)
+function _get_module(mod_name::String, uuid::Union{Base.UUID, Nothing})
 	parts = split(mod_name, '.')
-	uuid = isempty(uuid_str) ? nothing : Base.UUID(uuid_str)
 	pkgid = Base.PkgId(uuid, parts[1])
 	root_mod = get(Base.loaded_modules, pkgid, nothing)
 	root_mod !== nothing || error("Cannot find module $mod_name when loading cached function.")
@@ -217,7 +216,8 @@ function _get_module(mod_name::String, uuid_str::String)
 end
 
 function cache_load(cache::Cache, ::Val{:Function}, g)
-	mod = _get_module(g["module"]::String, g["uuid"]::String)
+	uuid = haskey(g, "uuid") ? Base.UUID(g["uuid"]::String) : nothing
+	mod = _get_module(g["module"]::String, uuid)
 	getproperty(mod, Symbol(g["name"]::String))
 end
 

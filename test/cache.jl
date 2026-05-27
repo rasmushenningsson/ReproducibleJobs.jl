@@ -530,8 +530,9 @@ function run_cache_storage_tests()
 			end
 		end
 
-		@testset "$str" for (x,str) in ((iszero,"iszero"), (only,"only"), (!=,"!="))
+		@testset "$str" for (x,str) in ((iszero,"iszero"), (only,"only"), (!=,"!="), (isdiag,"isdiag"))
 			cache = Cache(CacheKey, Deduplicator(); dir)
+			ReproducibleJobs.register_function!(cache.deduplicator, x)
 			key = new_key(cache)
 			x2 = cache_get!(Returns(x), cache, key)
 			@test x2 === x
@@ -547,6 +548,18 @@ function run_cache_storage_tests()
 				@test h5["root"] isa HDF5.Group
 				@test read(h5["root"]["type"]) == "Function"
 				@test read(h5["root"]["name"]) == str
+
+				mod = parentmodule(typeof(x))
+				mod = mod === Core ? Base : mod
+				@test read(h5["root"]["module"]) == string(mod)
+
+				pkgid = Base.PkgId(mod)
+				if pkgid.uuid !== nothing
+					@test haskey(h5["root"], "uuid")
+					@test read(h5["root"]["uuid"]) == string(pkgid.uuid)
+				else
+					@test !haskey(h5["root"], "uuid")
+				end
 
 				types, custom = extract_jld2_types(h5)
 				@test types == []
