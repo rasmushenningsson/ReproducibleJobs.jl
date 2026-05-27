@@ -22,8 +22,6 @@ import AbstractTrees # for pretty printing
 using StyledStrings # For Spec printing
 import Dates # for printing of timestamped paths
 
-using Statistics # just to be able to put `mean` in `SupportedFunctions`...
-
 export
 	Deduplicator,
 	Cache,
@@ -37,6 +35,8 @@ export
 	TimestampedFilePath,
 	ChecksummedFilePath,
 	deduplicate!,
+	is_cancelled,
+	throw_if_cancelled,
 	print_spec,
 	fetch!,
 	forward!,
@@ -47,9 +47,7 @@ export
 	prefetched,
 	ifelse_spec,
 	error_spec,
-	checksummedfilepath_spec,
-	is_cancelled,
-	throw_if_cancelled
+	checksummedfilepath_spec
 
 # Use public keyword in Julia versions where it is available
 if VERSION >= v"1.11.0-DEV.469"
@@ -60,7 +58,11 @@ if VERSION >= v"1.11.0-DEV.469"
 			get_cache_path,
 			persist_cache_path!,
 			create_spec,
-			cached
+			cached,
+			get_scheduler,
+			set_scheduler!,
+			with_scheduler,
+			register_function!
 		"""
 		eval(Meta.parse(str))
 	end

@@ -290,7 +290,7 @@ function _should_collapse(::Type{T}; nested) where T<:Union{<:AbstractArray, <:A
 	nested ? false : _should_collapse(eltype(T); nested=true)
 end
 
-_should_collapse(::Type{T}; nested) where T<:Union{<:Number,String,Symbol,Char,DataType,Colon,Nothing,Missing,VersionNumber,Regex} = true
+_should_collapse(::Type{T}; nested) where T<:Union{<:Number,String,Symbol,Char,DataType,Nothing,Missing,VersionNumber,Regex} = true
 _should_collapse(::Type{T}; nested) where T<:Function = !(T isa UnionAll) # true for standard functions and false for e.g. Base.Fix with free parameters
 
 _should_collapse(::Type{T}; nested) where T<:Union{<:Pair, <:Tuple, <:NamedTuple, <:Returns, <:ComposedFunction} =

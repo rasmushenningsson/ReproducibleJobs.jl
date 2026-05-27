@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Run all tests:**
 ```
-julia --project=test test/runtests.jl
+jp -e `using Pkg; Pkg.test("ReproducibleJobs")`
 ```
 
 **Run a single testset from the REPL:**

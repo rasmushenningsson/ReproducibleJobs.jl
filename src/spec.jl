@@ -469,13 +469,13 @@ deduplication_copy(sr::SpecRun) = sr
 
 
 # TODO: THIS ISN'T GOOD ENOUGH! WE NEED TO ENSURE WE ONLY STORE EACH SPEC ONCE, EVEN IF IT'S REFERENCED MULTIPLE TIMES
-function cache_save(io, name, sr::SpecRun)
+function cache_save(cache::Cache, io, name, sr::SpecRun)
 	# Save as a group
 	g = JLD2.Group(io, name)
 	g["type"] = "Spec"
 	g["f"] = sr.f # Is this the best I can do?
-	cache_save(g, "args", sr.args) # TODO: Must be fixed now that we use Vector{Any}
-	cache_save(g, "kwargs", sr.kwargs) # TODO: Must be fixed now that we use Vector{Pair{Symbol,Any}}
+	cache_save(cache, g, "args", sr.args) # TODO: Must be fixed now that we use Vector{Any}
+	cache_save(cache, g, "kwargs", sr.kwargs) # TODO: Must be fixed now that we use Vector{Pair{Symbol,Any}}
 	nothing
 end
 function cache_load(cache::Cache, ::Val{:Spec}, g)

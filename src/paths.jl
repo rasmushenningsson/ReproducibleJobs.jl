@@ -13,7 +13,7 @@ deduplicate_type(::Type{TimestampedFilePath}) = false
 deconstruct_weak_rec(x::TimestampedFilePath) = x
 reconstruct_weak_rec(x::TimestampedFilePath) = x
 
-function cache_save(io, name, x::TimestampedFilePath)
+function cache_save(cache::Cache, io, name, x::TimestampedFilePath)
 	io[name] = x # Rely on JLD2 standard handling for saving/loading
 	nothing
 end
@@ -51,7 +51,7 @@ deduplicate_type(::Type{ChecksummedFilePath}) = false
 deconstruct_weak_rec(x::ChecksummedFilePath) = x
 reconstruct_weak_rec(x::ChecksummedFilePath) = x
 
-function cache_save(io, name, x::ChecksummedFilePath)
+function cache_save(cache::Cache, io, name, x::ChecksummedFilePath)
 	io[name] = x # Rely on JLD2 standard handling for saving/loading
 	nothing
 end

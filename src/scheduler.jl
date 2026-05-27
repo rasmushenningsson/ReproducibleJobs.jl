@@ -76,6 +76,10 @@ Scheduler(; kwargs...) = Scheduler(Deduplicator(); kwargs...)
 
 
 
+register_function!(scheduler::Scheduler, f) = register_function!(scheduler.deduplicator, f)
+register_function!(f) = register_function!(get_scheduler(), f)
+
+
 function set_lru_item_capacity!(scheduler::Scheduler, capacity)
 	scheduler.lru_item_capacity[] = capacity
 	scheduler
