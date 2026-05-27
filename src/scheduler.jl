@@ -671,16 +671,11 @@ function process_queue!(scheduler::Scheduler)
 		try
 			process_step!(scheduler, curr_sr)
 		catch e
-			if e isa InterruptException
-				# Interrupt all jobs but keep processing so that all SpecRuns end up in a good state
-				_cancel!()
-				e = CancelledException() # We use this for cancellation internally (Is there any need for that? Should we just use InterruptException?)
-				s = curr_sr.state.x
-				set_result!(scheduler, curr_sr, e)
-				s isa Union{Waiting{State}, Processing{State}} && update_downstream!(scheduler, s.downstream, e)
-			else
-				rethrow()
-			end
+			e isa InterruptException && _cancel!() # Interrupt all jobs but keep processing so that all SpecRuns end up in a good state
+			s = curr_sr.state.x
+			set_result!(scheduler, curr_sr, CancelledException())
+			s isa Union{Waiting{State}, Processing{State}} && update_downstream!(scheduler, s.downstream, CancelledException())
+			e isa InterruptException || rethrow()
 		end
 	end
 end
@@ -740,12 +735,12 @@ function process!(scheduler::Scheduler, job::Job; once=false)
 			res isa Exception && throw(res) # Do we want to throw CancelledException/InterruptException? Or just return nothing in that case?
 			return res
 		catch e
-			if e isa InterruptException # Maybe do this for all exceptions?
-				_cancel!()
-				process_queue!(scheduler) # drain remaining items — quick since cancelled=true
+			_cancel!()
+			if e isa InterruptException
 				cancel_items!(scheduler.progress_display)
 				set_text!(scheduler.progress_display, scheduler.main_display_item[], _main_display_text(job.f) * styled"{red: Cancelling}")
 			end
+			process_queue!(scheduler) # drain remaining items — quick since cancelled=true
 			rethrow()
 		finally
 			print_display(scheduler.progress_display; final=true)

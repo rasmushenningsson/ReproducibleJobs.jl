@@ -187,7 +187,7 @@ function print_item(io, item::ProgressBarItem, t; finish_time=nothing, finish_te
 	i = @atomic item.i
 	i = clamp(i, 0, item.n)
 
-	f = i / item.n # fraction completed
+	f = i / max(item.n, 1) # fraction completed
 	p = round(Int, f*100) # percentage completed
 
 	k = round(Int, item.n_chars*f) # number of chars to fill
