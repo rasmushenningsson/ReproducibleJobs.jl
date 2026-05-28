@@ -51,7 +51,8 @@ export
 	error_spec,
 	checksummedfilepath_spec,
 	get_failed_job,
-	get_failed_spec
+	get_failed_spec,
+	set_progress_display! # Experimental
 
 # Use public keyword in Julia versions where it is available
 if VERSION >= v"1.11.0-DEV.469"
@@ -66,8 +67,7 @@ if VERSION >= v"1.11.0-DEV.469"
 			get_scheduler,
 			set_scheduler!,
 			with_scheduler,
-			register_function!,
-			set_progress_display!
+			register_function!
 		"""
 		eval(Meta.parse(str))
 	end

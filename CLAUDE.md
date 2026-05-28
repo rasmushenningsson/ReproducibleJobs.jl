@@ -25,7 +25,7 @@ Or, from the terminal:
 **Redirect progress display to a log file** (useful when stdout is not a TTY, e.g. inside Claude Code):
 ```julia
 using ReproducibleJobs
-set_progress_display!(ProgressDisplay(;io=WatchableLog("progress.log", 30)))
+ReproducibleJobs.set_progress_display!(ProgressDisplay(;io=WatchableLog("progress.log", 8)))
 ```
 Then watch it live in another terminal:
 ```
