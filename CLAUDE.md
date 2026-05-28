@@ -22,6 +22,16 @@ Or, from the terminal:
 2. Run `jp -e 'include("cache.jl"); run_cache_tests()'`
 (and similar for other testsets)
 
+**Redirect progress display to a log file** (useful when stdout is not a TTY, e.g. inside Claude Code):
+```julia
+using ReproducibleJobs
+set_progress_display!(ProgressDisplay(;io=WatchableLog("progress.log", 30)))
+```
+Then watch it live in another terminal:
+```
+watch -n 0.1 --color "cat progress.log"
+```
+
 **Configure the on-disk cache path:**
 ```julia
 using ReproducibleJobs

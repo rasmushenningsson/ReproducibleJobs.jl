@@ -1,9 +1,12 @@
+emit(io, args...) = print(io, args...)
+_end_tick!(io, nlines, final) = final || move_cursor_up(io, nlines)
+
 function move_cursor_up(io, n)
 	# print(io, "\e[A\e[2K" ^ n) # This version also clears when moving up
 	print(io, "\r\u1b[A" ^ n) # This only moves up
 end
 
-println_clear(io::IO, args...) = println(io, args..., "\e[K") # clear the rest of the line
+emit_clear(io, args...) = println(io, args..., "\e[K") # clear the rest of the line
 
 
 abstract type AbstractProgressItem end
@@ -79,6 +82,7 @@ end
 const ProgressMessageUnion = Union{ProgressMessageAddItem, ProgressMessageSetText, ProgressMessageRemoveItem, ProgressMessageInfo}
 
 mutable struct ProgressDisplay
+	io::Union{IO, WatchableLog}
 	nlines::Int # the number of active lines
 	head::ListNode{ProgressItemUnion} # dummy item, we always ignore the first item in the list
 	tail::ListNode{ProgressItemUnion}
@@ -88,9 +92,9 @@ mutable struct ProgressDisplay
 	min_display_time::Float64 # suppress all output (except info messages at final) if elapsed < this
 	print_interval::Float64   # minimum time between redraws of the active display
 end
-function ProgressDisplay(; min_display_time=0.1, print_interval=0.05)
+function ProgressDisplay(; io=stdout, min_display_time=0.1, print_interval=0.05)
 	head = ListNode(ProgressItemUnion, ProgressText())
-	ProgressDisplay(0, head, head, Channel{ProgressMessageUnion}(Inf), time(), -Inf, min_display_time, print_interval)
+	ProgressDisplay(io, 0, head, head, Channel{ProgressMessageUnion}(Inf), time(), -Inf, min_display_time, print_interval)
 end
 
 function Base.empty!(pd::ProgressDisplay)
@@ -149,10 +153,10 @@ function print_duration(io, s::Real; min_s=0.05)
 		s = round(Int, s)
 		m,s = divrem(s, 60)
 		h,m = divrem(m, 60)
-		h>0 && print(io, h, "h ")
-		print(io, m, "m ", s, "s ")
+		h>0 && emit(io, h, "h ")
+		emit(io, m, "m ", s, "s ")
 	elseif s >= min_s
-		print(io, round(s;digits=1), "s ")
+		emit(io, round(s;digits=1), "s ")
 	end
 end
 
@@ -168,11 +172,11 @@ function print_item(io, item::ProgressText, t; finish_time=nothing, finish_text=
 		end
 	end
 
-	isempty(item.text) || print(io, item.text, " ")
+	isempty(item.text) || emit(io, item.text, " ")
 
 	item.type in (:timed,:header) && print_duration(io, run_time)
-	finish_text !== nothing && print(io, finish_text)
-	println_clear(io)
+	finish_text !== nothing && emit(io, finish_text)
+	emit_clear(io)
 	return true
 end
 
@@ -182,7 +186,7 @@ function print_item(io, item::ProgressBarItem, t; finish_time=nothing, finish_te
 
 	# run_time < 0.05 && return false # TODO: Enable - only display if some time did pass (caveat: if it did display once, we should print it at finish time even if the actual run_time was below the threshold)
 
-	isempty(item.text) || print(io, item.text, " ")
+	isempty(item.text) || emit(io, item.text, " ")
 
 	i = @atomic item.i
 	i = clamp(i, 0, item.n)
@@ -193,29 +197,29 @@ function print_item(io, item::ProgressBarItem, t; finish_time=nothing, finish_te
 	k = round(Int, item.n_chars*f) # number of chars to fill
 
 	# # TODO: Use fewer temporary objects for this?
-	print(io, lpad(p,3), "%: ", "─"^k, " "^(item.n_chars-k+1))
+	emit(io, lpad(p,3), "%: ", "─"^k, " "^(item.n_chars-k+1))
 
 	if i == 0
-		print(io, " ETA: ?")
+		emit(io, " ETA: ?")
 	elseif i < item.n
 		spent = t-item.start_time
 		eta = spent*(1-f)/f
-		# str * " ETA: " * duration_string(eta)
-		print(io, "ETA: ")
+		emit(io, "ETA: ")
 		print_duration(io, eta; min_s = 0.0)
 	else
 		print_duration(io, run_time)
 	end
 
-	finish_text !== nothing && print(io, finish_text)
+	finish_text !== nothing && emit(io, finish_text)
 
-	println_clear(io)
+	emit_clear(io)
 	return true
 end
 
 
 
-function print_display(io, pd::ProgressDisplay; final=false)
+function print_display(pd::ProgressDisplay; final=false)
+	io = pd.io
 	t = time()
 	suppress_output = t - pd.start_time < pd.min_display_time
 
@@ -240,7 +244,7 @@ function print_display(io, pd::ProgressDisplay; final=false)
 			suppress_output || suppress_finished || print_item(io, msg.item, t; finish_time=msg.t, finish_text=msg.text) # print removed items first (in order of removal) (guard against multiple remove calls)
 		else#if msg isa ProgressMessageInfo
 			msg::ProgressMessageInfo
-			println_clear(io, msg.text) # a one-off message
+			emit_clear(io, msg.text) # a one-off message
 		end
 	end
 
@@ -253,7 +257,7 @@ function print_display(io, pd::ProgressDisplay; final=false)
 
 
 	# # Add this to print a separating line between done and active items
-	# println_clear(io, styled"{blue:↓ Active}")
+	# emit_clear(io, styled"{blue:↓ Active}")
 	# nlines += 1
 
 
@@ -275,9 +279,8 @@ function print_display(io, pd::ProgressDisplay; final=false)
 	# Move cursor back to the top of the active display so the next call
 	# overwrites it in place. Skipped on the final call so the cursor stays
 	# below the display and subsequent output appears underneath.
-	final || move_cursor_up(io, nlines)
+	_end_tick!(io, nlines, final)
 end
-print_display(pd::ProgressDisplay; kwargs...) = print_display(stdout, pd; kwargs...)
 
 
 

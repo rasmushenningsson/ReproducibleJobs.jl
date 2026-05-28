@@ -83,6 +83,13 @@ register_function!(scheduler::Scheduler, f) = register_function!(scheduler.dedup
 register_function!(f) = register_function!(get_scheduler(), f)
 
 
+function set_progress_display!(scheduler::Scheduler, pd::ProgressDisplay)
+	scheduler.progress_display = pd
+	scheduler
+end
+set_progress_display!(pd) = set_progress_display!(get_scheduler(), pd)
+
+
 function set_lru_item_capacity!(scheduler::Scheduler, capacity)
 	scheduler.lru_item_capacity[] = capacity
 	scheduler

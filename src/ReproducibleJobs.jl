@@ -34,6 +34,8 @@ export
 	Preprocess,
 	TimestampedFilePath,
 	ChecksummedFilePath,
+	ProgressDisplay, # Experimental
+	WatchableLog, # Experimental
 	deduplicate!,
 	is_cancelled,
 	throw_if_cancelled,
@@ -64,7 +66,8 @@ if VERSION >= v"1.11.0-DEV.469"
 			get_scheduler,
 			set_scheduler!,
 			with_scheduler,
-			register_function!
+			register_function!,
+			set_progress_display!
 		"""
 		eval(Meta.parse(str))
 	end
@@ -97,6 +100,7 @@ include("cache.jl")
 
 
 # Progress utils
+include("watchable_log.jl")
 include("progress.jl")
 
 
