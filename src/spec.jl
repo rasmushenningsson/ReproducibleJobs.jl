@@ -219,6 +219,8 @@ function try_get_result_rec(sr::SpecRun)
 		sr.state.x.result, sr.state.x.weak_result
 	elseif sr.state.x isa Next{State}
 		try_get_result_rec(sr.state.x.ref) # recurse
+	elseif sr.state.x isa Errored
+		sr.state.x.exception, NotValid()
 	else
 		NotValid(), NotValid()
 	end
