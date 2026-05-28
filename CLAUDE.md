@@ -27,10 +27,19 @@ Or, from the terminal:
 using ReproducibleJobs
 ReproducibleJobs.set_progress_display!(ProgressDisplay(;io=WatchableLog("progress.log", 8)))
 ```
-Then watch it live in another terminal:
+The file is overwritten from the top on every tick (seek + truncate), so `cat`-ing the whole
+file always gives the current snapshot. The file ends with `--- Done ---` when the run completes.
+
+In a regular terminal, watch it live with color:
 ```
 watch -n 0.1 --color "cat progress.log"
 ```
+
+Inside Claude Code (no TTY, `watch` doesn't work), use a shell loop instead:
+```bash
+while true; do cat progress.log; sleep 1; done
+```
+Or just `cat progress.log` on demand to see the current state.
 
 **Configure the on-disk cache path:**
 ```julia
