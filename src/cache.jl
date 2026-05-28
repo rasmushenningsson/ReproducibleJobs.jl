@@ -192,6 +192,10 @@ function _cache_save_deconstructed(cache::Cache, io, name, x::T) where T
 	nothing
 end
 
+
+cache_save(cache::Cache, io, name, ::Colon) = (g = JLD2.Group(io, name); g["type"] = "Colon"; nothing)
+cache_load(cache::Cache, ::Val{:Colon}, g) = Colon()
+
 function cache_save(cache::Cache, io, name, f::F) where F<:Function
 	f in cache.deduplicator.supported_functions ||
 		error("Function $(nameof(f)) (from module $(parentmodule(F))) is not registered. Call register_function!(deduplicator, f) to register it.")
@@ -203,7 +207,10 @@ function cache_save(cache::Cache, io, name, f::F) where F<:Function
 	g["type"] = "Function"
 	g["module"] = string(mod)
 	pkgid.uuid !== nothing && (g["uuid"] = string(pkgid.uuid))
-	g["name"] = string(nameof(f))
+	fn_name = nameof(f)
+	isdefined(mod, fn_name) && getproperty(mod, fn_name) === f ||
+		error("Cannot save $f: `$mod.$fn_name` does not refer to the function itself. Add a dedicated cache_save/cache_load pair for $(typeof(f)).")
+	g["name"] = string(fn_name)
 	nothing
 end
 
@@ -218,7 +225,7 @@ end
 function cache_load(cache::Cache, ::Val{:Function}, g)
 	uuid = haskey(g, "uuid") ? Base.UUID(g["uuid"]::String) : nothing
 	mod = _get_module(g["module"]::String, uuid)
-	getproperty(mod, Symbol(g["name"]::String))
+	getproperty(mod, Symbol(g["name"]::String)) # If this fails, it's probably because the saved function was a Functor.
 end
 
 

@@ -567,6 +567,24 @@ function run_cache_storage_tests()
 			end
 
 		end
+
+		@testset "Colon()" begin
+			cache = Cache(CacheKey, Deduplicator(); dir)
+			ReproducibleJobs.register_function!(cache.deduplicator, Colon())
+			key = new_key(cache)
+			x2 = cache_get!(Returns(Colon()), cache, key)
+			@test x2 === Colon()
+
+			empty!(cache.deduplicator)
+			key = create_test_key(cache, key.f)
+			x3 = cache_get!(error_fun, cache, key)
+			@test x3 === Colon()
+
+			h5open(key2path(cache, key), "r") do h5
+				@test h5["root"] isa HDF5.Group
+				@test read(h5["root"]["type"]) == "Colon"
+			end
+		end
 	end
 
 	@testset "BitVector" begin
