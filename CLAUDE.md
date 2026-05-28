@@ -17,6 +17,11 @@ jp -e `using Pkg; Pkg.test("ReproducibleJobs")`
 ```
 Each test file exposes a `run_<name>_tests()` function for interactive use.
 
+Or, from the terminal:
+1. Go to the test directory inside the package.
+2. Run `jp -e 'include("cache.jl"); run_cache_tests()'`
+(and similar for other testsets)
+
 **Configure the on-disk cache path:**
 ```julia
 using ReproducibleJobs
