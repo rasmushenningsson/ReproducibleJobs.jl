@@ -530,19 +530,27 @@ function _show_result(io::IO, w::WeakRef)
 	end
 end
 
-function Base.show(io::IO, ref::SpecRef)
+function show_spec_ref(io, ref::SpecRef; show_result=true)
 	if get(io,:compact,false)
 		show(io, ref.f)
 	else
 		print_spec(io, ref; maxdepth=5)
-		result, weak_result = try_get_result_rec(ref)
+		if show_result
+			result, weak_result = try_get_result_rec(ref)
 
-		if result !== NotValid()
-			print(io, "Result: ")
-			_show_result(io, result)
-		elseif weak_result !== NotValid()
-			print(io, "Result: ")
-			_show_result(io, weak_result)
+			if result !== NotValid()
+				print(io, "Result: ")
+				_show_result(io, result)
+			elseif weak_result !== NotValid()
+				print(io, "Result: ")
+				_show_result(io, weak_result)
+			end
 		end
 	end
 end
+
+Base.show(io::IO, ref::SpecRef) = show_spec_ref(io, ref)
+
+# A little workaround so we can print Specs and SpecRuns directly as well
+Base.show(io::IO, sr::SpecRun) = show_spec_ref(io, Job(sr))
+Base.show(io::IO, spec::Spec) = show_spec_ref(io, Job(SpecRun(spec)); show_result=false)
