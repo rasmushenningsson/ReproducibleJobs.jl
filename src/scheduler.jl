@@ -48,8 +48,8 @@ mutable struct Scheduler{H}
 	# preprocess_display_item::Base.RefValue{Union{ProgressText,Nothing}} # We reuse a single display item for preprocessing, to avoid flooding the terminal
 	# deduplication_display_item::Base.RefValue{Union{ProgressText,Nothing}} # We reuse a single display item for deduplication, to avoid flooding the terminal
 
-	# Last failing SpecRun, for debugging. Access the error via last_error_sr / last_error_spec.
-	last_error_sr::Union{Nothing, SpecRun}
+	# Last failing SpecRun, for debugging. Access the error via get_failed_job / get_failed_spec.
+	failed_sr::Union{Nothing, SpecRun}
 end
 function Scheduler(cache::Cache{SpecRun,H};
 	               lru_item_capacity = nothing,
@@ -162,7 +162,7 @@ function set_result!(scheduler::Scheduler, sr::SpecRun, res)
 		sr.state = state_initialized() # reset so the job can be re-run
 		return sr
 	end
-	res isa ProcessingException && scheduler.last_error_sr === nothing && (scheduler.last_error_sr = sr)
+	res isa ProcessingException && scheduler.failed_sr === nothing && (scheduler.failed_sr = sr)
 	if !(res isa Exception) && !is_preprocessing(sr)
 		lru_touch!(scheduler.lru, sr) do
 			Base.summarysize(res)
@@ -181,18 +181,18 @@ function get_result!(scheduler::Scheduler, sr::SpecRun)
 	res
 end
 
-last_error_sr(scheduler::Scheduler) = scheduler.last_error_sr
-last_error_sr() = last_error_sr(get_scheduler())
+get_failed_job(scheduler::Scheduler) = isnothing(scheduler.failed_sr) ? nothing : Job(scheduler.failed_sr)
+get_failed_job() = get_failed_job(get_scheduler())
 
-function last_error_spec(scheduler::Scheduler)
-	sr = scheduler.last_error_sr
+function get_failed_spec(scheduler::Scheduler)
+	sr = scheduler.failed_sr
 	sr === nothing && return nothing
 	ex = sr.state.x
 	ex isa Errored || return nothing
 	e = ex.exception
 	e isa ProcessingException ? first(e.stack) : nothing
 end
-last_error_spec() = last_error_spec(get_scheduler())
+get_failed_spec() = get_failed_spec(get_scheduler())
 
 
 
@@ -745,7 +745,7 @@ end
 
 
 function process!(scheduler::Scheduler, job::Job; once=false)
-	scheduler.last_error_sr = nothing
+	scheduler.failed_sr = nothing
 	scheduler.work_channel = Channel{WorkUnion}(Inf)
 	scheduler.result_channel = Channel{Any}(Inf)
 

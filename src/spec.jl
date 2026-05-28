@@ -25,6 +25,7 @@ struct SpecRef{T}
 		new{T}(sr, op)
 	end
 end
+SpecRef{T}(sr::SpecRun{T}) where T = SpecRef{T}(sr, :forward)
 SpecRef(sr::SpecRun{T}, op=:forward) where T = SpecRef{T}(sr, op)
 
 

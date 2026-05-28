@@ -17,6 +17,7 @@ _C(s::Symbol) = (_CALLS[s] = _N(s) + 1)    # increment count
 my_double(x; __version=v"1.0.0") = 2x
 my_add(a, b; __version=v"1.0.0") = a + b
 my_val(x; __version=v"1.0.0") = x
+my_err(x; __version=v"1.0.0") = error(x)
 
 # Test 1
 t1_f(x; __version=v"1.0.0") = (_C(:t1_f); 2x)
@@ -87,11 +88,6 @@ t_compound_fn(x; __version=v"1.0.0") = (_C(:t_compound); CompoundResult(; a=x*2,
 # Tests 16–17 — file path types
 t_read_tfp(fp; __version=v"1.0.0") = (_C(:t_read_tfp); read(fp.path, String))
 t_read_cfp(fp; __version=v"1.0.0") = (_C(:t_read_cfp); read(fp.path, String))
-
-# Tests for last_error_sr / last_error_spec
-t_last_err_fn(x; __version=v"1.0.0")     = error("test error $x")
-t_last_err_parent(x; __version=v"1.0.0") = x + 1
-t_last_err_ok(x; __version=v"1.0.0")     = x * 2
 
 
 function run_scheduler_tests()
@@ -357,57 +353,6 @@ function _run_scheduler_tests(dir)
 		@test _N(:t_read_tfp) == 2
 	end
 
-
-	@testset "last_error_sr — nothing before any error" begin
-		ok_job = create_spec(t_last_err_ok, 1; __version=v"1.0.0")
-		fetch!(scheduler, ok_job)
-		@test last_error_sr(scheduler) === nothing
-		@test last_error_spec(scheduler) === nothing
-	end
-
-
-	@testset "last_error_sr — set on fresh error, cleared on next success" begin
-		# fresh error: unique arg to avoid caching from other tests
-		job = create_spec(t_last_err_fn, 1001; __version=v"1.0.0")
-		try fetch!(scheduler, job) catch end
-		sr = last_error_sr(scheduler)
-		@test sr !== nothing
-		@test sr.f === t_last_err_fn
-
-		spec = last_error_spec(scheduler)
-		@test spec !== nothing
-		@test spec.f === t_last_err_fn
-		@test spec.args[1] == 1001   # actual value, not a Job
-
-		# success clears last_error_sr
-		ok_job = create_spec(t_last_err_ok, 2; __version=v"1.0.0")
-		fetch!(scheduler, ok_job)
-		@test last_error_sr(scheduler) === nothing
-		@test last_error_spec(scheduler) === nothing
-	end
-
-
-	@testset "last_error_sr — root cause captured for propagated error" begin
-		dep_job    = create_spec(t_last_err_fn, 1002; __version=v"1.0.0")
-		parent_job = create_spec(t_last_err_parent, dep_job; __version=v"1.0.0")
-		try fetch!(scheduler, parent_job) catch end
-		sr = last_error_sr(scheduler)
-		@test sr !== nothing
-		@test sr.f === t_last_err_fn   # root cause sr, not the propagating parent
-	end
-
-
-	@testset "last_error_sr — set when error is cached in sr state" begin
-		job = create_spec(t_last_err_fn, 1003; __version=v"1.0.0")
-		# first call: fresh error
-		try fetch!(scheduler, job) catch end
-		# second call: error is now cached in sr state; last_error_sr must still be set
-		try fetch!(scheduler, job) catch end
-		@test last_error_sr(scheduler) !== nothing
-		@test last_error_sr(scheduler).f === t_last_err_fn
-	end
-
-
 	@testset "ChecksummedFilePath — same checksum deduplicated, different checksum distinct" begin
 		_CALLS[:t_read_cfp] = 0
 		fp   = joinpath(dir, "cfp_test.txt")
@@ -432,5 +377,51 @@ function _run_scheduler_tests(dir)
 		@test job3 !== job1
 		@test fetch!(scheduler, job3) == "new content"
 		@test _N(:t_read_cfp) == 2
+	end
+
+
+	@testset "failed job — nothing before any error" begin
+		ok_job = create_spec(my_double, 1; __version=v"1.0.0")
+		fetch!(scheduler, ok_job)
+		@test get_failed_job(scheduler) === nothing
+		@test get_failed_spec(scheduler) === nothing
+	end
+
+
+	@testset "failed job — set on fresh error, cleared on next success" begin
+		# fresh error: unique arg to avoid caching from other tests
+		inner_job = create_spec(my_double, 99; __version=v"1.0.0")
+		job = create_spec(my_err, inner_job; __version=v"1.0.0")
+		try fetch!(scheduler, job) catch end
+		@test get_failed_job(scheduler).f === my_err
+
+		spec = get_failed_spec(scheduler)
+		@test spec !== nothing
+		@test spec.f === my_err
+		@test spec.args[1] == 99*2 # this is the replaced value
+
+		# success clears failed job
+		ok_job = create_spec(my_double, 2; __version=v"1.0.0")
+		fetch!(scheduler, ok_job)
+		@test get_failed_job(scheduler) === nothing
+		@test get_failed_spec(scheduler) === nothing
+	end
+
+
+	@testset "failed job — root cause captured for propagated error" begin
+		dep_job    = create_spec(my_err, 1002; __version=v"1.0.0")
+		parent_job = create_spec(my_add, dep_job, 1; __version=v"1.0.0")
+		try fetch!(scheduler, parent_job) catch end
+		@test get_failed_job(scheduler).f === my_err
+	end
+
+
+	@testset "failed job — set when error is cached in SpecRun state" begin
+		job = create_spec(my_err, 1003; __version=v"1.0.0")
+		# first call: fresh error
+		try fetch!(scheduler, job) catch end
+		# second call: error is now cached in SpecRun state; failed job must still be set
+		try fetch!(scheduler, job) catch end
+		@test get_failed_job(scheduler).f === my_err
 	end
 end

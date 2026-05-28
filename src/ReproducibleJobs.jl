@@ -48,8 +48,8 @@ export
 	ifelse_spec,
 	error_spec,
 	checksummedfilepath_spec,
-	last_error_sr, # TODO: Rename - probably wrap in a Job?
-	last_error_spec # TODO: Rename? Should the name indicate that it is after replacement?
+	get_failed_job,
+	get_failed_spec
 
 # Use public keyword in Julia versions where it is available
 if VERSION >= v"1.11.0-DEV.469"
