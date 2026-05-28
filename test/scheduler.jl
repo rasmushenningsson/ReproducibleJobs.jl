@@ -88,6 +88,11 @@ t_compound_fn(x; __version=v"1.0.0") = (_C(:t_compound); CompoundResult(; a=x*2,
 t_read_tfp(fp; __version=v"1.0.0") = (_C(:t_read_tfp); read(fp.path, String))
 t_read_cfp(fp; __version=v"1.0.0") = (_C(:t_read_cfp); read(fp.path, String))
 
+# Tests for last_error_sr / last_error_spec
+t_last_err_fn(x; __version=v"1.0.0")     = error("test error $x")
+t_last_err_parent(x; __version=v"1.0.0") = x + 1
+t_last_err_ok(x; __version=v"1.0.0")     = x * 2
+
 
 function run_scheduler_tests()
 	@testset "Scheduler" begin
@@ -350,6 +355,56 @@ function _run_scheduler_tests(dir)
 		@test job2 !== job1
 		@test fetch!(scheduler, job2) == "version1"   # same file, different spec
 		@test _N(:t_read_tfp) == 2
+	end
+
+
+	@testset "last_error_sr — nothing before any error" begin
+		ok_job = create_spec(t_last_err_ok, 1; __version=v"1.0.0")
+		fetch!(scheduler, ok_job)
+		@test last_error_sr(scheduler) === nothing
+		@test last_error_spec(scheduler) === nothing
+	end
+
+
+	@testset "last_error_sr — set on fresh error, cleared on next success" begin
+		# fresh error: unique arg to avoid caching from other tests
+		job = create_spec(t_last_err_fn, 1001; __version=v"1.0.0")
+		try fetch!(scheduler, job) catch end
+		sr = last_error_sr(scheduler)
+		@test sr !== nothing
+		@test sr.f === t_last_err_fn
+
+		spec = last_error_spec(scheduler)
+		@test spec !== nothing
+		@test spec.f === t_last_err_fn
+		@test spec.args[1] == 1001   # actual value, not a Job
+
+		# success clears last_error_sr
+		ok_job = create_spec(t_last_err_ok, 2; __version=v"1.0.0")
+		fetch!(scheduler, ok_job)
+		@test last_error_sr(scheduler) === nothing
+		@test last_error_spec(scheduler) === nothing
+	end
+
+
+	@testset "last_error_sr — root cause captured for propagated error" begin
+		dep_job    = create_spec(t_last_err_fn, 1002; __version=v"1.0.0")
+		parent_job = create_spec(t_last_err_parent, dep_job; __version=v"1.0.0")
+		try fetch!(scheduler, parent_job) catch end
+		sr = last_error_sr(scheduler)
+		@test sr !== nothing
+		@test sr.f === t_last_err_fn   # root cause sr, not the propagating parent
+	end
+
+
+	@testset "last_error_sr — set when error is cached in sr state" begin
+		job = create_spec(t_last_err_fn, 1003; __version=v"1.0.0")
+		# first call: fresh error
+		try fetch!(scheduler, job) catch end
+		# second call: error is now cached in sr state; last_error_sr must still be set
+		try fetch!(scheduler, job) catch end
+		@test last_error_sr(scheduler) !== nothing
+		@test last_error_sr(scheduler).f === t_last_err_fn
 	end
 
 

@@ -47,6 +47,9 @@ mutable struct Scheduler{H}
 	gc_display_item::Base.RefValue{Union{ProgressText,Nothing}}
 	# preprocess_display_item::Base.RefValue{Union{ProgressText,Nothing}} # We reuse a single display item for preprocessing, to avoid flooding the terminal
 	# deduplication_display_item::Base.RefValue{Union{ProgressText,Nothing}} # We reuse a single display item for deduplication, to avoid flooding the terminal
+
+	# Last failing SpecRun, for debugging. Access the error via last_error_sr / last_error_spec.
+	last_error_sr::Union{Nothing, SpecRun}
 end
 function Scheduler(cache::Cache{SpecRun,H};
 	               lru_item_capacity = nothing,
@@ -60,7 +63,7 @@ function Scheduler(cache::Cache{SpecRun,H};
 	work_channel = Channel{WorkUnion}(Inf)
 	result_channel = Channel{Any}(Inf)
 
-	scheduler = Scheduler{H}(cache.deduplicator, cache, SpecRun[], nothing, work_channel, result_channel, Ref(lru_item_capacity), Ref(lru_mem_capacity), Ref(lru_mem_fraction), LRUCache{SpecRun}(), ProgressDisplay(), Ref{Union{ProgressText,Nothing}}(nothing), Ref{Union{ProgressText,Nothing}}(nothing), Ref{Union{ProgressText,Nothing}}(nothing))
+	scheduler = Scheduler{H}(cache.deduplicator, cache, SpecRun[], nothing, work_channel, result_channel, Ref(lru_item_capacity), Ref(lru_mem_capacity), Ref(lru_mem_fraction), LRUCache{SpecRun}(), ProgressDisplay(), Ref{Union{ProgressText,Nothing}}(nothing), Ref{Union{ProgressText,Nothing}}(nothing), Ref{Union{ProgressText,Nothing}}(nothing), nothing)
 
 	# Move to inner constructor?
     finalizer(scheduler) do s
@@ -159,6 +162,7 @@ function set_result!(scheduler::Scheduler, sr::SpecRun, res)
 		sr.state = state_initialized() # reset so the job can be re-run
 		return sr
 	end
+	res isa ProcessingException && scheduler.last_error_sr === nothing && (scheduler.last_error_sr = sr)
 	if !(res isa Exception) && !is_preprocessing(sr)
 		lru_touch!(scheduler.lru, sr) do
 			Base.summarysize(res)
@@ -176,6 +180,19 @@ function get_result!(scheduler::Scheduler, sr::SpecRun)
 	end
 	res
 end
+
+last_error_sr(scheduler::Scheduler) = scheduler.last_error_sr
+last_error_sr() = last_error_sr(get_scheduler())
+
+function last_error_spec(scheduler::Scheduler)
+	sr = scheduler.last_error_sr
+	sr === nothing && return nothing
+	ex = sr.state.x
+	ex isa Errored || return nothing
+	e = ex.exception
+	e isa ProcessingException ? first(e.stack) : nothing
+end
+last_error_spec() = last_error_spec(get_scheduler())
 
 
 
@@ -461,7 +478,10 @@ function setup_processing!(scheduler, job)
 	if is_preprocessing(sr)
 		# Cached result
 		res = get_result!(scheduler, sr)
-		res !== NotValid() && return res # Early out for preprocessing specs - it **preprocessed** to a result
+		if res !== NotValid()
+			res isa ProcessingException && set_result!(scheduler, sr, res)
+			return res # Early out for preprocessing specs - it **preprocessed** to a result
+		end
 	end
 
 	deps = get_dependencies(sr)
@@ -472,7 +492,10 @@ function setup_processing!(scheduler, job)
 	if !is_preprocessing(sr)
 		# Cached result
 		res = get_result!(scheduler, sr)
-		res !== NotValid() && return res # Early out for computing specs
+		if res !== NotValid()
+			res isa ProcessingException && set_result!(scheduler, sr, res)
+			return res # Early out for computing specs
+		end
 	end
 
 	sr.state.x isa Union{Waiting{State},Processing{State}} && return NotValid() # It has already been setup.
@@ -722,6 +745,7 @@ end
 
 
 function process!(scheduler::Scheduler, job::Job; once=false)
+	scheduler.last_error_sr = nothing
 	scheduler.work_channel = Channel{WorkUnion}(Inf)
 	scheduler.result_channel = Channel{Any}(Inf)
 
