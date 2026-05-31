@@ -46,6 +46,7 @@ function deduplication_hash end
 const _DEFAULT_SUPPORTED_FUNCTIONS = Function[
 	:, identity, !, iszero, ismissing, isequal, startswith, only, in,
 	<, <=, >, >=, ==, !=, maximum, minimum,
+	sqrt, abs, abs2,
 ]
 
 # TODO: figure out a strategy for cleaning out entries where the weakref is nothing
