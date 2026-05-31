@@ -44,7 +44,7 @@ Or just `cat progress.log` on demand to see the current state.
 **Configure the on-disk cache path:**
 ```julia
 using ReproducibleJobs
-ReproducibleJobs.Deduplicators.persist_cache_path!("/path/to/cache")
+ReproducibleJobs.persist_cache_path!("/path/to/cache")
 ```
 This writes a Julia Preference; the default is `.cache` in the working directory.
 
@@ -52,19 +52,21 @@ This writes a Julia Preference; the default is `.cache` in the working directory
 
 ### Core Concepts
 
-**`Spec`** (`src/spec.jl`): A specification of a computation — a function `f` plus `args` and `kwargs`. Specs are deduplicated by default (same spec === same object in memory). `create_spec(f, args...; kwargs...)` is the main constructor. All non-preprocessing specs must include a `__version` kwarg (stripped before calling `f`). `op` field controls how the Spec is processed: `Call` (ready), `Fetch` (compute immediately), `Prefetch` (collapse to result before calling parent), `Forward` (still being forwarded through preprocessing).
+**`Spec`** (`src/spec.jl`): A specification of a computation — a function `f` plus `args` and `kwargs`. `create_spec(f, args...; kwargs...)` is the main constructor. All non-preprocessing specs must include a `__version` kwarg (stripped before calling `f`).
 
-**`Job`** (`src/job.jl`): User-facing wrapper around a `Spec`. Holds a cached `result` field. Call `fetch!(job)` to compute, `forward(job)` to run preprocessing only.
+**`Job`** (`src/spec.jl`): The primary user-facing type. Type alias `Job = SpecRef{State}`. A reference to a `SpecRun` with an `op` symbol (`:forward`, `:call`, `:fetch`, or `:prefetch`) that controls how it is processed. Call `fetch!(job)` to compute, `forward!(job)` to run preprocessing only.
 
-**`Scheduler`** (`src/scheduler.jl`): Single-threaded executor. Owns a `Deduplicator` and a `Cache`. Processes specs by forwarding through preprocessing, then computing. The global scheduler is accessed via `get_scheduler()` / `set_scheduler!()` / `with_scheduler(f, s)`. On-disk caching is activated via `cached(spec)`.
+**`SpecRun`** (`src/spec.jl`): The live, deduplicated handle for a spec. Holds the current `state` (one of `Initialized`, `Waiting`, `Processing`, `Next`, `Result`, `Errored`). `Result` contains both a strong `result` field and a weakly-held `weak_result` (via `deconstruct_weak_rec`). The LRU cache on `Scheduler` keeps the strong reference alive for recently used specs; on eviction the strong reference is cleared but `weak_result` persists. If the user still holds the result object the weak reference revives it; otherwise the spec re-runs.
 
-**`Deduplicator`** (`src/Deduplicators/deduplicator.jl`): Ensures structurally equal mutable objects share the same memory reference. Uses `StableHashTraits` for content hashing plus a pointer→(weakref, hash) map. Types opt-in via `deduplicate_type(::Type{T}) = true`. Arrays become `ReadOnlyArray`s after deduplication to prevent mutation.
+**`Scheduler`** (`src/scheduler.jl`): Async executor (uses `Threads.@spawn` for a worker task). Owns a `Deduplicator`, a `Cache`, and an `LRUCache`. Processes specs by forwarding through preprocessing, then computing. The global scheduler is accessed via `get_scheduler()` / `set_scheduler!()` / `with_scheduler(f, s)`. On-disk caching is activated via `cached(spec)`.
 
-**`Cache`** (`src/Deduplicators/cache.jl`): Two-level cache keyed by `SpecArgs`. In-memory level is a `WeakKeyDict` using `deconstruct_weak_rec`/`reconstruct_weak_rec` to hold values weakly. On-disk level stores JLD2 files named by hash. `cache_get!(f, cache, key; use_disk)` is the main entry point.
+**`Deduplicator`** (`src/deduplicator.jl`): Ensures structurally equal mutable objects share the same memory reference. Uses `StableHashTraits` for content hashing plus a pointer→(weakref, hash) map. Types opt-in via `deduplicate_type(::Type{T}) = true`. Arrays become `ReadOnlyArray`s after deduplication to prevent mutation.
+
+**`Cache`** (`src/cache.jl`): On-disk cache keyed by `SpecRun`. Stores JLD2 files named by hash. `cache_get!(f, cache, key)` is the main entry point.
 
 **`Preprocess` / `Preprocessing`** (`src/preprocess.jl`): Wraps a function to mark it as a preprocessing step. Preprocessing functions receive a `Preprocessing{E}()` sentinel as their first argument. The scheduler calls preprocessing specs via `forward!`/`forward_once!` before computing dependencies. `Preprocess{true}` (early) vs `Preprocess{false}` (late) controls ordering among nested preprocessing steps. `should_forward_child` rules determine which parent/child combos are forwarded.
 
-**`CompoundResult`** (`src/Deduplicators/compound_result.jl`): A named collection of heterogeneous results (`keys::ROVec{String}`, `values::Vector`). Used with `cached(spec, sub_key)` to load individual sub-results from disk without loading the entire result.
+**`CompoundResult`** (`src/compound_result.jl`): A named collection of heterogeneous results (`keys::ROVec{String}`, `values::Vector`). Used with `cached(spec, sub_key)` to load individual sub-results from disk without loading the entire result.
 
 **`TimestampedFilePath` / `ChecksummedFilePath`** (`src/paths.jl`): File path wrappers that capture `mtime` or SHA-256 checksum so file changes invalidate cached computations. `ChecksummedFilePath` equality is based solely on checksum, allowing cached results to survive file renames.
 
@@ -72,24 +74,24 @@ This writes a Julia Preference; the default is `.cache` in the working directory
 
 ```
 Job → fetch!(job)
-        └→ Scheduler.process!(spec, Fetch)
+        └→ Scheduler.process!(sr, :fetch)
               ├─ Forward phase: expand preprocessing specs (forward! loop)
-              │    └─ preprocessing f receives Preprocessing{E}() and returns new SpecArgs
-              └─ Compute phase (all deps have op=Call):
-                    ├─ cache_get!(cache, sa; use_disk=false)  [in-memory]
-                    └─ cache_get!(cache, sa; use_disk=true)   [on-disk, for cached() specs]
+              │    └─ preprocessing f receives Preprocessing{E}() and returns new Spec args
+              └─ Compute phase (all deps have op=:call):
+                    ├─ get_result!(sr)                      [strong ref, or weak ref revival]
+                    └─ cache_get!(cache, sr)                [on-disk JLD2, for cached() specs]
                           └─ f(args...; kwargs...)  [kwargs with __ prefix are stripped]
 ```
 
 ### Adding Support for New Types
 
 To deduplicate a new mutable type, implement:
-- `Deduplicators.deduplicate_type(::Type{MyType}) = true`
-- `Deduplicators.deduplication_pointer(x::MyType)` → `pointer_from_objref(x)`
-- `Deduplicators.deduplicate_children!(d, x::MyType; kwargs...)` → returns deduplicated version
-- `Deduplicators.deduplication_hash(d, x::MyType)` → `Hash`
-- `Deduplicators.deduplication_copy(x::MyType)`
+- `deduplicate_type(::Type{MyType}) = true`
+- `deduplication_pointer(x::MyType)` → unique pointer (e.g. `pointer_from_objref(x)`)
+- `deduplicate_children!(d, x::MyType; kwargs...)` → returns deduplicated version
+- `deduplication_hash(d, x::MyType)` → `Hash`
+- `deduplication_copy(x::MyType)`
 
-For disk persistence also implement `cache_save(io, name, x::MyType)` and `cache_load(cache, ::Val{:MyType}, g)`.
+For disk persistence also implement `cache_save(cache, io, name, x::MyType)` and `cache_load(cache, ::Val{:MyType}, g)`.
 
 For reconstructable value types, implement `deconstruct_type`, `deconstruct`, `reconstruct`, `type_to_tag`, `tag_to_type` instead.
