@@ -9,6 +9,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 jp -e `using Pkg; Pkg.test("ReproducibleJobs")`
 ```
 
+**Run a single testset via julia-mcp** (preferred — persistent session, no restart needed):
+```julia
+includet("dev/ReproducibleJobs/test/cache.jl")
+run_cache_tests()
+```
+Each test file exposes a `run_<name>_tests()` function. `includet` ensures Revise tracks changes to the test file and only needs to be called once per session.
+
 **Run a single testset from the REPL:**
 ```julia
 # 1. Activate the test environment
