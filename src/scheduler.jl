@@ -422,17 +422,11 @@ function setup_dependency!(scheduler, sr::SpecRun{State}, call::Bool, dep::Job, 
 		# stop before calling (but allow fetch/prefetch to call)
 		next = curr
 
-		# override = dep.op === :fetch || (dep.op === :prefetch && !is_preprocessing(sr))
-		# while override || (curr.op !== :call && should_forward_child(sr.f, curr.f))
-		# 	next = setup_processing!(scheduler, curr)
-		# 	next isa Job || break
-		# 	curr = next # transfer op?? Nah. I don't think so.
-		# end
-
 		while curr.op === :fetch || (curr.op === :prefetch && !is_preprocessing(sr)) || (curr.op !== :call && should_forward_child(sr.f, curr.f))
 			next = setup_processing!(scheduler, curr)
 			next isa Job || break
-			curr = apply_op(curr.op, next)
+			next = apply_op(curr.op, next)
+			curr = next
 		end
 	end
 
@@ -448,8 +442,6 @@ function update_dependency!(scheduler, sr::SpecRun{State}, dep::Job, res)
 	@assert res !== NotValid()
 
 	# TODO: If res is an exception, we should not wait for other upstream jobs to finish.
-
-	res isa Job && (res = apply_op(dep.op, res))
 
 	waiting = sr.state.x::Waiting
 	waiting.upstream[dep] = res
