@@ -16,6 +16,7 @@ _C(s::Symbol) = (_CALLS[s] = _N(s) + 1)    # increment count
 # Shared compute primitives (no counting)
 my_double(x; __version=v"1.0.0") = 2x
 my_add(a, b; __version=v"1.0.0") = a + b
+my_apply(f, args...; __version=v"1.0.0") = f(args...)
 my_val(x; __version=v"1.0.0") = x
 my_err(x; __version=v"1.0.0") = error(x)
 
@@ -37,6 +38,12 @@ function t4_make_len_spec(::Preprocessing, data_job)
 	len_spec = create_spec(t4_get_len, data_job; __version=v"1.0.0")
 	create_spec(t4_use_len, prefetched(len_spec); __version=v"1.0.0")
 end
+
+# Test 4b
+function t4b_remove_last_arg(::Preprocessing, inner)
+	create_spec(inner.f, inner.args[1:end-1]...; inner.kwargs...)
+end
+
 
 # Test 5 — should_forward_child: preprocessing dep of normal spec
 t5_double(x; __version=v"1.0.0")    = (_C(:t5_double); 2x)
@@ -167,6 +174,20 @@ function _run_scheduler_tests(dir)
 
 		@test fetch!(scheduler, job) == 40   # use_len(length([1,2,3,4])) = 4*10
 		@test _N(:t4_get_len) == 1 && _N(:t4_use_len) == 1
+	end
+
+	@testset "Prefetched of preprocessed" begin
+		job1 = create_spec(my_add, 10, 100, 1000; __version=v"1.0.0")
+		job2 = create_spec(Preprocess(t4b_remove_last_arg), job1)
+		job3 = create_spec(my_double, prefetched(job2); __version=v"1.0.0")
+		@test forward!(job3).sr == create_spec(my_double, 110; __version=v"1.0.0").sr
+	end
+
+	@testset "Prefetched of preprocessed with Base.Fix2" begin
+		job1 = create_spec(my_add, 10, 100, 1000; __version=v"1.0.0")
+		job2 = create_spec(Preprocess(t4b_remove_last_arg), job1)
+		job3 = create_spec(my_apply, Base.Fix2(<, prefetched(job2)), 1; __version=v"1.0.0") # Make a version with Fix2 and see if that triggers the bug
+		@test forward!(job3).sr == create_spec(my_apply, Base.Fix2(<, 110), 1; __version=v"1.0.0").sr
 	end
 
 

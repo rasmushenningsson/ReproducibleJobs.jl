@@ -204,12 +204,13 @@ end
 
 
 
-function transfer_op(src::SpecRef{T}, dest::SpecRef{T}) where T
-	if src.op == :call
-		dest.op === :call ? dest : SpecRef(get_sr(dest), :forward) # We can keep Call, but never transfer it (so fallback to standard forwarding)
-	else
-		SpecRef(get_sr(dest), src.op) # Transfer
-	end
+# Eagerness ordering: :forward < :call < :prefetch < :fetch
+# When a dep with op `dep_op` resolves to a new Job, we want the stricter of the two.
+const _op_prio = Dict(:forward=>0, :call=>1, :prefetch=>2, :fetch=>3)
+function apply_op(op, ref::SpecRef{T}) where T
+	# :call must never be transferred to a non-:call dest — :call requires additional ready_to_call checks
+	@assert op !== :call || ref.op === :call
+	_op_prio[op] > _op_prio[ref.op] ? SpecRef(get_sr(ref), op) : ref
 end
 
 

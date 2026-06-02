@@ -138,6 +138,8 @@ function Base.empty!(scheduler::Scheduler)
 	force_empty!(scheduler.lru)
 	# empty!(scheduler.deduplicator) # Hmm. This is problematic, because the user can still have specs, and the deduplicator shouldn't lose track of those.
 
+	scheduler.failed_sr = nothing
+
 	# Shut down the previous worker task
 	close(scheduler.work_channel)
 	close(scheduler.result_channel)
@@ -411,7 +413,8 @@ end
 
 
 function setup_dependency!(scheduler, sr::SpecRun{State}, call::Bool, dep::Job, curr::Job)
-	# curr::Job = dep
+	curr = apply_op(dep.op, curr)
+
 	if call
 		@assert curr.op == :call
 		next = setup_processing!(scheduler, curr)
@@ -419,13 +422,17 @@ function setup_dependency!(scheduler, sr::SpecRun{State}, call::Bool, dep::Job, 
 		# stop before calling (but allow fetch/prefetch to call)
 		next = curr
 
-		override = dep.op === :fetch || (dep.op === :prefetch && !is_preprocessing(sr))
-		while override || (curr.op !== :call && should_forward_child(sr.f, curr.f))
-			# @show override, sr.f, curr.f, curr.op
+		# override = dep.op === :fetch || (dep.op === :prefetch && !is_preprocessing(sr))
+		# while override || (curr.op !== :call && should_forward_child(sr.f, curr.f))
+		# 	next = setup_processing!(scheduler, curr)
+		# 	next isa Job || break
+		# 	curr = next # transfer op?? Nah. I don't think so.
+		# end
+
+		while curr.op === :fetch || (curr.op === :prefetch && !is_preprocessing(sr)) || (curr.op !== :call && should_forward_child(sr.f, curr.f))
 			next = setup_processing!(scheduler, curr)
 			next isa Job || break
-			# @show override, sr.f, curr.f, curr.op, next.op
-			curr = next # transfer op?? Nah. I don't think so.
+			curr = apply_op(curr.op, next)
 		end
 	end
 
@@ -441,6 +448,8 @@ function update_dependency!(scheduler, sr::SpecRun{State}, dep::Job, res)
 	@assert res !== NotValid()
 
 	# TODO: If res is an exception, we should not wait for other upstream jobs to finish.
+
+	res isa Job && (res = apply_op(dep.op, res))
 
 	waiting = sr.state.x::Waiting
 	waiting.upstream[dep] = res
@@ -738,7 +747,7 @@ function process_job!(scheduler::Scheduler, job::Job; once=false)
 			if once || (op in (:forward,:prefetch) && res.op === :call)
 				break # Only take one step / forward is done
 			end
-			job = transfer_op(job, res) # continue processing
+			job = apply_op(job.op, res) # continue processing
 		else
 			@assert !(res isa CompoundResult)
 			break # result
