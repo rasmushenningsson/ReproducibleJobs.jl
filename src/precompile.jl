@@ -38,11 +38,6 @@ _pc_compound(x; __version=v"1.0.0") = CompoundResult(; a=x, b=x+1)
 				write(fp, "hello")
 				cfp = checksummedfilepath_spec(fp)
 				fetch!(cfp)
-
-				# Progress display — WatchableLog
-				logfile = joinpath(dir, "pc_progress.log")
-				set_progress_display!(ProgressDisplay(; io=WatchableLog(logfile, 4)))
-				fetch!(create_spec(identity, 6; __version=v"1.0.0"))
 			end
 		end
 	end
