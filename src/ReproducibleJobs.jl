@@ -144,4 +144,6 @@ let scheduler::Union{Nothing,Scheduler} = nothing
 end
 
 
+include("precompile.jl")
+
 end
