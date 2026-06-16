@@ -11,6 +11,8 @@ using Preferences # For persisting cache dir
 using DataStructures: DataStructures, MutableBinaryMinHeap # For LRU functionality
 using SHA
 
+using ScopedValues # for cancellation
+
 using LinearAlgebra # For handling copy_arg(transposed)
 
 using DataFrames # TODO: Use package extension?
@@ -20,19 +22,23 @@ import AbstractTrees # for pretty printing
 using StyledStrings # For Spec printing
 import Dates # for printing of timestamped paths
 
-using Statistics # just to be able to put `mean` in `SupportedFunctions`...
-
 export
 	Deduplicator,
 	Cache,
 	Scheduler,
-	Spec,
+	# Spec, ?
+	SpecRef,
+	Job,
 	CompoundResult,
 	AbstractPreprocess,
 	Preprocess,
 	TimestampedFilePath,
 	ChecksummedFilePath,
+	ProgressDisplay, # Experimental
+	WatchableLog, # Experimental
 	deduplicate!,
+	is_cancelled,
+	throw_if_cancelled,
 	print_spec,
 	fetch!,
 	forward!,
@@ -43,7 +49,10 @@ export
 	prefetched,
 	ifelse_spec,
 	error_spec,
-	checksummedfilepath_spec
+	checksummedfilepath_spec,
+	get_failed_job,
+	get_failed_spec,
+	set_progress_display! # Experimental
 
 # Use public keyword in Julia versions where it is available
 if VERSION >= v"1.11.0-DEV.469"
@@ -54,7 +63,11 @@ if VERSION >= v"1.11.0-DEV.469"
 			get_cache_path,
 			persist_cache_path!,
 			create_spec,
-			cached
+			cached,
+			get_scheduler,
+			set_scheduler!,
+			with_scheduler,
+			register_function!
 		"""
 		eval(Meta.parse(str))
 	end
@@ -87,6 +100,7 @@ include("cache.jl")
 
 
 # Progress utils
+include("watchable_log.jl")
 include("progress.jl")
 
 
@@ -97,6 +111,7 @@ include("preprocess.jl")
 include("processing_exception.jl")
 include("lru_cache.jl")
 include("scheduler.jl")
+include("scheduler_old.jl") # will be removed
 
 include("paths.jl")
 
@@ -128,5 +143,7 @@ let scheduler::Union{Nothing,Scheduler} = nothing
 	end
 end
 
+
+include("precompile.jl")
 
 end

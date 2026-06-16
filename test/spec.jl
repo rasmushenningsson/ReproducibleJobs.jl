@@ -95,86 +95,86 @@ function _run_spec_tests()
 		spec = create_spec(sin, 1)
 		let s = f(spec)
 			@test s.op === op
-			@test s.sa === spec.sa
+			@test s.sr === spec.sr
 		end
 
 		let t = f((1,spec))
 			@test t[2].op === op
-			@test t[2].sa === spec.sa
+			@test t[2].sr === spec.sr
 		end
 
 		let t2 = f((spec,spec))
 			@test t2[1].op === op
-			@test t2[1].sa === spec.sa
+			@test t2[1].sr === spec.sr
 			@test t2[2].op === op
-			@test t2[2].sa === spec.sa
+			@test t2[2].sr === spec.sr
 		end
 
 		let nt = f((; a=1, b=spec))
 			@test nt.a === 1
 			@test nt.b.op === op
-			@test nt.b.sa === spec.sa
+			@test nt.b.sr === spec.sr
 		end
 
 		let p = f(1=>spec)
 			@test p[1] === 1
 			@test p[2].op === op
-			@test p[2].sa === spec.sa
+			@test p[2].sr === spec.sr
 		end
 		let p2 = f(spec=>2)
 			@test p2[1].op === op
-			@test p2[1].sa === spec.sa
+			@test p2[1].sr === spec.sr
 			@test p2[2] === 2
 		end
 		let p3 = f(spec=>spec)
 			@test p3[1].op === op
-			@test p3[1].sa === spec.sa
+			@test p3[1].sr === spec.sr
 			@test p3[2].op === op
-			@test p3[2].sa === spec.sa
+			@test p3[2].sr === spec.sr
 		end
 
 		let a = f([1,spec])
 			@test a[1] === 1
 			@test a[2].op === op
-			@test a[2].sa === spec.sa
+			@test a[2].sr === spec.sr
 		end
 
 		let dict = f(Dict("key"=>spec))
 			@test only(keys(dict)) == "key"
 			@test dict["key"].op === op
-			@test dict["key"].sa === spec.sa
+			@test dict["key"].sr === spec.sr
 		end
 
 		let dict2 = f(Dict(spec=>"value"))
 			@test only(keys(dict2)).op === op
-			@test only(keys(dict2)).sa === spec.sa
+			@test only(keys(dict2)).sr === spec.sr
 			@test only(values(dict2)) == "value"
 		end
 
 		let set = f(Set((spec,2)))
 			(v1,v2) = set
-			v1 isa Spec || ((v1,v2) = (v2,v1)) # handle that order is not guaranteed
+			v1 isa Job || ((v1,v2) = (v2,v1)) # handle that order is not guaranteed
 			@test v1.op === op
-			@test v1.sa === spec.sa
+			@test v1.sr === spec.sr
 			@test v2 == 2
 		end
 
 		let r = f(Returns(spec))
 			@test r.value.op === op
-			@test r.value.sa === spec.sa
+			@test r.value.sr === spec.sr
 		end
 
 		let fix = f(isequal(spec))
 			@test fix.f === isequal
 			@test fix.x.op === op
-			@test fix.x.sa === spec.sa
+			@test fix.x.sr === spec.sr
 		end
 
 		let c = f(sin∘isequal(spec))
 			@test c.outer === sin
 			@test c.inner.f === isequal
 			@test c.inner.x.op === op
-			@test c.inner.x.sa === spec.sa
+			@test c.inner.x.sr === spec.sr
 		end
 
 		let nested = f(Set([Dict("k"=>[1=>(;a=(spec,))])]))
@@ -191,7 +191,7 @@ function _run_spec_tests()
 			@test t isa Tuple
 			s = only(t)
 			@test s.op === op
-			@test s.sa === spec.sa
+			@test s.sr === spec.sr
 		end
 	end
 end

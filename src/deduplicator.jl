@@ -1,10 +1,8 @@
-deduplicate_type(::Type{T}) where T<:Union{<:Number,String,Symbol,Char,DataType,Colon,Nothing,Missing,VersionNumber,Regex} = false
+deduplicate_type(::Type{T}) where T<:Union{<:Number,String,Symbol,Char,DataType,Nothing,Missing,VersionNumber,Regex} = false
 
 deduplicate_type(::Type{<:AbstractRange{T}}) where T<:Union{Number,Char} = false
 
-# Simple temporary(?) solution for allowing some functions to be used as arguments
-const SupportedFunctions = Union{typeof(identity), typeof(!), typeof(iszero), typeof(ismissing), typeof(isequal), typeof(startswith), typeof(only), typeof(in), typeof(<), typeof(<=), typeof(>), typeof(>=), typeof(==), typeof(!=), typeof(maximum), typeof(minimum), typeof(mean)}
-deduplicate_type(::Type{T}) where T<:SupportedFunctions = false
+deduplicate_type(::Type{<:Function}) = true # Must be true so we can handle `supported_functions`. 
 
 deduplicate_type(::Type{<:Exception}) = false
 
@@ -44,9 +42,15 @@ function deduplication_hash end
 
 
 
+# NB: Colon is a special case, we just use it as a value, but it is actually a function as well. So we need it here.
+const _DEFAULT_SUPPORTED_FUNCTIONS = Function[
+	:, identity, !, iszero, ismissing, isequal, startswith, only, in,
+	<, <=, >, >=, ==, !=, maximum, minimum,
+	something, coalesce,
+	sqrt, abs, abs2,
+]
 
 # TODO: figure out a strategy for cleaning out entries where the weakref is nothing
-
 # Maybe support type param that is only used to ensure return values are typed (because WeakRef doesn't have a type param)
 struct Deduplicator{H}
 	hash_context::H
@@ -54,15 +58,22 @@ struct Deduplicator{H}
 	pointer2obj::Dict{Ptr{Nothing},Tuple{WeakRef,Hash}}
 	hash2obj::Dict{Hash,WeakRef}
 
+	supported_functions::Set{Function}
+
 	# @atomic cleanup_needed::Bool # TODO: Do something like this to keep track of we need to remove old dangling references. Probably a counter though so we don't do it too often.
 end
-Deduplicator(hash_context::H) where H = Deduplicator{H}(hash_context, Dict{Ptr{Nothing},Tuple{WeakRef,Hash}}(), Dict{Hash,WeakRef}())
+function Deduplicator(hash_context::H; supported_functions=Set{Function}(_DEFAULT_SUPPORTED_FUNCTIONS)) where H
+	Deduplicator{H}(hash_context, Dict{Ptr{Nothing},Tuple{WeakRef,Hash}}(), Dict{Hash,WeakRef}(), supported_functions)
+end
 Deduplicator() = Deduplicator(DeduplicatorHashContext())
+
+register_function!(d::Deduplicator, f) = push!(d.supported_functions, f)
 
 
 function Base.empty!(d::Deduplicator)
 	empty!(d.pointer2obj)
 	empty!(d.hash2obj)
+	# supported_functions is intentionally not cleared
 	d
 end
 
@@ -141,6 +152,8 @@ end
 
 function insert_item!(d::Deduplicator, p, x, h)
 	@assert ismutable(x)
+
+	# TODO: Ensure no InterruptException can happen in the when insterting?
 	w = WeakRef(x)
 	# finalizer(..., x) # TODO: Add a finalizer to be able to track when cleanup is needed
 	d.pointer2obj[p] = (w,h)
@@ -155,11 +168,19 @@ function deconstruct end
 function reconstruct end
 
 
-# Default implementation (only possible for deconstructed types)
+# Default implementation (only possible for deconstructed types, and supported functions)
 function deduplication_hash(d, x::T) where T
-	@assert deconstruct_type(T)
-	xd = deconstruct(x)::Tuple
-	compute_hash(d, (type_to_tag(T), hash_or_value.(Ref(d), xd)...))
+	if deconstruct_type(T)
+		xd = deconstruct(x)::Tuple
+		compute_hash(d, (type_to_tag(T), hash_or_value.(Ref(d), xd)...))
+	elseif T <: Function
+		# Do we need to check that the function is in supported_functions here? I don't think so, the check in _deduplicate! should be enough.
+		mod = parentmodule(T)
+		mod = mod === Core ? Base : mod # Allows for functions moving between Core and Base
+		compute_hash(d, (mod, nameof(T)))
+	else
+		error("Cannot compute hash for type: ", T)
+	end
 end
 
 deconstruct_type(::Type{<:Tuple}) = true
@@ -250,20 +271,13 @@ function _deduplicate!(d::Union{Deduplicator,Nothing}, x::T, transfer_ownership:
 
 	already_copied = already_copied || transfer_ownership
 
-	# # TODO: Can we find a nicer way to do this?
-	# if x isa ReadOnlyArray
-	# 	x = parent(x)
-	# 	already_copied = true
-	# else
-	# 	already_copied = transfer_ownership
-	# end
-
-
-	# TESTING
 	if deconstruct_type(T)
 		xd = deconstruct(x)
 		xd = deduplicate_children!(d, xd; transfer_ownership)
 		return reconstruct(T, xd)
+	elseif T <: Function
+		isnothing(d) || x in d.supported_functions || throw(ArgumentError("$x is not a registered function"))
+		return x
 	end
 
 

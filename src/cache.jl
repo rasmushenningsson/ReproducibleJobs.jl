@@ -34,11 +34,11 @@ function deconstruct_weak_rec(cr::CompoundResult) # NB: This is never mean to be
 	CompoundResult(cr.keys, [deconstruct_weak_rec(v) for v in cr.values])
 end
 
-deconstruct_weak_rec(x::Union{<:Number,String,Symbol,Char,DataType,Colon,Nothing,Missing,VersionNumber,Regex}) = x
+deconstruct_weak_rec(x::Union{<:Number,String,Symbol,Char,DataType,Nothing,Missing,VersionNumber,Regex}) = x
 
 deconstruct_weak_rec(x::AbstractUnitRange{T}) where T<:Union{Number,Char} = x
 deconstruct_weak_rec(x::AbstractRange{T}) where T<:Union{Number,Char} = x
-deconstruct_weak_rec(x::SupportedFunctions) = x
+deconstruct_weak_rec(x::Function) = x
 deconstruct_weak_rec(x::ROArray{T,N}) where {T,N} = deconstruct_weak_rec(parent(x))
 deconstruct_weak_rec(x::ROBitArray{N}) where N = deconstruct_weak_rec(parent(x))
 
@@ -59,10 +59,10 @@ function reconstruct_weak_rec(w::WeakRef)
 	value = w.value
 	value !== nothing ? deduplication_postprocess(value) : NotValid() # deduplication_postprocess is used to wrap in ReadOnlyArray
 end
-reconstruct_weak_rec(x::Union{<:Number,String,Symbol,Char,DataType,Colon,Nothing,Missing,VersionNumber,Regex}) = x
+reconstruct_weak_rec(x::Union{<:Number,String,Symbol,Char,DataType,Nothing,Missing,VersionNumber,Regex}) = x
 reconstruct_weak_rec(x::AbstractUnitRange{T}) where T<:Union{Number,Char} = x
 reconstruct_weak_rec(x::AbstractRange{T}) where T<:Union{Number,Char} = x
-reconstruct_weak_rec(x::SupportedFunctions) = x
+reconstruct_weak_rec(x::Function) = x
 
 reconstruct_weak_rec(x::T) where T<:Exception = x
 
@@ -78,8 +78,6 @@ end
 
 
 
-
-
 struct CustomStorage{T}
 	value::T
 end
@@ -89,7 +87,7 @@ function JLD2.writeas(::Type{CustomStorage{T}}) where T
 end
 
 
-# function custom_wrap(x::T) where T<:Union{<:Number,String,Symbol,Char,DataType,Colon,Nothing,Missing}
+# function custom_wrap(x::T) where T<:Union{<:Number,String,Symbol,Char,DataType,Nothing,Missing}
 # 	x
 # end
 
@@ -112,12 +110,6 @@ custom_wrap(x::VersionNumber) = CustomStorage(x)
 JLD2.writeas(::Type{CustomStorage{VersionNumber}}) = String
 JLD2.wconvert(::Type{String}, cs::CustomStorage{VersionNumber}) = string(cs.value)
 JLD2.rconvert(::Type{CustomStorage{VersionNumber}}, value::String) = CustomStorage(VersionNumber(value))
-
-
-custom_wrap(x::SupportedFunctions) = CustomStorage(x)
-JLD2.writeas(::Type{CustomStorage{T}}) where T<:SupportedFunctions = String
-JLD2.wconvert(::Type{String}, cs::CustomStorage{T}) where T<:SupportedFunctions = string(cs.value)
-JLD2.rconvert(::Type{CustomStorage{T}}, value::String) where T<:SupportedFunctions = CustomStorage(getproperty(Base,Symbol(value)))
 
 
 
@@ -168,38 +160,79 @@ function cache_load(cache::Cache, io, name)
 	end
 end
 
-function cache_save(io, name, x::T) where T<:Union{<:Number,String,Symbol,Char,DataType,Colon,Nothing,Missing}
+function cache_save(cache::Cache, io, name, x::T) where T<:Union{<:Number,String,Symbol,Char,DataType,Nothing,Missing}
 	io[name] = x
 	nothing
 end
-function cache_save(io, name, x::T) where T<:Union{VersionNumber,Regex}
+function cache_save(cache::Cache, io, name, x::T) where T<:Union{VersionNumber,Regex}
 	io[name] = custom_wrap(x)
 	nothing
 end
 
-function cache_save(io, name, x::AbstractRange{T}) where T<:Union{Number,Char}
+function cache_save(cache::Cache, io, name, x::AbstractRange{T}) where T<:Union{Number,Char}
 	io[name] = x
 	nothing
 end
 
 
-function cache_save(io, name, x::T) where T<:SupportedFunctions
-	io[name] = custom_wrap(x)
+# Returns, Fix, ComposedFunction are Function subtypes that are handled via deconstruct.
+# These explicit methods take priority over the plain F<:Function method below.
+cache_save(cache::Cache, io, name, x::Returns) = _cache_save_deconstructed(cache, io, name, x)
+cache_save(cache::Cache, io, name, x::Base.Fix) = _cache_save_deconstructed(cache, io, name, x)
+cache_save(cache::Cache, io, name, x::ComposedFunction) = _cache_save_deconstructed(cache, io, name, x)
+
+function _cache_save_deconstructed(cache::Cache, io, name, x::T) where T
+	xd = deconstruct(x)::Tuple
+	g = JLD2.Group(io, name)
+	g["type"] = String(type_to_tag(T).name)
+	g["length"] = length(xd)
+	for (i, xi) in enumerate(xd)
+		cache_save(cache, g, string(i), xi)
+	end
 	nothing
+end
+
+
+cache_save(cache::Cache, io, name, ::Colon) = (g = JLD2.Group(io, name); g["type"] = "Colon"; nothing)
+cache_load(cache::Cache, ::Val{:Colon}, g) = Colon()
+
+function cache_save(cache::Cache, io, name, f::F) where F<:Function
+	f in cache.deduplicator.supported_functions ||
+		error("Function $(nameof(f)) (from module $(parentmodule(F))) is not registered. Call register_function!(deduplicator, f) to register it.")
+	mod = parentmodule(F)
+	mod = mod === Core ? Base : mod # Core is accessible through Base, normalize to avoid breakage if functions move between the two
+	root = Base.moduleroot(mod)
+	pkgid = Base.PkgId(root)
+	g = JLD2.Group(io, name)
+	g["type"] = "Function"
+	g["module"] = string(mod)
+	pkgid.uuid !== nothing && (g["uuid"] = string(pkgid.uuid))
+	fn_name = nameof(f)
+	isdefined(mod, fn_name) && getproperty(mod, fn_name) === f ||
+		error("Cannot save $f: `$mod.$fn_name` does not refer to the function itself. Add a dedicated cache_save/cache_load pair for $(typeof(f)).")
+	g["name"] = string(fn_name)
+	nothing
+end
+
+function _get_module(mod_name::String, uuid::Union{Base.UUID, Nothing})
+	parts = split(mod_name, '.')
+	pkgid = Base.PkgId(uuid, parts[1])
+	root_mod = get(Base.loaded_modules, pkgid, nothing)
+	root_mod !== nothing || error("Cannot find module $mod_name when loading cached function.")
+	foldl((mod, p) -> getproperty(mod, Symbol(p)), parts[2:end]; init=root_mod)
+end
+
+function cache_load(cache::Cache, ::Val{:Function}, g)
+	uuid = haskey(g, "uuid") ? Base.UUID(g["uuid"]::String) : nothing
+	mod = _get_module(g["module"]::String, uuid)
+	getproperty(mod, Symbol(g["name"]::String)) # If this fails, it's probably because the saved function was a Functor.
 end
 
 
 # Default implementation (only possible for deconstructed types)
-function cache_save(io, name, x::T) where T
+function cache_save(cache::Cache, io, name, x::T) where T
 	@assert deconstruct_type(T) "cache_save fallback only available for types that can be deconstructed, got $T."
-	xd = deconstruct(x)::Tuple
-	# Save as a group
-	g = JLD2.Group(io, name)
-	g["type"] = String(type_to_tag(T).name)
-	g["length"] = length(xd)
-	for (i,xi) in enumerate(xd)
-		cache_save(g, string(i), xi)
-	end
+	_cache_save_deconstructed(cache, io, name, x)
 end
 # Default implementation (only possible for deconstructed types)
 function cache_load(cache::Cache, val::Val{S}, g) where S
@@ -235,12 +268,12 @@ function _cache_save_string_array(io, name, type_str, result::Array{T,N}) where 
 	nothing
 end
 
-cache_save(io, name, result::Array{String,N}) where N =
+cache_save(cache::Cache, io, name, result::Array{String,N}) where N =
 	_cache_save_string_array(io, name, "ArrayOfStrings", result)
-cache_save(io, name, result::Array{Symbol,N}) where N =
+cache_save(cache::Cache, io, name, result::Array{Symbol,N}) where N =
 	_cache_save_string_array(io, name, "ArrayOfSymbols", result)
 
-function cache_save(io, name, result::Array{T,N}) where {T,N} # NB: Strings/Symbols are handled above
+function cache_save(cache::Cache, io, name, result::Array{T,N}) where {T,N} # NB: Strings/Symbols are handled above
 	# if store_eltype_inline(T) || isempty(result)
 	if isbitstype(T) || isempty(result)
 		# Rely on JLD2 for inlined eltypes - and to store type info for empty arrays
@@ -255,7 +288,7 @@ function cache_save(io, name, result::Array{T,N}) where {T,N} # NB: Strings/Symb
 		g["type_index"] = type_index
 		for (i,Ti) in enumerate(ut)
 			part = Ti[result[k] for k in eachindex(result) if result[k] isa Ti]
-			cache_save(g, string(i), part)
+			cache_save(cache, g, string(i), part)
 		end
 	else
 		# Save as a group
@@ -263,12 +296,12 @@ function cache_save(io, name, result::Array{T,N}) where {T,N} # NB: Strings/Symb
 		g["type"] = "Array"
 		g["size"] = size(result)
 		for (ind,x) in pairs(result)
-			cache_save(g, _index_to_string(ind), x)
+			cache_save(cache, g, _index_to_string(ind), x)
 		end
 	end
 	nothing
 end
-cache_save(io, name, result::ROArray{T,N}) where {T,N} = cache_save(io, name, parent(result))
+cache_save(cache::Cache, io, name, result::ROArray{T,N}) where {T,N} = cache_save(cache, io, name, parent(result))
 
 
 function _cache_load_string_array(::Type{T}, cache::Cache, g, sz::NTuple{N,Int}) where {T,N}
@@ -328,7 +361,7 @@ end
 
 
 
-function cache_save(io, name, result::ROBitArray{N}) where N
+function cache_save(cache::Cache, io, name, result::ROBitArray{N}) where N
 	# Unwrap ROBitArray into BitArray and rely on JLD2 handling of the BitArray. This implicitly relies on BitArray internals, but we don't need to explicitly deal with them here...
 	# We could consider using CustomStorage, but then we need some way to construct a BitArray from chunks and there is no public interface for that.
 	io[name] = parent(result)
@@ -336,13 +369,13 @@ function cache_save(io, name, result::ROBitArray{N}) where N
 end
 
 
-function cache_save(io, name, result::T) where T<:NamedTuple
+function cache_save(cache::Cache, io, name, result::T) where T<:NamedTuple
 	# Save as a group
 	g = JLD2.Group(io, name)
 	g["type"] = "NamedTuple"
 	g["keys"] = keys(result)
 	for (i,x) in enumerate(result)
-		cache_save(g, string(i), x)
+		cache_save(cache, g, string(i), x)
 	end
 	nothing
 end
@@ -352,12 +385,12 @@ function cache_load(cache::Cache, ::Val{:NamedTuple}, g)
 end
 
 
-function cache_save(io, name, result::Dict{K,V}) where {K,V}
+function cache_save(cache::Cache, io, name, result::Dict{K,V}) where {K,V}
 	# Save as a group of keys and values
 	g = JLD2.Group(io, name)
 	g["type"] = "Dict"
-	cache_save(g, "keys", collect(keys(result)))
-	cache_save(g, "values", collect(values(result)))
+	cache_save(cache, g, "keys", collect(keys(result)))
+	cache_save(cache, g, "values", collect(values(result)))
 	nothing
 end
 function cache_load(cache::Cache, ::Val{:Dict}, g)
@@ -369,13 +402,13 @@ function cache_load(cache::Cache, ::Val{:Dict}, g)
 end
 
 
-function cache_save(io, name, df::DataFrame)
+function cache_save(cache::Cache, io, name, df::DataFrame)
 	# Save as a group
 	g = JLD2.Group(io, name)
 	g["type"] = "DataFrame"
 	g["names"] = names(df)
 	for (i,col) in enumerate(eachcol(df))
-		cache_save(g, string(i), col)
+		cache_save(cache, g, string(i), col)
 	end
 	nothing
 end
@@ -390,14 +423,14 @@ end
 
 
 # Experimental CompoundResult support.
-function cache_save(io, name, cr::CompoundResult)
+function cache_save(cache::Cache, io, name, cr::CompoundResult)
 	# Save as a group
 	g = JLD2.Group(io, name)
 	g["type"] = "CompoundResult"
 	g["keys"] = parent(cr.keys)
 	for (i,v) in pairs(cr.values)
 		v isa CompoundResult && error("Nested CompoundResults are not (yet?) implemented.")
-		cache_save(g, string(i), v)
+		cache_save(cache, g, string(i), v)
 	end
 end
 function cache_load(cache::Cache, ::Val{:CompoundResult}, g)
@@ -448,11 +481,22 @@ end
 # assumes deduplicate! has already been called on result
 function _save_file(cache::Cache{K}, key::K, fp, result) where K
 	isdir(cache.dir) || mkdir(cache.dir)
-	jldopen(fp, "w"; compress=ZstdFilter()) do io # should we set compression level?
-		# cache_save(io, "key", key)
-		cache_save(io, "root", result)
+
+	tmp_fp = joinpath(dirname(fp), "tmp_" * basename(fp))
+	try
+		jldopen(tmp_fp, "w"; compress=ZstdFilter()) do io # should we set compression level?
+			# cache_save(cache, io, "key", key)
+			cache_save(cache, io, "root", result)
+		end
+		mv(tmp_fp, fp)
+	catch
+		isfile(tmp_fp) && rm(tmp_fp)
+		rethrow()
 	end
 end
+
+
+cache_haskey(cache::Cache{K}, key::K) where K = isfile(key2path(cache, key))
 
 
 function cache_get!(f, cache::Cache{K}, key::K) where K
@@ -461,6 +505,7 @@ function cache_get!(f, cache::Cache{K}, key::K) where K
 	isfile(fp) && return _load_file(cache, key, fp) # This should deduplicate already
 
 	result = f()
+	@assert result !== NotValid()
 	# result isa CompoundResult && throw(ArgumentError("Cannot retrieve CompoundResult directly from cache. You must specify sub-result(s) using cached(key,sub...)."))
 	result = deduplicate!(cache.deduplicator, result; transfer_ownership=true)
 	!(result isa Exception) && _save_file(cache, key, fp, result)
