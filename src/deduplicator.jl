@@ -46,6 +46,7 @@ function deduplication_hash end
 const _DEFAULT_SUPPORTED_FUNCTIONS = Function[
 	:, identity, !, iszero, ismissing, isequal, startswith, only, in,
 	<, <=, >, >=, ==, !=, maximum, minimum,
+	something, coalesce,
 	sqrt, abs, abs2,
 ]
 
