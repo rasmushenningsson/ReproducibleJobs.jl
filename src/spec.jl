@@ -532,6 +532,17 @@ function _show_result(io::IO, w::WeakRef)
 		print(io, styled"{red:Evicted}")
 	end
 end
+function _show_result(io::IO, dw::DeconstructedWeak{R}) where R
+	v = reconstruct_weak_rec(dw)
+	if v !== NotValid()
+		print(io, "DeconstructedWeak(")
+		_show_result(io, v)
+		print(io, ")")
+	else
+		print(io, styled"{red:DeconstructedWeak\{$R\}}")
+	end
+end
+
 
 function show_spec_ref(io, ref::SpecRef; show_result=true)
 	if get(io,:compact,false)
