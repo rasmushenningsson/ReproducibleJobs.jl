@@ -1,3 +1,22 @@
+"""
+    WatchableLog(filename, nlines)
+
+A file-backed log that overwrites itself from the top on every tick, keeping at most `nlines`
+visible. Useful for redirecting [`ProgressDisplay`](@ref) output when stdout is not a TTY.
+The file ends with `--- Done ---` when a call to [`fetch!`](@ref)/[`forward!`](@ref) completes.
+
+Watch it live with `watch -n 0.1 --color "cat filename"` or just `cat filename` on demand.
+
+!!! note "Experimental"
+    This API is experimental and may change.
+
+# Examples
+```julia
+set_progress_display!(ProgressDisplay(; io=WatchableLog("progress.log", 8)))
+```
+
+See also [`ProgressDisplay`](@ref), [`set_progress_display!`](@ref).
+"""
 mutable struct WatchableLog
     file::IO
     nlines::Int            # max lines visible in the file at once

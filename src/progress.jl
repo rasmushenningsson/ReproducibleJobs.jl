@@ -81,6 +81,20 @@ end
 
 const ProgressMessageUnion = Union{ProgressMessageAddItem, ProgressMessageSetText, ProgressMessageRemoveItem, ProgressMessageInfo}
 
+"""
+    ProgressDisplay(; io=stdout, min_display_time=0.1, print_interval=0.05)
+
+A live progress display that shows active computation steps, progress bars, and timing
+information. Output is written to `io`, which can be an `IO` stream or a [`WatchableLog`](@ref).
+
+Used by the [`Scheduler`](@ref) to show what is currently being computed. Can be customized via
+[`set_progress_display!`](@ref).
+
+!!! note "Experimental"
+    This API is experimental and may change.
+
+See also [`set_progress_display!`](@ref), [`WatchableLog`](@ref), [`ProgressBar`](@ref).
+"""
 mutable struct ProgressDisplay
 	io::Union{IO, WatchableLog}
 	nlines::Int # the number of active lines
@@ -284,6 +298,19 @@ end
 
 
 
+"""
+    ProgressBar(text; n_chars=40)
+    ProgressBar(pd::ProgressDisplay, text; n_chars=40)
+
+A callable progress bar for use inside long-running computations. Call `pb(n)` to start with
+`n` total steps, then `pb()` to advance one step. The bar is automatically removed from the
+display when all steps are completed.
+
+!!! note "Experimental"
+    This API is experimental and may change.
+
+See also [`ProgressDisplay`](@ref).
+"""
 struct ProgressBar
 	pd::ProgressDisplay
 	text::Union{String,AnnotatedString}

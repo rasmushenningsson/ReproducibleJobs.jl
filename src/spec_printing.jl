@@ -505,6 +505,13 @@ function build_print_node(context, value; prefix="")
 end
 
 
+"""
+    print_spec([io::IO], job; kwargs...)
+
+Print a tree representation of the spec graph rooted at `job`. Shared sub-specs are shown
+with numbered references to avoid duplication. Keyword arguments are forwarded to
+`AbstractTrees.print_tree` (e.g. `maxdepth`).
+"""
 function print_spec(io::IO, ref::SpecRef; kwargs...)
 	context = PrintContext(; line_length=displaysize(io)[2])
 	tree = build_print_node(context, ref)

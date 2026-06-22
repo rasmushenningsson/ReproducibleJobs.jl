@@ -1,4 +1,11 @@
-# NB: If we change how TimestampedFilePath works, we must change its stable_hash too.
+"""
+    TimestampedFilePath(path::String)
+
+A file path wrapper that captures the file's modification time (`mtime`) at construction.
+Used as a spec argument so that file changes invalidate cached computations.
+
+See also [`ChecksummedFilePath`](@ref), [`checksummedfilepath_spec`](@ref).
+"""
 struct TimestampedFilePath
 	path::String
 	timestamp::Float64
@@ -25,7 +32,16 @@ function Base.show(io::IO, ts::TimestampedFilePath)
 end
 
 
-# NB: If we change how ChecksummedFilePath works, we must change its stable_hash too.
+"""
+    ChecksummedFilePath(path::String)
+    ChecksummedFilePath(ts::TimestampedFilePath)
+
+A file path wrapper that captures the file's SHA-256 checksum. Equality is based solely on
+the checksum, so cached results survive file renames or moves as long as the content is
+unchanged.
+
+See also [`TimestampedFilePath`](@ref), [`checksummedfilepath_spec`](@ref).
+"""
 struct ChecksummedFilePath
 	path::String
 	timestamp::Float64
@@ -68,6 +84,21 @@ Base.show(io::IO, x::ChecksummedFilePath) = print(io, "ChecksummedFilePath(", x.
 
 
 
+"""
+    checksummedfilepath_spec(path; kwargs...) -> Job
+    checksummedfilepath_spec(ts::TimestampedFilePath; kwargs...) -> Job
+
+Create a [`Job`](@ref) that computes and caches a [`ChecksummedFilePath`](@ref) from a file
+path or [`TimestampedFilePath`](@ref). The result is prefetched to ensure that the hash of a spec
+containing a `ChecksummedFilePath` only depends on the file checksum and not the current path or
+modification time.
+
+!!! warning
+	Must be used by all specs referring to files! Otherwise, changing the file on disk will not
+	result in recomputation.
+
+See also [`ChecksummedFilePath`](@ref), [`TimestampedFilePath`](@ref).
+"""
 checksummedfilepath_spec(ts::TimestampedFilePath; kwargs...) =
 	prefetched(cached(create_spec(checksummedfilepath, ts; kwargs..., __version=v"0.1.0")))
 checksummedfilepath_spec(fp::AbstractString; kwargs...) =

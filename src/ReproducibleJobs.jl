@@ -86,7 +86,24 @@ const ROBitVec = ROBitArray{1}
 const ROBitMat = ROBitArray{2}
 
 
+"""
+    persist_cache_path!(path::String)
+
+Persist the path to the on-disk cache directory in LocalPreferences.toml, using Preferences.jl.
+This path is used by [`Scheduler`](@ref) to store cached computation results.
+
+See also [`get_cache_path`](@ref).
+"""
 persist_cache_path!(path::String) = @set_preferences!("cache_path"=>expanduser(path))
+
+"""
+    get_cache_path() -> String
+
+Return the path to the on-disk cache directory, defaulting to `".cache"` if not previously set via
+[`persist_cache_path!`](@ref).
+
+See also [`persist_cache_path!`](@ref).
+"""
 get_cache_path() = @something @load_preference("cache_path") ".cache"
 
 
@@ -121,8 +138,43 @@ include("error.jl")
 include("spec_printing.jl")
 
 
-# Do this to allow setting a custom scheduler/cache for unit tests (even when just including "runtests.jl").
-# Might be refactored later.
+"""
+    get_scheduler() -> Scheduler
+
+Return the global [`Scheduler`](@ref), creating a default one if none has been set.
+
+See also [`set_scheduler!`](@ref), [`with_scheduler`](@ref).
+"""
+function get_scheduler end
+
+"""
+    set_scheduler!(scheduler)
+
+Set the global [`Scheduler`](@ref).
+
+See also [`get_scheduler`](@ref), [`with_scheduler`](@ref).
+"""
+function set_scheduler! end
+
+"""
+    with_scheduler(f, scheduler)
+
+Execute `f()` with `scheduler` as the global [`Scheduler`](@ref), restoring the previous
+scheduler afterwards. This is the recommended way to use a custom scheduler for a block of code.
+Mostly useful for unit testing.
+
+# Examples
+```julia
+with_scheduler(Scheduler(; dir=mktempdir())) do
+    job = create_spec(my_function, data; __version=v"0.1.0")
+    fetch!(job)
+end
+```
+
+See also [`Scheduler`](@ref), [`get_scheduler`](@ref), [`set_scheduler!`](@ref).
+"""
+function with_scheduler end
+
 let scheduler::Union{Nothing,Scheduler} = nothing
 	global function get_scheduler()::Scheduler
 		scheduler = @something scheduler Scheduler()

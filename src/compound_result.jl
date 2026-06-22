@@ -1,3 +1,19 @@
+"""
+    CompoundResult(; kwargs...)
+
+A named collection of heterogeneous results from a single computation.
+
+Used with [`cached`](@ref) to store multi-output computations on disk and load individual
+sub-results without loading the entire result. Construct with keyword arguments where keys
+become string names and values are the individual results.
+
+# Examples
+```julia
+CompoundResult(; values, indices)
+```
+
+See also [`cached`](@ref).
+"""
 struct CompoundResult{T}
 	keys::ROVec{String}
 	values::Vector{T}

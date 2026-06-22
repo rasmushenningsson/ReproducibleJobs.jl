@@ -1,3 +1,15 @@
+"""
+    Spec
+
+A specification of a computation: a function `f` plus positional `args` and keyword `kwargs`.
+Specs are the immutable building blocks of the computation graph — they describe *what* to
+compute without holding any execution state.
+
+Users typically don't construct `Spec` directly; use [`create_spec`](@ref) instead, which
+handles deduplication automatically.
+
+See also [`Job`](@ref), [`create_spec`](@ref), [`SpecRef`](@ref).
+"""
 struct Spec
 	f::Any
 	args::Vector{Any}
@@ -10,6 +22,18 @@ struct Spec
 end
 
 
+"""
+    SpecRun{T}
+
+The live, deduplicated handle for a [`Spec`](@ref). Holds the current execution `state`, which
+progresses through `Initialized` → `Waiting` → `Processing` → `Next`/`Result`/`Errored`.
+Here, `Next` indicates that the spec was preprocessed, producing a new spec.
+
+Users interact with `SpecRun` indirectly through [`Job`](@ref) (which is `SpecRef{State}`).
+The underlying function, args and kwargs are accessible via `.f`, `.args`, `.kwargs`.
+
+See also [`Spec`](@ref), [`SpecRef`](@ref), [`Job`](@ref).
+"""
 mutable struct SpecRun{T}
 	const spec::Spec
 	state::T
@@ -17,6 +41,26 @@ end
 SpecRun(sr::SpecRun) = sr
 
 
+"""
+    SpecRef{T}
+
+A reference to a [`SpecRun`](@ref) with an operation symbol (`op`) that controls how it is processed
+when used as an argument to another spec.
+
+The `op` field is one of:
+
+* `:forward` - standard.
+* `:call` - used internally to signal that the spec is ready for computation.
+* `:fetch` - compute the spec and replaced it with the computed value immediately. This is used to
+get access to a computed value during preprocessing.
+* `:prefetch` - replace the spec with the value just before computing the parent spec. Note that
+this affects the hash of the parent spec that is computed, and it is an important tool for avoiding
+unnecessary recomputations.
+
+Access the underlying function, args and kwargs via `ref.f`, `ref.args`, `ref.kwargs`.
+
+See also [`Job`](@ref), [`fetch!`](@ref), [`forward!`](@ref).
+"""
 struct SpecRef{T}
 	sr::SpecRun{T}
 	op::Symbol # :forward, :call, :fetch or :prefetch
@@ -73,6 +117,17 @@ struct State
 end
 
 
+"""
+    Job
+
+The primary user-facing type, a type alias for `SpecRef{State}`.
+
+A `Job` represents a computation that can be executed via [`fetch!`](@ref) (compute and return
+result) or inspected via [`forward!`](@ref) (preprocess only). Jobs are created by
+[`create_spec`](@ref) and user-facing functions for creating specific Jobs.
+
+See also [`SpecRef`](@ref), [`fetch!`](@ref), [`forward!`](@ref), [`create_spec`](@ref).
+"""
 const Job = SpecRef{State}
 
 
@@ -97,6 +152,23 @@ SpecRun(spec::Spec) = SpecRun(spec, state_initialized())
 
 
 
+"""
+    create_spec(f, args...; kwargs...) -> Job
+
+Create a [`Job`](@ref) representing the computation `f(args...; kwargs...)`.
+
+All computing specs must include a `__version` keyword argument that affects the spec hash (and is
+stripped before calling `f`). The spec is automatically deduplicated using the current scheduler's
+deduplicator, so structurally identical specs share the same `SpecRun`.
+
+# Examples
+```julia
+job = create_spec(my_function, input_data; some_value=10, __version=v"0.1.0")
+result = fetch!(job)
+```
+
+See also [`Job`](@ref), [`fetch!`](@ref), [`cached`](@ref).
+"""
 function create_spec(f, args...; scheduler=get_scheduler(), deduplicator=scheduler.deduplicator, kwargs...)
 	a = collect(Any, args)
 	kw = collect(Pair{Symbol,Any}, kwargs)
@@ -372,7 +444,21 @@ _prefetched(::Any) = nothing
 _prefetched(ref::SpecRef) = SpecRef(ref.sr, :prefetch)
 
 
+"""
+    fetched(x)
+
+Mark all [`Job`](@ref) references within `x` with `:fetch` operation, so that they will be computed
+and their results available when the parent spec is (pre)processed.
+"""
 fetched(x) = map_specs(_fetched, x)
+
+"""
+    prefetched(x)
+
+Mark all [`Job`](@ref) references within `x` with `:prefetch` operation, so that they will be
+replaced by their computed value, just before computing the parent spec. This is used to ensure the
+parent spec's hash is affected by the argument value, not the spec.
+"""
 prefetched(x) = map_specs(_prefetched, x)
 
 

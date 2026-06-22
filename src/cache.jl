@@ -1,4 +1,13 @@
-struct Cache{K,H}
+"""
+    Cache(::Type{K}, deduplicator; dir=get_cache_path())
+
+On-disk cache for computed results. The key type `K` must implement `deduplication_pointer`.
+Results are stored as JLD2 files in `dir`, named by key hash. Loaded results are automatically
+deduplicated.
+
+See also [`cached`](@ref), [`Scheduler`](@ref).
+"""
+struct Cache{K,H} # Consider getting rid of K
 	deduplicator::Deduplicator{H}
 
 	# On-disk cache

@@ -50,8 +50,29 @@ const _DEFAULT_SUPPORTED_FUNCTIONS = Function[
 	sqrt, abs, abs2,
 ]
 
-# TODO: figure out a strategy for cleaning out entries where the weakref is nothing
-# Maybe support type param that is only used to ensure return values are typed (because WeakRef doesn't have a type param)
+"""
+    Deduplicator(; supported_functions=...)
+
+Ensures that structurally equal mutable objects share the same memory reference.
+
+Uses content hashing (via `StableHashTraits`) to identify equal objects and a pointer-to-weakref
+map to track live objects.
+
+Only types implementing `deduplicate_type` and other functions defining the exact deduplication
+behavior, can be used with the deduplicator.
+
+!!! warning "Read-only"
+    All objects in the deduplicator are considered read-only. Mutating an object that is tracked
+    by the deduplicator is considered undefined behavior.
+    As much as possible, the deduplicator enforces this, but Julia does not have a proper
+    mechanism for marking objects as read-only, so in the end, it is up to the user to respect
+    this convention.
+    Deduplicated arrays are wrapped in `ReadOnlyArray`, to make it easier for the user to avoid
+    mutating by mistake. But for some types like `Dict` or `SparseMatrixCSC`, there is no practical
+    way to enforce it, so they are returned as is.
+
+See also [`deduplicate!`](@ref).
+"""
 struct Deduplicator{H}
 	hash_context::H
 
@@ -67,6 +88,20 @@ function Deduplicator(hash_context::H; supported_functions=Set{Function}(_DEFAUL
 end
 Deduplicator() = Deduplicator(DeduplicatorHashContext())
 
+# TODO: figure out a strategy for cleaning out Deduplicator entries where the weakref is nothing..
+# Maybe support type param that is only used to ensure return values are typed (because WeakRef doesn't have a type param).
+
+
+
+"""
+    register_function!(deduplicator, f)
+
+Register a function `f` so that it can be used in specs and stored in the on-disk cache.
+
+Only registered functions can appear as the `f` argument to [`create_spec`](@ref) or as values
+inside spec args/kwargs. Common functions (e.g. `identity`, `!`, `in`, comparisons) are
+registered by default.
+"""
 register_function!(d::Deduplicator, f) = push!(d.supported_functions, f)
 
 
@@ -161,7 +196,7 @@ function insert_item!(d::Deduplicator, p, x, h)
 end
 
 
-# TESTING
+
 deconstruct_type(::Type{T}) where T = false
 
 function deconstruct end
@@ -336,8 +371,16 @@ function deduplicate_impl!(d::Union{Deduplicator,Nothing}, x::T, transfer_owners
 end
 
 
-# public
-# TODO: can we find a better name than transfer_ownership?
+"""
+    deduplicate!(deduplicator, x; transfer_ownership=false)
+
+Deduplicate `x` using `deduplicator`, returning a structurally equal object that shares memory
+with any previously deduplicated equal object. Arrays in the result are wrapped in `ReadOnlyArray`.
+
+When `transfer_ownership=true`, the deduplicator is allowed to take ownership of `x`'s memory
+directly (skipping the copy step), which is appropriate when `x` is a freshly computed result
+that will not be mutated.
+"""
 function deduplicate!(d::Union{Deduplicator,Nothing}, x::T; transfer_ownership=false) where T
 	already_copied = deduplication_type_already_copied(T)
 	x = deduplication_preprocess(x)

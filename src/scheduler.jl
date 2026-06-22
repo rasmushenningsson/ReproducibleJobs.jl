@@ -19,11 +19,39 @@ end
 const WorkUnion = Union{WorkCompute, WorkPreprocess, WorkDeduplicateResult, WorkCacheGet, WorkSubGet}
 
 const CANCELLED = ScopedValue(Threads.Atomic{Bool}(false))
+
+"""
+    is_cancelled() -> Bool
+
+Return `true` if the current computation has been cancelled (e.g. by an `InterruptException` -
+Ctrl+C).
+"""
 is_cancelled() = CANCELLED[][]
+
+"""
+    throw_if_cancelled()
+
+Throw a `CancelledException` if the current computation has been cancelled. Can be called
+regularly from within long-running computations to allow early termination.
+"""
 throw_if_cancelled() = is_cancelled() && throw(CancelledException())
 _cancel!() = CANCELLED[][] = true
 
 
+"""
+    Scheduler(; dir=get_cache_path(), lru_item_capacity=200, lru_mem_capacity=..., lru_mem_fraction=0.1)
+    Scheduler(deduplicator; dir=get_cache_path(), kwargs...)
+    Scheduler(cache; lru_item_capacity=200, kwargs...)
+
+Async executor for specs. Owns a [`Deduplicator`](@ref), a [`Cache`](@ref), and an LRU cache
+for recently computed results. Processes jobs by forwarding through preprocessing steps, then
+computing results in a worker task.
+
+Use [`with_scheduler`](@ref) to set a scheduler for a block of code, or [`get_scheduler`](@ref) /
+[`set_scheduler!`](@ref) to manage the global scheduler.
+
+See also [`fetch!`](@ref), [`forward!`](@ref), [`Job`](@ref).
+"""
 mutable struct Scheduler{H}
 	deduplicator::Deduplicator{H}
 
@@ -80,9 +108,23 @@ Scheduler(; kwargs...) = Scheduler(Deduplicator(); kwargs...)
 
 
 register_function!(scheduler::Scheduler, f) = register_function!(scheduler.deduplicator, f)
+
 register_function!(f) = register_function!(get_scheduler(), f)
 
 
+"""
+    set_progress_display!([scheduler,] pd::ProgressDisplay)
+
+Set the progress display used by the scheduler. The no-argument scheduler form uses the global
+scheduler.
+
+# Examples
+```julia
+set_progress_display!(ProgressDisplay(; io=WatchableLog("progress.log", 8)))
+```
+
+See also [`ProgressDisplay`](@ref), [`WatchableLog`](@ref).
+"""
 function set_progress_display!(scheduler::Scheduler, pd::ProgressDisplay)
 	scheduler.progress_display = pd
 	scheduler
@@ -190,9 +232,26 @@ function get_result!(scheduler::Scheduler, sr::SpecRun)
 	res
 end
 
+"""
+    get_failed_job(scheduler=get_scheduler())
+
+Return the [`Job`](@ref) for the most recently failed computation, or `nothing` if no failure
+has occurred. Useful for debugging after a `ProcessingException`.
+
+See also [`get_failed_spec`](@ref).
+"""
 get_failed_job(scheduler::Scheduler) = isnothing(scheduler.failed_sr) ? nothing : Job(scheduler.failed_sr)
 get_failed_job() = get_failed_job(get_scheduler())
 
+"""
+    get_failed_spec(scheduler=get_scheduler())
+
+Return the innermost `Spec` that caused the most recent failure, or `nothing`.
+Note that resolved argument specs are replaced by their actual values, so we can inspect the
+actual values that made the computation/preprocessing fail.
+
+See also [`get_failed_job`](@ref).
+"""
 function get_failed_spec(scheduler::Scheduler)
 	sr = scheduler.failed_sr
 	sr === nothing && return nothing
@@ -396,6 +455,24 @@ function compoundresult_sub end
 function compoundresult_keys end
 function get_cached end
 
+"""
+    cached(job) -> Job
+    cached(job, sub::String) -> Job
+
+Activate on-disk caching for `job`. When `sub` is provided, only the named sub-result of a
+[`CompoundResult`](@ref) is loaded from disk, avoiding loading the entire result.
+
+# Examples
+```julia
+cached_job = cached(create_spec(expensive_function, data; __version=v"0.1.0"))
+```
+
+```julia
+U_job = cached(svd_job, "U")  # load only the U factor
+```
+
+See also [`CompoundResult`](@ref), [`Cache`](@ref).
+"""
 function cached(job::Job, sub::Union{Nothing,String}=nothing; return_keys::Bool=false)
 	@assert sub==nothing || return_keys==false
 
@@ -790,8 +867,36 @@ function process!(scheduler::Scheduler, job::Job; once=false)
 	end
 end
 
+"""
+    fetch!([scheduler,] job) -> result
+
+Execute the computation represented by `job` and return the result. All preprocessing steps
+and dependencies are resolved first. Results are cached in the LRU cache and, if the job was
+created with [`cached`](@ref), also on disk.
+
+See also [`forward!`](@ref), [`Job`](@ref).
+"""
 fetch!(scheduler::Scheduler, job::Job; kwargs...) = process!(scheduler, Job(get_sr(job), :fetch); kwargs...)
+
+"""
+    forward!([scheduler,] job) -> Job
+
+Run preprocessing steps on `job` without computing the final result. Returns the forwarded
+[`Job`](@ref) with all preprocessing resolved. This can be useful for inspecting and understanding
+how a spec is preprocessed.
+
+See also [`fetch!`](@ref), [`forward_once!`](@ref).
+"""
 forward!(scheduler::Scheduler, job::Job; kwargs...) = process!(scheduler, Job(get_sr(job), :forward); kwargs...)
+
+"""
+    forward_once!([scheduler,] job) -> Job
+
+Run a single preprocessing step on `job`, returning the resulting [`Job`](@ref). This can be useful
+for inspecting and understanding how a spec is preprocessed.
+
+See also [`forward!`](@ref).
+"""
 forward_once!(scheduler::Scheduler, job::Job; kwargs...) = process!(scheduler, Job(get_sr(job), :forward); kwargs..., once=true)
 
 fetch!(job::Job; kwargs...) = fetch!(get_scheduler(), job; kwargs...)
