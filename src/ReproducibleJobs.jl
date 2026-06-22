@@ -26,7 +26,7 @@ export
 	Deduplicator,
 	Cache,
 	Scheduler,
-	# Spec, ?
+	Spec,
 	SpecRef,
 	Job,
 	CompoundResult,
@@ -43,7 +43,6 @@ export
 	fetch!,
 	forward!,
 	forward_once!,
-	forward_once,
 	fetched,
 	prefetched,
 	ifelse_spec,
