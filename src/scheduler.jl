@@ -107,8 +107,18 @@ Scheduler(; kwargs...) = Scheduler(Deduplicator(); kwargs...)
 
 
 
+"""
+    register_function!(scheduler, f)
+
+Register a function in the scheduler's deduplicator.
+"""
 register_function!(scheduler::Scheduler, f) = register_function!(scheduler.deduplicator, f)
 
+"""
+    register_function!(f)
+
+Register a function in the global scheduler (the one retrieved by [`get_scheduler`](@ref)).
+"""
 register_function!(f) = register_function!(get_scheduler(), f)
 
 
