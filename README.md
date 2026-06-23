@@ -1,5 +1,10 @@
 # ReproducibleJobs.jl
 
+[![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://rasmushenningsson.github.io/ReproducibleJobs.jl/stable/)
+[![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://rasmushenningsson.github.io/ReproducibleJobs.jl/dev/)
+[![Build Status](https://github.com/rasmushenningsson/ReproducibleJobs.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/rasmushenningsson/ReproducibleJobs.jl/actions/workflows/CI.yml?query=branch%3Amain)
+
+
 ReproducibleJobs.jl is a framework for reproducible analyses of scientific data, that is based on the following ideas:
 
 * The burden of reproducibility should be moved from the user to the packages they use for analysis, when possible.
