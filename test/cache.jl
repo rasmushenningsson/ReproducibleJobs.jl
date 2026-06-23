@@ -313,6 +313,7 @@ function run_cache_storage_tests()
 			@test deduplicate!(cache.deduplicator, x3) === x3
 
 			h5open(key2path(cache, key), "r") do h5
+				pkgversion(HDF5) >= v"0.17.3" && return # TEMP workaround, see https://github.com/HDFGroup/hdf5/issues/6409
 				@test read(h5, "root") == x
 
 				types, custom = extract_jld2_types(h5)
@@ -339,6 +340,7 @@ function run_cache_storage_tests()
 			@test deduplicate!(cache.deduplicator, x3) === x3
 
 			h5open(key2path(cache, key), "r") do h5
+				pkgversion(HDF5) >= v"0.17.3" && return # TEMP workaround
 				@test read(h5, "root") == x
 
 				types, custom = extract_jld2_types(h5)
@@ -365,6 +367,7 @@ function run_cache_storage_tests()
 			@test deduplicate!(cache.deduplicator, x3) === x3
 
 			h5open(key2path(cache, key), "r") do h5
+				pkgversion(HDF5) >= v"0.17.3" && return # TEMP workaround
 				@test read(h5, "root") == x
 
 				types, custom = extract_jld2_types(h5)
@@ -391,6 +394,7 @@ function run_cache_storage_tests()
 			@test deduplicate!(cache.deduplicator, x3) === x3
 
 			h5open(key2path(cache, key), "r") do h5
+				pkgversion(HDF5) >= v"0.17.3" && return # TEMP workaround
 				root = h5["root"]
 				@test read(root, "type") == "Tuple"
 				@test read(root, "length") == 3
@@ -420,6 +424,7 @@ function run_cache_storage_tests()
 			@test deduplicate!(cache.deduplicator, x3) === x3
 
 			h5open(key2path(cache, key), "r") do h5
+				pkgversion(HDF5) >= v"0.17.3" && return # TEMP workaround
 				root = h5["root"]
 				@test read(root, "type") == "NamedTuple"
 				@test read(root, "keys") == (; var"1"="c", var"2"="b", var"3"="a")
@@ -453,6 +458,7 @@ function run_cache_storage_tests()
 			@test deduplicate!(cache.deduplicator, x3) === x3
 
 			h5open(key2path(cache, key), "r") do h5
+				pkgversion(HDF5) >= v"0.17.3" && return # TEMP workaround
 				root = h5["root"]
 				@test read(root, "type") == "Pair"
 				@test read(root, "length") == 2
@@ -483,6 +489,7 @@ function run_cache_storage_tests()
 			@test deduplicate!(cache.deduplicator, x3) === x3
 
 			h5open(key2path(cache, key), "r") do h5
+				pkgversion(HDF5) >= v"0.17.3" && return # TEMP workaround
 				root = h5["root"]
 				@test read(root, "type") == "Dict"
 				keys = _load_array_of_strings(String, root["keys"])
@@ -515,6 +522,7 @@ function run_cache_storage_tests()
 			@test deduplicate!(cache.deduplicator, x3) === x3
 
 			h5open(key2path(cache, key), "r") do h5
+				pkgversion(HDF5) >= v"0.17.3" && return # TEMP workaround
 				root = h5["root"]
 				@test read(root, "type") == "Set"
 				@test read(root, "length") == 1
@@ -545,6 +553,7 @@ function run_cache_storage_tests()
 			@test x3 === x
 
 			h5open(key2path(cache, key), "r") do h5
+				pkgversion(HDF5) >= v"0.17.3" && return # TEMP workaround
 				@test h5["root"] isa HDF5.Group
 				@test read(h5["root"]["type"]) == "Function"
 				@test read(h5["root"]["name"]) == str
@@ -581,6 +590,7 @@ function run_cache_storage_tests()
 			@test x3 === Colon()
 
 			h5open(key2path(cache, key), "r") do h5
+				pkgversion(HDF5) >= v"0.17.3" && return # TEMP workaround
 				@test h5["root"] isa HDF5.Group
 				@test read(h5["root"]["type"]) == "Colon"
 			end
@@ -605,6 +615,7 @@ function run_cache_storage_tests()
 		@test deduplicate!(cache.deduplicator, x3) === x3
 
 		h5open(key2path(cache, key), "r") do h5
+			pkgversion(HDF5) >= v"0.17.3" && return # TEMP workaround
 			# We already test the ability to read back the contents using JLD2, so no need to test the values here.
 
 			types, custom = extract_jld2_types(h5)
@@ -633,6 +644,7 @@ function run_cache_storage_tests()
 		@test deduplicate!(cache.deduplicator, x3) === x3
 
 		h5open(key2path(cache, key), "r") do h5
+			pkgversion(HDF5) >= v"0.17.3" && return # TEMP workaround
 			# We already test the ability to read back the contents using JLD2, so no need to test the values here.
 
 			types, custom = extract_jld2_types(h5)
@@ -663,6 +675,7 @@ function run_cache_storage_tests()
 			@test deduplicate!(cache.deduplicator, x3) === x3
 
 			h5open(key2path(cache, key), "r") do h5
+				pkgversion(HDF5) >= v"0.17.3" && return # TEMP workaround
 				root = h5["root"]
 				@test T.(_load_array_of_strings(T, root)) == x
 
@@ -694,6 +707,7 @@ function run_cache_storage_tests()
 
 			# Test that the value was properly written using CustomStorage
 			h5open(key2path(cache, key), "r") do h5
+				pkgversion(HDF5) >= v"0.17.3" && return # TEMP workaround
 				# We already test the ability to read back the contents using JLD2, so no need to test the values here.
 
 				types, custom = extract_jld2_types(h5)
@@ -728,6 +742,7 @@ function run_cache_storage_tests()
 
 			# Test that the value was properly written using CustomStorage
 			h5open(key2path(cache, key), "r") do h5
+				pkgversion(HDF5) >= v"0.17.3" && return # TEMP workaround
 				root = read(h5, "root")
 				@test root == repr(x)
 
@@ -758,6 +773,7 @@ function run_cache_storage_tests()
 
 			# Test that the value was properly written using CustomStorage
 			h5open(key2path(cache, key), "r") do h5
+				pkgversion(HDF5) >= v"0.17.3" && return # TEMP workaround
 				root = read(h5, "root")
 				@test root == string(x)
 
@@ -789,6 +805,7 @@ function run_cache_storage_tests()
 
 		# Test that the value was properly written using Groups and CustomStorage
 		h5open(key2path(cache, key), "r") do h5
+			pkgversion(HDF5) >= v"0.17.3" && return # TEMP workaround
 			root = h5["root"]
 			@test read(root, "type") == "Array"
 			@test read(root, "1") == [1,5,2]
@@ -819,6 +836,7 @@ function run_cache_storage_tests()
 
 		# Test that the value was properly written using Groups and CustomStorage
 		h5open(key2path(cache, key), "r") do h5
+			pkgversion(HDF5) >= v"0.17.3" && return # TEMP workaround
 			root = h5["root"]
 			@test read(root, "type") == "$T"
 			@test read(root, "length") == 1
@@ -849,6 +867,7 @@ function run_cache_storage_tests()
 
 		# Test that the value was properly written using Groups and CustomStorage
 		h5open(key2path(cache, key), "r") do h5
+			pkgversion(HDF5) >= v"0.17.3" && return # TEMP workaround
 			root = h5["root"]
 			@test read(root, "type") == "SparseMatrixCSC"
 			@test read(root, "length") == 5
@@ -882,6 +901,7 @@ function run_cache_storage_tests()
 		@test deduplicate!(cache.deduplicator, x3) === x3
 
 		h5open(key2path(cache, key), "r") do h5
+			pkgversion(HDF5) >= v"0.17.3" && return # TEMP workaround
 			root = h5["root"]
 			@test read(root, "type") == "SparseVector"
 			@test read(root, "length") == 3
@@ -914,6 +934,7 @@ function run_cache_storage_tests()
 
 		# Test that the value was properly written using Groups and CustomStorage
 		h5open(key2path(cache, key), "r") do h5
+			pkgversion(HDF5) >= v"0.17.3" && return # TEMP workaround
 			root = h5["root"]
 			@test read(root["type"]) == "DataFrame"
 			@test read(root["names"]) == ["a", "b"]
@@ -951,6 +972,7 @@ function run_cache_storage_tests()
 
 		# Test that the value was properly written using Groups and CustomStorage
 		h5open(key2path(cache, key), "r") do h5
+			pkgversion(HDF5) >= v"0.17.3" && return # TEMP workaround
 			root = h5["root"]
 			@test read(root, "type") == "Array"
 			@test read(root, "size") == (; var"1"=2,)
@@ -984,6 +1006,7 @@ function run_cache_storage_tests()
 			@test deduplicate!(cache.deduplicator, x3) === x3
 
 			h5open(key2path(cache, key), "r") do h5
+				pkgversion(HDF5) >= v"0.17.3" && return # TEMP workaround
 				root = h5["root"]
 				@test read(root, "type") == "Returns"
 				@test read(root, "length") == 1
@@ -1012,6 +1035,7 @@ function run_cache_storage_tests()
 			@test deduplicate!(cache.deduplicator, x3) === x3
 
 			h5open(key2path(cache, key), "r") do h5
+				pkgversion(HDF5) >= v"0.17.3" && return # TEMP workaround
 				root = h5["root"]
 				@test read(root, "type") == "Returns"
 				@test read(root, "length") == 1
@@ -1045,6 +1069,7 @@ function run_cache_storage_tests()
 			@test deduplicate!(cache.deduplicator, x3) === x3
 
 			h5open(key2path(cache, key), "r") do h5
+				pkgversion(HDF5) >= v"0.17.3" && return # TEMP workaround
 				root = h5["root"]
 				@test read(root, "type") == "Fix"
 				@test read(root, "length") == 3
@@ -1078,6 +1103,7 @@ function run_cache_storage_tests()
 			@test deduplicate!(cache.deduplicator, x3) === x3
 
 			h5open(key2path(cache, key), "r") do h5
+				pkgversion(HDF5) >= v"0.17.3" && return # TEMP workaround
 				root = h5["root"]
 				@test read(root, "type") == "Fix"
 				@test read(root, "length") == 3
@@ -1116,6 +1142,7 @@ function run_cache_storage_tests()
 			@test deduplicate!(cache.deduplicator, x3) === x3
 
 			h5open(key2path(cache, key), "r") do h5
+				pkgversion(HDF5) >= v"0.17.3" && return # TEMP workaround
 				root = h5["root"]
 				@test read(root, "type") == "ComposedFunction"
 				@test read(root, "length") == 2
@@ -1150,6 +1177,7 @@ function run_cache_storage_tests()
 			@test deduplicate!(cache.deduplicator, x3) === x3
 
 			h5open(key2path(cache, key), "r") do h5
+				pkgversion(HDF5) >= v"0.17.3" && return # TEMP workaround
 				root = h5["root"]
 				@test read(root, "type") == "ComposedFunction"
 				@test read(root, "length") == 2
@@ -1197,6 +1225,7 @@ function run_cache_storage_tests()
 				@test deduplicate!(cache.deduplicator, x3) === x3
 
 				h5open(key2path(cache, key), "r") do h5
+					pkgversion(HDF5) >= v"0.17.3" && return # TEMP workaround
 					root = h5["root"]
 
 					if T <: ROVec
@@ -1265,6 +1294,7 @@ function run_cache_storage_tests()
 
 			# Test that the value was properly written using Groups and CustomStorage
 			h5open(key2path(cache, key), "r") do h5
+				pkgversion(HDF5) >= v"0.17.3" && return # TEMP workaround
 				root = h5["root"]
 				@test read(root["1"], "type") == "Tuple"
 				@test read(root["2"], "type") == "Pair"
@@ -1324,6 +1354,7 @@ function run_cache_storage_tests()
 			@test deduplicate!(cache.deduplicator, w2) === w2
 
 			h5open(key2path(cache, key), "r") do h5
+				pkgversion(HDF5) >= v"0.17.3" && return # TEMP workaround
 				root = h5["root"]
 				@test read(root, "type") == "CompoundResult"
 				@test read(root, "keys") == ["sub", "sub2"]
@@ -1363,6 +1394,7 @@ function run_cache_storage_tests()
 			@test deduplicate!(cache.deduplicator, x3) === x3
 
 			h5open(key2path(cache, key), "r") do h5
+				pkgversion(HDF5) >= v"0.17.3" && return # TEMP workaround
 				root = h5["root"]
 
 				# Type indices
@@ -1405,6 +1437,7 @@ function run_cache_storage_tests()
 			@test deduplicate!(cache.deduplicator, x3) === x3
 
 			h5open(key2path(cache, key), "r") do h5
+				pkgversion(HDF5) >= v"0.17.3" && return # TEMP workaround
 				@test read(h5, "root") == x
 
 				types, custom = extract_jld2_types(h5)
@@ -1430,6 +1463,7 @@ function run_cache_storage_tests()
 			@test deduplicate!(cache.deduplicator, x3) === x3
 
 			h5open(key2path(cache, key), "r") do h5
+				pkgversion(HDF5) >= v"0.17.3" && return # TEMP workaround
 				root = h5["root"]
 				stored = _load_array_of_strings(String, root)
 				@test isempty(stored)
@@ -1460,6 +1494,7 @@ function run_cache_storage_tests()
 			@test deduplicate!(cache.deduplicator, x3) === x3
 
 			h5open(key2path(cache, key), "r") do h5
+				pkgversion(HDF5) >= v"0.17.3" && return # TEMP workaround
 				root = h5["root"]
 				@test read(root, "type") == "SparseMatrixCSC"
 				@test read(root, "length") == 5
