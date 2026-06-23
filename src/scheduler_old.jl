@@ -31,8 +31,8 @@ end
 
 
 function _fetch_and_compute_cached!(scheduler, sr::SpecRun, deps::Vector{Job})
-	inner_spec = sr.args[1]::Job
-	inner_sr = get_sr(inner_spec)
+	inner_job = sr.args[1]::Job
+	inner_sr = get_sr(inner_job)
 	inner_deps = get_dependencies(inner_sr)
 	@assert all(s->s.op === :call, inner_deps) # The outer call has enforced all inner specs to be calls has well.
 

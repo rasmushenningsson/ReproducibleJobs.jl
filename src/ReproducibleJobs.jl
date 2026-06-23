@@ -45,9 +45,9 @@ export
 	forward_once!,
 	fetched,
 	prefetched,
-	ifelse_spec,
-	error_spec,
-	checksummedfilepath_spec,
+	ifelse_job,
+	error_job,
+	checksummedfilepath_job,
 	get_failed_job,
 	get_failed_spec,
 	set_progress_display! # Experimental
@@ -60,7 +60,7 @@ if VERSION >= v"1.11.0-DEV.469"
 			ProgressBar, # experimental
 			get_cache_path,
 			persist_cache_path!,
-			create_spec,
+			create_job,
 			cached,
 			get_scheduler,
 			set_scheduler!,
@@ -165,7 +165,7 @@ Mostly useful for unit testing.
 # Examples
 ```julia
 with_scheduler(Scheduler(; dir=mktempdir())) do
-    job = create_spec(my_function, data; __version=v"0.1.0")
+    job = create_job(my_function, data; __version=v"0.1.0")
     fetch!(job)
 end
 ```

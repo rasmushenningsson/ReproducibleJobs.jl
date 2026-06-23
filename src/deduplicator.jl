@@ -98,7 +98,7 @@ Deduplicator() = Deduplicator(DeduplicatorHashContext())
 
 Register a function `f` so that it can be used in specs and stored in the on-disk cache.
 
-Only registered functions can appear as the `f` argument to [`create_spec`](@ref) or as values
+Only registered functions can appear as the `f` argument to [`create_job`](@ref) or as values
 inside spec args/kwargs. Common functions (e.g. `identity`, `!`, `in`, comparisons) are
 registered by default.
 """

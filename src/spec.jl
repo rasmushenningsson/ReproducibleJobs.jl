@@ -5,10 +5,10 @@ A specification of a computation: a function `f` plus positional `args` and keyw
 Specs are the immutable building blocks of the computation graph — they describe *what* to
 compute without holding any execution state.
 
-Users typically don't construct `Spec` directly; use [`create_spec`](@ref) instead, which
+Users typically don't construct `Spec` directly; use [`create_job`](@ref) instead, which
 handles deduplication automatically.
 
-See also [`Job`](@ref), [`create_spec`](@ref), [`SpecRef`](@ref).
+See also [`Job`](@ref), [`create_job`](@ref), [`SpecRef`](@ref).
 """
 struct Spec
 	f::Any
@@ -124,9 +124,9 @@ The primary user-facing type, a type alias for `SpecRef{State}`.
 
 A `Job` represents a computation that can be executed via [`fetch!`](@ref) (compute and return
 result) or inspected via [`forward!`](@ref) (preprocess only). Jobs are created by
-[`create_spec`](@ref) and user-facing functions for creating specific Jobs.
+[`create_job`](@ref) and user-facing functions for creating specific Jobs.
 
-See also [`SpecRef`](@ref), [`fetch!`](@ref), [`forward!`](@ref), [`create_spec`](@ref).
+See also [`SpecRef`](@ref), [`fetch!`](@ref), [`forward!`](@ref), [`create_job`](@ref).
 """
 const Job = SpecRef{State}
 
@@ -153,7 +153,7 @@ SpecRun(spec::Spec) = SpecRun(spec, state_initialized())
 
 
 """
-    create_spec(f, args...; kwargs...) -> Job
+    create_job(f, args...; kwargs...) -> Job
 
 Create a [`Job`](@ref) representing the computation `f(args...; kwargs...)`.
 
@@ -163,20 +163,20 @@ deduplicator, so structurally identical specs share the same `SpecRun`.
 
 # Examples
 ```julia
-job = create_spec(my_function, input_data; some_value=10, __version=v"0.1.0")
+job = create_job(my_function, input_data; some_value=10, __version=v"0.1.0")
 result = fetch!(job)
 ```
 
 See also [`Job`](@ref), [`fetch!`](@ref), [`cached`](@ref).
 """
-function create_spec(f, args...; scheduler=get_scheduler(), deduplicator=scheduler.deduplicator, kwargs...)
+function create_job(f, args...; scheduler=get_scheduler(), deduplicator=scheduler.deduplicator, kwargs...)
 	a = collect(Any, args)
 	kw = collect(Pair{Symbol,Any}, kwargs)
 	sort!(kw; by=first)
 	sr = SpecRun(Spec(f, a, kw))
 
 	deduplicator !== nothing && (sr = deduplicate!(deduplicator, sr))
-	SpecRef(sr)
+	Job(sr)
 end
 
 

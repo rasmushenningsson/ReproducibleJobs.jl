@@ -1,7 +1,7 @@
 """
-    error_spec(args...) -> Job
+    error_job(args...) -> Job
 
 Create a [`Job`](@ref) that throws an error with the given arguments when computed.
-Useful together with [`ifelse_spec`](@ref).
+Useful together with [`ifelse_job`](@ref).
 """
-error_spec(args...) = create_spec(error, args...; __version=v"0.1.0")
+error_job(args...) = create_job(error, args...; __version=v"0.1.0")

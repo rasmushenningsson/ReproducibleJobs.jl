@@ -3,7 +3,7 @@
 
 using Test
 using ReproducibleJobs
-using ReproducibleJobs: create_spec, with_scheduler, Preprocessing, ProcessingException, cached
+using ReproducibleJobs: create_job, with_scheduler, Preprocessing, ProcessingException, cached
 
 
 # All test functions must be at module scope (named, non-closure) so the
@@ -25,29 +25,29 @@ t1_f(x; __version=v"1.0.0") = (_C(:t1_f); 2x)
 
 # Test 2 — single preprocessing step
 t2_double(x; __version=v"1.0.0")       = (_C(:t2_double); 2x)
-t2_step1(::Preprocessing, x_job)       = (_C(:t2_step1); create_spec(t2_double, x_job; __version=v"1.0.0"))
+t2_step1(::Preprocessing, x_job)       = (_C(:t2_step1); create_job(t2_double, x_job; __version=v"1.0.0"))
 
 # Test 3 — two-level preprocessing
-t3_inner(::Preprocessing, x_job) = (_C(:t3_inner); create_spec(my_double, x_job; __version=v"1.0.0"))
-t3_outer(::Preprocessing, x_job) = (_C(:t3_outer); create_spec(Preprocess(t3_inner), x_job))
+t3_inner(::Preprocessing, x_job) = (_C(:t3_inner); create_job(my_double, x_job; __version=v"1.0.0"))
+t3_outer(::Preprocessing, x_job) = (_C(:t3_outer); create_job(Preprocess(t3_inner), x_job))
 
 # Test 4 — prefetched dep in preprocessing output
 t4_get_len(x; __version=v"1.0.0") = (_C(:t4_get_len); length(x))
 t4_use_len(n; __version=v"1.0.0") = (_C(:t4_use_len); n * 10)
-function t4_make_len_spec(::Preprocessing, data_job)
-	len_spec = create_spec(t4_get_len, data_job; __version=v"1.0.0")
-	create_spec(t4_use_len, prefetched(len_spec); __version=v"1.0.0")
+function t4_make_len_job(::Preprocessing, data_job)
+	len_job = create_job(t4_get_len, data_job; __version=v"1.0.0")
+	create_job(t4_use_len, prefetched(len_job); __version=v"1.0.0")
 end
 
 # Test 4b
 function t4b_remove_last_arg(::Preprocessing, inner)
-	create_spec(inner.f, inner.args[1:end-1]...; inner.kwargs...)
+	create_job(inner.f, inner.args[1:end-1]...; inner.kwargs...)
 end
 
 
 # Test 5 — should_forward_child: preprocessing dep of normal spec
 t5_double(x; __version=v"1.0.0")    = (_C(:t5_double); 2x)
-t5_preproc(::Preprocessing, x_job)  = (_C(:t5_preproc); create_spec(t5_double, x_job; __version=v"1.0.0"))
+t5_preproc(::Preprocessing, x_job)  = (_C(:t5_preproc); create_job(t5_double, x_job; __version=v"1.0.0"))
 
 # Test 6 — should_forward_child: normal dep of preprocessing spec
 t6_dep_fn(x; __version=v"1.0.0") = (_C(:t6_dep); x * 3)
@@ -55,7 +55,7 @@ const t6_dep_was_job = Ref(false)  # verified after preprocessing returns
 function t6_preproc(::Preprocessing, dep_job)
 	_C(:t6_preproc)
 	t6_dep_was_job[] = (dep_job isa Job)
-	create_spec(my_double, dep_job; __version=v"1.0.0")
+	create_job(my_double, dep_job; __version=v"1.0.0")
 end
 
 # Test 7 — error propagation
@@ -71,22 +71,22 @@ const t_fetched_dep_was_value = Ref(false)
 function t_fetched_preproc_fn(::Preprocessing, dep)
 	_C(:t_fetched_preproc)
 	t_fetched_dep_was_value[] = !(dep isa Job)
-	create_spec(my_double, dep; __version=v"1.0.0")
+	create_job(my_double, dep; __version=v"1.0.0")
 end
 
 # Test 10 — Preprocess{false} runs after Preprocess{true}
-t_late_early_fn(::Preprocessing, x_job) = (_C(:t_late_early); create_spec(my_double, x_job; __version=v"1.0.0"))
+t_late_early_fn(::Preprocessing, x_job) = (_C(:t_late_early); create_job(my_double, x_job; __version=v"1.0.0"))
 function t_late_late_fn(::Preprocessing, x_job)
 	_C(:t_late_late)
-	create_spec(my_add, x_job, 10; __version=v"1.0.0")
+	create_job(my_add, x_job, 10; __version=v"1.0.0")
 end
 
 # Test 11 — error in preprocessing
 t_bad_preproc_fn(::Preprocessing, x) = error("preproc failure")
 
 # Test 13 — forward_once! stepping (uses t7_bad for ProcessingException; test 12 has no new fns)
-t_step_inner(::Preprocessing, x_job) = (_C(:t_step_inner); create_spec(my_double, x_job; __version=v"1.0.0"))
-t_step_outer(::Preprocessing, x_job) = (_C(:t_step_outer); create_spec(Preprocess(t_step_inner), x_job))
+t_step_inner(::Preprocessing, x_job) = (_C(:t_step_inner); create_job(my_double, x_job; __version=v"1.0.0"))
+t_step_outer(::Preprocessing, x_job) = (_C(:t_step_outer); create_job(Preprocess(t_step_inner), x_job))
 
 # Tests 14–15 — on-disk caching
 t_cached_fn(x; __version=v"1.0.0")   = (_C(:t_cached); x * 3)
@@ -113,7 +113,7 @@ function _run_scheduler_tests(dir)
 
 	@testset "No preprocessing" begin
 		_CALLS[:t1_f] = 0
-		job = create_spec(t1_f, 5; __version=v"1.0.0")
+		job = create_job(t1_f, 5; __version=v"1.0.0")
 
 		# forward returns :call immediately — nothing to preprocess
 		fwd = forward!(scheduler, job)
@@ -131,8 +131,8 @@ function _run_scheduler_tests(dir)
 
 	@testset "Single preprocessing step" begin
 		_CALLS[:t2_step1] = _CALLS[:t2_double] = 0
-		leaf      = create_spec(my_val, 7; __version=v"1.0.0")
-		chain_job = create_spec(Preprocess(t2_step1), leaf)
+		leaf      = create_job(my_val, 7; __version=v"1.0.0")
+		chain_job = create_job(Preprocess(t2_step1), leaf)
 
 		fwd1 = forward_once!(scheduler, chain_job)
 		@test fwd1 isa Job
@@ -150,8 +150,8 @@ function _run_scheduler_tests(dir)
 
 	@testset "forward_once vs forward — two-level preprocessing" begin
 		_CALLS[:t3_outer] = _CALLS[:t3_inner] = 0
-		leaf = create_spec(my_val, 3; __version=v"1.0.0")
-		job  = create_spec(Preprocess(t3_outer), leaf)
+		leaf = create_job(my_val, 3; __version=v"1.0.0")
+		job  = create_job(Preprocess(t3_outer), leaf)
 
 		# one step: outer runs, inner does not
 		fwd1 = forward_once!(scheduler, job)
@@ -169,33 +169,33 @@ function _run_scheduler_tests(dir)
 
 	@testset "Prefetched dep in preprocessing output" begin
 		_CALLS[:t4_get_len] = _CALLS[:t4_use_len] = 0
-		data_job = create_spec(my_val, [1, 2, 3, 4]; __version=v"1.0.0")
-		job      = create_spec(Preprocess(t4_make_len_spec), data_job)
+		data_job = create_job(my_val, [1, 2, 3, 4]; __version=v"1.0.0")
+		job      = create_job(Preprocess(t4_make_len_job), data_job)
 
 		@test fetch!(scheduler, job) == 40   # use_len(length([1,2,3,4])) = 4*10
 		@test _N(:t4_get_len) == 1 && _N(:t4_use_len) == 1
 	end
 
 	@testset "Prefetched of preprocessed" begin
-		job1 = create_spec(my_add, 10, 100, 1000; __version=v"1.0.0")
-		job2 = create_spec(Preprocess(t4b_remove_last_arg), job1)
-		job3 = create_spec(my_double, prefetched(job2); __version=v"1.0.0")
-		@test forward!(job3).sr == create_spec(my_double, 110; __version=v"1.0.0").sr
+		job1 = create_job(my_add, 10, 100, 1000; __version=v"1.0.0")
+		job2 = create_job(Preprocess(t4b_remove_last_arg), job1)
+		job3 = create_job(my_double, prefetched(job2); __version=v"1.0.0")
+		@test forward!(job3).sr == create_job(my_double, 110; __version=v"1.0.0").sr
 	end
 
 	@testset "Prefetched of preprocessed with Base.Fix2" begin
-		job1 = create_spec(my_add, 10, 100, 1000; __version=v"1.0.0")
-		job2 = create_spec(Preprocess(t4b_remove_last_arg), job1)
-		job3 = create_spec(my_apply, Base.Fix2(<, prefetched(job2)), 1; __version=v"1.0.0") # Make a version with Fix2 and see if that triggers the bug
-		@test forward!(job3).sr == create_spec(my_apply, Base.Fix2(<, 110), 1; __version=v"1.0.0").sr
+		job1 = create_job(my_add, 10, 100, 1000; __version=v"1.0.0")
+		job2 = create_job(Preprocess(t4b_remove_last_arg), job1)
+		job3 = create_job(my_apply, Base.Fix2(<, prefetched(job2)), 1; __version=v"1.0.0") # Make a version with Fix2 and see if that triggers the bug
+		@test forward!(job3).sr == create_job(my_apply, Base.Fix2(<, 110), 1; __version=v"1.0.0").sr
 	end
 
 
 	@testset "should_forward_child — preprocessing dep of normal spec is forwarded" begin
 		_CALLS[:t5_preproc] = _CALLS[:t5_double] = 0
-		leaf        = create_spec(my_val, 5; __version=v"1.0.0")
-		preproc_job = create_spec(Preprocess(t5_preproc), leaf)
-		parent_job  = create_spec(my_add, preproc_job, 1; __version=v"1.0.0")
+		leaf        = create_job(my_val, 5; __version=v"1.0.0")
+		preproc_job = create_job(Preprocess(t5_preproc), leaf)
+		parent_job  = create_job(my_add, preproc_job, 1; __version=v"1.0.0")
 
 		# forwarding the parent triggers forwarding of the preprocessing dep
 		fwd = forward!(scheduler, parent_job)
@@ -210,8 +210,8 @@ function _run_scheduler_tests(dir)
 	@testset "should_forward_child — normal dep of preprocessing spec is not forwarded" begin
 		_CALLS[:t6_preproc] = _CALLS[:t6_dep] = 0
 		t6_dep_was_job[] = false
-		dep_job = create_spec(t6_dep_fn, 4; __version=v"1.0.0")
-		job     = create_spec(Preprocess(t6_preproc), dep_job)
+		dep_job = create_job(t6_dep_fn, 4; __version=v"1.0.0")
+		job     = create_job(Preprocess(t6_preproc), dep_job)
 
 		forward!(scheduler, job)
 		@test _N(:t6_preproc) == 1
@@ -224,8 +224,8 @@ function _run_scheduler_tests(dir)
 
 
 	@testset "Error propagation" begin
-		dep_job    = create_spec(t7_bad, 0; __version=v"1.0.0")
-		parent_job = create_spec(t7_parent, dep_job; __version=v"1.0.0")
+		dep_job    = create_job(t7_bad, 0; __version=v"1.0.0")
+		parent_job = create_job(t7_parent, dep_job; __version=v"1.0.0")
 
 		@test_throws "intentional failure" fetch!(scheduler, parent_job)
 	end
@@ -233,10 +233,10 @@ function _run_scheduler_tests(dir)
 
 	@testset "DAG sharing — shared dep computed once" begin
 		_CALLS[:t_dag] = 0
-		leaf    = create_spec(my_val, 100; __version=v"1.0.0")
-		dep     = create_spec(t_dag_fn, leaf; __version=v"1.0.0")
-		parent1 = create_spec(my_add, dep, 0; __version=v"1.0.0")
-		parent2 = create_spec(my_add, dep, 1000; __version=v"1.0.0")
+		leaf    = create_job(my_val, 100; __version=v"1.0.0")
+		dep     = create_job(t_dag_fn, leaf; __version=v"1.0.0")
+		parent1 = create_job(my_add, dep, 0; __version=v"1.0.0")
+		parent2 = create_job(my_add, dep, 1000; __version=v"1.0.0")
 
 		r1 = fetch!(scheduler, parent1)
 		r2 = fetch!(scheduler, parent2)
@@ -249,9 +249,9 @@ function _run_scheduler_tests(dir)
 	@testset "fetched dep is computed before preprocessing runs" begin
 		_CALLS[:t_fetched_dep] = _CALLS[:t_fetched_preproc] = 0
 		t_fetched_dep_was_value[] = false
-		leaf = create_spec(my_val, 11; __version=v"1.0.0")
-		dep  = create_spec(t_fetched_dep_fn, leaf; __version=v"1.0.0")
-		job  = create_spec(Preprocess(t_fetched_preproc_fn), fetched(dep))
+		leaf = create_job(my_val, 11; __version=v"1.0.0")
+		dep  = create_job(t_fetched_dep_fn, leaf; __version=v"1.0.0")
+		job  = create_job(Preprocess(t_fetched_preproc_fn), fetched(dep))
 
 		# During forwarding, the fetched dep is computed; preprocessing receives its VALUE
 		fwd = forward!(scheduler, job)
@@ -267,9 +267,9 @@ function _run_scheduler_tests(dir)
 
 	@testset "Preprocess{false} runs after Preprocess{true}" begin
 		_CALLS[:t_late_early] = _CALLS[:t_late_late] = 0
-		leaf      = create_spec(my_val, 30; __version=v"1.0.0")
-		early_job = create_spec(Preprocess(t_late_early_fn), leaf)          # early: doubles x
-		job       = create_spec(Preprocess{false}(t_late_late_fn), early_job)  # late: adds 10
+		leaf      = create_job(my_val, 30; __version=v"1.0.0")
+		early_job = create_job(Preprocess(t_late_early_fn), leaf)          # early: doubles x
+		job       = create_job(Preprocess{false}(t_late_late_fn), early_job)  # late: adds 10
 
 		fwd = forward!(scheduler, job)
 		@test fwd isa Job && fwd.op === :call
@@ -281,15 +281,15 @@ function _run_scheduler_tests(dir)
 
 
 	@testset "Error in preprocessing" begin
-		dep_job = create_spec(my_val, 200; __version=v"1.0.0")
-		job     = create_spec(Preprocess(t_bad_preproc_fn), dep_job)
+		dep_job = create_job(my_val, 200; __version=v"1.0.0")
+		job     = create_job(Preprocess(t_bad_preproc_fn), dep_job)
 		@test_throws "preproc failure" fetch!(scheduler, job)
 	end
 
 
 	@testset "ProcessingException structure" begin
-		dep_job    = create_spec(t7_bad, 99; __version=v"1.0.0")
-		parent_job = create_spec(t7_parent, dep_job; __version=v"1.0.0")
+		dep_job    = create_job(t7_bad, 99; __version=v"1.0.0")
+		parent_job = create_job(t7_parent, dep_job; __version=v"1.0.0")
 		exc = nothing
 		try
 			fetch!(scheduler, parent_job)
@@ -305,8 +305,8 @@ function _run_scheduler_tests(dir)
 
 	@testset "forward_once! stepping" begin
 		_CALLS[:t_step_inner] = _CALLS[:t_step_outer] = 0
-		leaf = create_spec(my_val, 42; __version=v"1.0.0")
-		job  = create_spec(Preprocess(t_step_outer), leaf)
+		leaf = create_job(my_val, 42; __version=v"1.0.0")
+		job  = create_job(Preprocess(t_step_outer), leaf)
 
 		# step 1: outer runs, inner does not
 		fwd1 = forward_once!(scheduler, job)
@@ -328,7 +328,7 @@ function _run_scheduler_tests(dir)
 
 	@testset "Cached on-disk — second scheduler finds result" begin
 		_CALLS[:t_cached] = 0
-		inner = create_spec(t_cached_fn, 7; __version=v"1.0.0")
+		inner = create_job(t_cached_fn, 7; __version=v"1.0.0")
 		job   = cached(inner)
 
 		r1 = fetch!(scheduler, job)
@@ -347,7 +347,7 @@ function _run_scheduler_tests(dir)
 
 	@testset "Cached CompoundResult sub-results" begin
 		_CALLS[:t_compound] = 0
-		inner = create_spec(t_compound_fn, 5; __version=v"1.0.0")
+		inner = create_job(t_compound_fn, 5; __version=v"1.0.0")
 		sub_a = cached(inner, "a")
 		sub_b = cached(inner, "b")
 
@@ -362,13 +362,13 @@ function _run_scheduler_tests(dir)
 		fp  = joinpath(dir, "ts_test.txt")
 		write(fp, "version1")
 		ts1  = TimestampedFilePath(fp)
-		job1 = create_spec(t_read_tfp, ts1; __version=v"1.0.0")
+		job1 = create_job(t_read_tfp, ts1; __version=v"1.0.0")
 		@test fetch!(scheduler, job1) == "version1"
 		@test _N(:t_read_tfp) == 1
 
 		# Artificially different timestamp → different spec → must recompute
 		ts2  = TimestampedFilePath(ts1.path, ts1.timestamp + 1.0)
-		job2 = create_spec(t_read_tfp, ts2; __version=v"1.0.0")
+		job2 = create_job(t_read_tfp, ts2; __version=v"1.0.0")
 		@test job2 !== job1
 		@test fetch!(scheduler, job2) == "version1"   # same file, different spec
 		@test _N(:t_read_tfp) == 2
@@ -379,14 +379,14 @@ function _run_scheduler_tests(dir)
 		fp   = joinpath(dir, "cfp_test.txt")
 		write(fp, "stable content")
 		cfp1 = ChecksummedFilePath(fp)
-		job1 = create_spec(t_read_cfp, cfp1; __version=v"1.0.0")
+		job1 = create_job(t_read_cfp, cfp1; __version=v"1.0.0")
 		@test fetch!(scheduler, job1) == "stable content"
 		@test _N(:t_read_cfp) == 1
 
 		# Same checksum, different timestamp → same spec (hash is checksum-only)
 		cfp2 = ChecksummedFilePath(cfp1.path, cfp1.timestamp + 100.0, cfp1.checksum)
 		@test isequal(cfp1, cfp2)   # isequal by checksum
-		job2 = create_spec(t_read_cfp, cfp2; __version=v"1.0.0")
+		job2 = create_job(t_read_cfp, cfp2; __version=v"1.0.0")
 		@test job2 === job1   # deduplicated to the same Job
 		@test _N(:t_read_cfp) == 1   # not recomputed
 
@@ -394,7 +394,7 @@ function _run_scheduler_tests(dir)
 		write(fp, "new content")
 		cfp3 = ChecksummedFilePath(fp)
 		@test !isequal(cfp1, cfp3)
-		job3 = create_spec(t_read_cfp, cfp3; __version=v"1.0.0")
+		job3 = create_job(t_read_cfp, cfp3; __version=v"1.0.0")
 		@test job3 !== job1
 		@test fetch!(scheduler, job3) == "new content"
 		@test _N(:t_read_cfp) == 2
@@ -402,7 +402,7 @@ function _run_scheduler_tests(dir)
 
 
 	@testset "failed job — nothing before any error" begin
-		ok_job = create_spec(my_double, 1; __version=v"1.0.0")
+		ok_job = create_job(my_double, 1; __version=v"1.0.0")
 		fetch!(scheduler, ok_job)
 		@test get_failed_job(scheduler) === nothing
 		@test get_failed_spec(scheduler) === nothing
@@ -411,8 +411,8 @@ function _run_scheduler_tests(dir)
 
 	@testset "failed job — set on fresh error, cleared on next success" begin
 		# fresh error: unique arg to avoid caching from other tests
-		inner_job = create_spec(my_double, 99; __version=v"1.0.0")
-		job = create_spec(my_err, inner_job; __version=v"1.0.0")
+		inner_job = create_job(my_double, 99; __version=v"1.0.0")
+		job = create_job(my_err, inner_job; __version=v"1.0.0")
 		try fetch!(scheduler, job) catch end
 		@test get_failed_job(scheduler).f === my_err
 
@@ -422,7 +422,7 @@ function _run_scheduler_tests(dir)
 		@test spec.args[1] == 99*2 # this is the replaced value
 
 		# success clears failed job
-		ok_job = create_spec(my_double, 2; __version=v"1.0.0")
+		ok_job = create_job(my_double, 2; __version=v"1.0.0")
 		fetch!(scheduler, ok_job)
 		@test get_failed_job(scheduler) === nothing
 		@test get_failed_spec(scheduler) === nothing
@@ -430,15 +430,15 @@ function _run_scheduler_tests(dir)
 
 
 	@testset "failed job — root cause captured for propagated error" begin
-		dep_job    = create_spec(my_err, 1002; __version=v"1.0.0")
-		parent_job = create_spec(my_add, dep_job, 1; __version=v"1.0.0")
+		dep_job    = create_job(my_err, 1002; __version=v"1.0.0")
+		parent_job = create_job(my_add, dep_job, 1; __version=v"1.0.0")
 		try fetch!(scheduler, parent_job) catch end
 		@test get_failed_job(scheduler).f === my_err
 	end
 
 
 	@testset "failed job — set when error is cached in SpecRun state" begin
-		job = create_spec(my_err, 1003; __version=v"1.0.0")
+		job = create_job(my_err, 1003; __version=v"1.0.0")
 		# first call: fresh error
 		try fetch!(scheduler, job) catch end
 		# second call: error is now cached in SpecRun state; failed job must still be set

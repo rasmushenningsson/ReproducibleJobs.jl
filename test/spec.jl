@@ -1,6 +1,6 @@
 using Test
 using ReproducibleJobs
-using ReproducibleJobs: create_spec, with_scheduler, ROVec
+using ReproducibleJobs: create_job, with_scheduler, ROVec
 
 
 function run_spec_tests()
@@ -16,48 +16,48 @@ end
 function _run_spec_tests()
 	@testset "Comparisons" begin
 		@testset "Basic comparisons" begin
-			spec = create_spec(sin, 1)
+			spec = create_job(sin, 1)
 
-			spec2 = create_spec(sin, 1)
+			spec2 = create_job(sin, 1)
 			@test spec === spec2
 
-			spec3 = create_spec(sin, 2)
+			spec3 = create_job(sin, 2)
 			@test !isequal(spec, spec3)
 
-			spec4 = create_spec(sin, 1; deduplicator=nothing)
+			spec4 = create_job(sin, 1; deduplicator=nothing)
 			@test spec !== spec4
 			@test isequal(spec, spec4)
 
-			spec5 = create_spec(sin, 1.0)
+			spec5 = create_job(sin, 1.0)
 			@test spec !== spec5 # Not the same spec because types are different.
 			@test isequal(spec, spec5) # Equal because isequal(1,1.0) - is that what we want?
 		end
 
 		@testset "Vector" begin
-			a = create_spec(sin, [1,5,2])
-			b = create_spec(sin, [1,5,2]; deduplicator=nothing)
+			a = create_job(sin, [1,5,2])
+			b = create_job(sin, [1,5,2]; deduplicator=nothing)
 			@test a !== b # Because b wasn't deduplicated.
 			@test isequal(a, b)
 		end
 
 		@testset "Comparisons with missing" begin
 			let
-				spec = create_spec(sin, missing)
-				spec2 = create_spec(sin, missing)
+				spec = create_job(sin, missing)
+				spec2 = create_job(sin, missing)
 				@test spec === spec2
 				@test isequal(spec, spec2)
 			end
 
 			let
-				spec = create_spec(sin, 1, missing)
-				spec2 = create_spec(sin, 2, missing)
+				spec = create_job(sin, 1, missing)
+				spec2 = create_job(sin, 2, missing)
 				@test spec !== spec2
 				@test !isequal(spec, spec2)
 			end
 
 			let
-				spec = create_spec(sin, missing, 1)
-				spec2 = create_spec(sin, missing, 2)
+				spec = create_job(sin, missing, 1)
+				spec2 = create_job(sin, missing, 2)
 				@test spec !== spec2
 				@test !isequal(spec, spec2)
 			end
@@ -65,26 +65,26 @@ function _run_spec_tests()
 
 		@testset "Comparison edge cases" begin
 			@testset "Returns" begin
-				a = create_spec(sin, Returns("a"))
-				b = create_spec(sin, Returns("a"); deduplicator=nothing)
+				a = create_job(sin, Returns("a"))
+				b = create_job(sin, Returns("a"); deduplicator=nothing)
 				@test a !== b # Because b wasn't deduplicated.
 				@test isequal(a, b)
 			end
 			@testset "Returns Vector" begin
-				a = create_spec(sin, Returns([1,2,3]))
-				b = create_spec(sin, Returns([1,2,3]); deduplicator=nothing)
+				a = create_job(sin, Returns([1,2,3]))
+				b = create_job(sin, Returns([1,2,3]); deduplicator=nothing)
 				@test a !== b # Because b wasn't deduplicated.
 				@test isequal(a, b)
 			end
 			@testset "Base.Fix" begin
-				a = create_spec(sin, startswith("a"))
-				b = create_spec(sin, startswith("a"); deduplicator=nothing)
+				a = create_job(sin, startswith("a"))
+				b = create_job(sin, startswith("a"); deduplicator=nothing)
 				@test a !== b # Because b wasn't deduplicated.
 				@test isequal(a, b)
 			end
 			@testset "ComposedFunction" begin
-				a = create_spec(sin, !startswith("a"))
-				b = create_spec(sin, !startswith("a"); deduplicator=nothing)
+				a = create_job(sin, !startswith("a"))
+				b = create_job(sin, !startswith("a"); deduplicator=nothing)
 				@test a !== b # Because b wasn't deduplicated.
 				@test isequal(a, b)
 			end
@@ -92,7 +92,7 @@ function _run_spec_tests()
 	end
 
 	@testset "$f" for (f,op) in ((fetched,:fetch), (prefetched,:prefetch))
-		spec = create_spec(sin, 1)
+		spec = create_job(sin, 1)
 		let s = f(spec)
 			@test s.op === op
 			@test s.sr === spec.sr

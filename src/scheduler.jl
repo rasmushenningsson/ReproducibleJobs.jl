@@ -479,7 +479,7 @@ Activate on-disk caching for `job`. When `sub` is provided, only the named sub-r
 
 # Examples
 ```julia
-cached_job = cached(create_spec(expensive_function, data; __version=v"0.1.0"))
+cached_job = cached(create_job(expensive_function, data; __version=v"0.1.0"))
 ```
 
 ```julia
@@ -491,11 +491,11 @@ See also [`CompoundResult`](@ref), [`Cache`](@ref).
 function cached(job::Job, sub::Union{Nothing,String}=nothing; return_keys::Bool=false)
 	@assert sub==nothing || return_keys==false
 
-	c = create_spec(get_cached, job; __version=v"1.0.0")
+	c = create_job(get_cached, job; __version=v"1.0.0")
 	if sub !== nothing
-		create_spec(compoundresult_sub, c, sub; __version=v"0.0.1")
+		create_job(compoundresult_sub, c, sub; __version=v"0.0.1")
 	elseif return_keys
-		create_spec(compoundresult_keys, c; __version=v"0.0.1")
+		create_job(compoundresult_keys, c; __version=v"0.0.1")
 	else
 		c
 	end

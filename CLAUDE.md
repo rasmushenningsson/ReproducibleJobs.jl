@@ -59,7 +59,7 @@ This writes a Julia Preference; the default is `.cache` in the working directory
 
 ### Core Concepts
 
-**`Spec`** (`src/spec.jl`): A specification of a computation — a function `f` plus `args` and `kwargs`. `create_spec(f, args...; kwargs...)` is the main constructor. All non-preprocessing specs must include a `__version` kwarg (stripped before calling `f`).
+**`Spec`** (`src/spec.jl`): A specification of a computation — a function `f` plus `args` and `kwargs`. Not created directly - `create_job(f, args...; kwargs...)` is the main constructor. All non-preprocessing specs must include a `__version` kwarg (stripped before calling `f`).
 
 **`Job`** (`src/spec.jl`): The primary user-facing type. Type alias `Job = SpecRef{State}`. A reference to a `SpecRun` with an `op` symbol (`:forward`, `:call`, `:fetch`, or `:prefetch`) that controls how it is processed. Call `fetch!(job)` to compute, `forward!(job)` to run preprocessing only.
 

@@ -4,7 +4,7 @@
 A file path wrapper that captures the file's modification time (`mtime`) at construction.
 Used as a spec argument so that file changes invalidate cached computations.
 
-See also [`ChecksummedFilePath`](@ref), [`checksummedfilepath_spec`](@ref).
+See also [`ChecksummedFilePath`](@ref), [`checksummedfilepath_job`](@ref).
 """
 struct TimestampedFilePath
 	path::String
@@ -40,7 +40,7 @@ A file path wrapper that captures the file's SHA-256 checksum. Equality is based
 the checksum, so cached results survive file renames or moves as long as the content is
 unchanged.
 
-See also [`TimestampedFilePath`](@ref), [`checksummedfilepath_spec`](@ref).
+See also [`TimestampedFilePath`](@ref), [`checksummedfilepath_job`](@ref).
 """
 struct ChecksummedFilePath
 	path::String
@@ -85,8 +85,8 @@ Base.show(io::IO, x::ChecksummedFilePath) = print(io, "ChecksummedFilePath(", x.
 
 
 """
-    checksummedfilepath_spec(path; kwargs...) -> Job
-    checksummedfilepath_spec(ts::TimestampedFilePath; kwargs...) -> Job
+    checksummedfilepath_job(path; kwargs...) -> Job
+    checksummedfilepath_job(ts::TimestampedFilePath; kwargs...) -> Job
 
 Create a [`Job`](@ref) that computes and caches a [`ChecksummedFilePath`](@ref) from a file
 path or [`TimestampedFilePath`](@ref). The result is prefetched to ensure that the hash of a spec
@@ -99,9 +99,9 @@ modification time.
 
 See also [`ChecksummedFilePath`](@ref), [`TimestampedFilePath`](@ref).
 """
-checksummedfilepath_spec(ts::TimestampedFilePath; kwargs...) =
-	prefetched(cached(create_spec(checksummedfilepath, ts; kwargs..., __version=v"0.1.0")))
-checksummedfilepath_spec(fp::AbstractString; kwargs...) =
-	checksummedfilepath_spec(TimestampedFilePath(fp); kwargs...)
+checksummedfilepath_job(ts::TimestampedFilePath; kwargs...) =
+	prefetched(cached(create_job(checksummedfilepath, ts; kwargs..., __version=v"0.1.0")))
+checksummedfilepath_job(fp::AbstractString; kwargs...) =
+	checksummedfilepath_job(TimestampedFilePath(fp); kwargs...)
 
-# checksummedfilepath_job(fp; kwargs...) = Job(checksummedfilepath_spec(fp; kwargs...))
+# checksummedfilepath_job(fp; kwargs...) = Job(checksummedfilepath_job(fp; kwargs...))
