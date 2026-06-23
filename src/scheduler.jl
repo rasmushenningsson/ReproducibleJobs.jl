@@ -174,8 +174,13 @@ function evict_results!(scheduler::Scheduler; evict_all=true)
 
 	# r_sz_str = _byte_size_string(lru.total_size)
 	# c_sz_str = _byte_size_string(mem_capacity)
-	r_sz_str = Base.format_bytes(lru.total_size; binary=false)
-	c_sz_str = Base.format_bytes(mem_capacity; binary=false)
+	@static if VERSION >= v"1.12.0"
+		r_sz_str = Base.format_bytes(lru.total_size; binary=false)
+		c_sz_str = Base.format_bytes(mem_capacity; binary=false)
+	else
+		r_sz_str = Base.format_bytes(lru.total_size)
+		c_sz_str = Base.format_bytes(mem_capacity)
+	end
 	# set_text!(scheduler.lru_display_item[], "⋅ LRU: $(length(lru))/$item_capacity items ($r_sz_str/$c_sz_str)")
 	if scheduler.lru_display_item[] !== nothing
 		set_text!(scheduler.progress_display, scheduler.lru_display_item[], styled"{blue:⋅ LRU:} $(length(lru))/$item_capacity items ($r_sz_str/$c_sz_str)")
@@ -390,7 +395,7 @@ function process_work(scheduler, work::WorkUnion)
 				sleep(0.05)
 			end
 		finally
-			isempty(scheduler.result_channel) && put!(scheduler.result_channel, nothing)
+			isready(scheduler.result_channel) || put!(scheduler.result_channel, nothing)
 		end
 	end
 
@@ -679,7 +684,11 @@ function _reset_progress_display!(scheduler, sr::SpecRun)
 end
 
 function _update_gc_display!(scheduler::Scheduler)
-	live = Base.format_bytes(Base.gc_live_bytes(); binary=false)
+	@static if VERSION >= v"1.12.0"
+		live = Base.format_bytes(Base.gc_live_bytes(); binary=false)
+	else
+		live = Base.format_bytes(Base.gc_live_bytes())
+	end
 	# More stuff? E.g. time since last full/incremental sweep. And max memory usage.
 	set_text!(scheduler.progress_display, scheduler.gc_display_item[], styled"{blue:⋅ GC:} $live live")
 end

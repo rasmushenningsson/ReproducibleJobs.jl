@@ -259,6 +259,7 @@ else
 	# Workaround for handling Fix not existing in earlier Julia versions
 	# Maintaining compatibility on disk
 	struct FixWorkaround{N} end
+	deconstruct_type(::Type{<:FixWorkaround}) = true
 
 	deconstruct_type(::Type{<:Base.Fix1}) = true
 	deconstruct_type(::Type{<:Base.Fix2}) = true
@@ -268,19 +269,9 @@ else
 	deconstruct(fix::Base.Fix1{F,T}) where {F,T} = (1, fix.f, fix.x)
 	deconstruct(fix::Base.Fix2{F,T}) where {F,T} = (2, fix.f, fix.x)
 
-	function reconstruct(::Type{FixWorkaround{1}}, (n,f,x)::Tuple{Int,F,T}) where {F,T}
-		@info "FixWorkaround{1}"
-		@assert 1 == n
-		Base.Fix1(f, x)
-	end
 	function reconstruct(::Type{<:Base.Fix1}, (n,f,x)::Tuple{Int,F,T}) where {F,T}
-		@info "Base.Fix1"
 		@assert 1 == n
 		Base.Fix1(f, x)
-	end
-	function reconstruct(::Type{FixWorkaround{2}}, (n,f,x)::Tuple{Int,F,T}) where {F,T}
-		@assert 2 == n
-		Base.Fix2(f, x)
 	end
 	function reconstruct(::Type{<:Base.Fix2}, (n,f,x)::Tuple{Int,F,T}) where {F,T}
 		@assert 2 == n

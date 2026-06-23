@@ -114,7 +114,14 @@ end
 function Base.empty!(pd::ProgressDisplay)
 	pd.nlines = 0
 	pd.head = pd.tail = ListNode(ProgressItemUnion, ProgressText())
-	empty!(pd.channel)
+
+	@static if VERSION >= v"1.12.0"
+		empty!(pd.channel)
+	else
+		while isready(pd.channel); take!(pd.channel); end
+	end
+
+
 	pd.start_time = time()
 	pd.last_print_time = -Inf
 	pd
@@ -244,10 +251,10 @@ function print_display(pd::ProgressDisplay; final=false)
 		t - pd.last_print_time < pd.print_interval && return # rate-limit redraws
 	end
 
-	# Process item updates (isempty!+take! works since we only have one consumer task)
+	# Process item updates (isready+take! works since we only have one consumer task)
 	# Removed items and info messages print here and stay permanently above the active display.
 	# Removed items are only printed if beyond threshold; info messages are always printed.
-	while !isempty(pd.channel)
+	while isready(pd.channel)
 		msg = take!(pd.channel)
 		if msg isa ProgressMessageAddItem
 			_add_item!(pd, msg.item)

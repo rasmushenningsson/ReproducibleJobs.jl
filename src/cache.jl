@@ -187,7 +187,11 @@ end
 # Returns, Fix, ComposedFunction are Function subtypes that are handled via deconstruct.
 # These explicit methods take priority over the plain F<:Function method below.
 cache_save(cache::Cache, io, name, x::Returns) = _cache_save_deconstructed(cache, io, name, x)
-cache_save(cache::Cache, io, name, x::Base.Fix) = _cache_save_deconstructed(cache, io, name, x)
+@static if VERSION >= v"1.12.0"
+	cache_save(cache::Cache, io, name, x::Base.Fix) = _cache_save_deconstructed(cache, io, name, x)
+else
+	cache_save(cache::Cache, io, name, x::Union{<:Base.Fix1,<:Base.Fix2}) = _cache_save_deconstructed(cache, io, name, x)
+end
 cache_save(cache::Cache, io, name, x::ComposedFunction) = _cache_save_deconstructed(cache, io, name, x)
 
 function _cache_save_deconstructed(cache::Cache, io, name, x::T) where T

@@ -19,7 +19,7 @@ using DataFrames # TODO: Use package extension?
 using SparseArrays # TODO: Use package extension?
 
 import AbstractTrees # for pretty printing
-using StyledStrings # For Spec printing
+using StyledStrings: AnnotatedString, @styled_str # For Spec printing
 import Dates # for printing of timestamped paths
 
 export
