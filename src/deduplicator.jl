@@ -243,16 +243,57 @@ tag_to_type(::Val{:Returns}) = Returns
 deconstruct(r::Returns{T}) where T = (r.value, )
 reconstruct(::Type{<:Returns}, (x,)::Tuple{T}) where T = Returns(x)
 
-deconstruct_type(::Type{<:Base.Fix}) = true
-type_to_tag(::Type{<:Base.Fix}) = TypeTag(:Fix)
-tag_to_type(::Val{:Fix}) = Base.Fix
-deconstruct(fix::Base.Fix{N,F,T}) where {N,F,T} = (N, fix.f, fix.x)
-function reconstruct(::Type{<:Base.Fix{N}}, (n,f,x)::Tuple{Int,F,T}) where {N,F,T}
-	@assert N == n
-	Base.Fix{N}(f, x)
-end
-function reconstruct(::Type{<:Base.Fix}, (n,f,x)::Tuple{Int,F,T}) where {F,T} # type unstable version when N isn't known at the type level
-	Base.Fix{n}(f, x)
+@static if VERSION >= v"1.12.0"
+	deconstruct_type(::Type{<:Base.Fix}) = true
+	type_to_tag(::Type{<:Base.Fix}) = TypeTag(:Fix)
+	tag_to_type(::Val{:Fix}) = Base.Fix
+	deconstruct(fix::Base.Fix{N,F,T}) where {N,F,T} = (N, fix.f, fix.x)
+	function reconstruct(::Type{<:Base.Fix{N}}, (n,f,x)::Tuple{Int,F,T}) where {N,F,T}
+		@assert N == n
+		Base.Fix{N}(f, x)
+	end
+	function reconstruct(::Type{<:Base.Fix}, (n,f,x)::Tuple{Int,F,T}) where {F,T} # type unstable version when N isn't known at the type level
+		Base.Fix{n}(f, x)
+	end
+else
+	# Workaround for handling Fix not existing in earlier Julia versions
+	# Maintaining compatibility on disk
+	struct FixWorkaround{N} end
+
+	deconstruct_type(::Type{<:Base.Fix1}) = true
+	deconstruct_type(::Type{<:Base.Fix2}) = true
+	type_to_tag(::Type{<:Base.Fix1}) = TypeTag(:Fix)
+	type_to_tag(::Type{<:Base.Fix2}) = TypeTag(:Fix)
+	tag_to_type(::Val{:Fix}) = FixWorkaround
+	deconstruct(fix::Base.Fix1{F,T}) where {F,T} = (1, fix.f, fix.x)
+	deconstruct(fix::Base.Fix2{F,T}) where {F,T} = (2, fix.f, fix.x)
+
+	function reconstruct(::Type{FixWorkaround{1}}, (n,f,x)::Tuple{Int,F,T}) where {F,T}
+		@info "FixWorkaround{1}"
+		@assert 1 == n
+		Base.Fix1(f, x)
+	end
+	function reconstruct(::Type{<:Base.Fix1}, (n,f,x)::Tuple{Int,F,T}) where {F,T}
+		@info "Base.Fix1"
+		@assert 1 == n
+		Base.Fix1(f, x)
+	end
+	function reconstruct(::Type{FixWorkaround{2}}, (n,f,x)::Tuple{Int,F,T}) where {F,T}
+		@assert 2 == n
+		Base.Fix2(f, x)
+	end
+	function reconstruct(::Type{<:Base.Fix2}, (n,f,x)::Tuple{Int,F,T}) where {F,T}
+		@assert 2 == n
+		Base.Fix2(f, x)
+	end
+	function reconstruct(::Type{<:FixWorkaround}, (n,f,x)::Tuple{Int,F,T}) where {F,T} # type unstable version when N isn't known at the type level
+		@assert n in (1,2)
+		if n == 1
+			Base.Fix1(f, x)
+		else
+			Base.Fix2(f, x)
+		end
+	end
 end
 
 deconstruct_type(::Type{<:ComposedFunction}) = true
@@ -617,10 +658,22 @@ deduplicate_type(::Type{<:Set}) = true
 function deduplicate_type(::Type{Returns{T}}) where {T}
 	deduplicate_type(T)
 end
+
 # Base.Fix
-function deduplicate_type(::Type{Base.Fix{N,F,T}}) where {N,F,T}
-	deduplicate_type(F) || deduplicate_type(T)
+@static if VERSION >= v"1.12.0"
+	function deduplicate_type(::Type{Base.Fix{N,F,T}}) where {N,F,T}
+		deduplicate_type(F) || deduplicate_type(T)
+	end
+else
+	function deduplicate_type(::Type{Base.Fix1{F,T}}) where {F,T}
+		deduplicate_type(F) || deduplicate_type(T)
+	end
+	function deduplicate_type(::Type{Base.Fix2{F,T}}) where {F,T}
+		deduplicate_type(F) || deduplicate_type(T)
+	end
 end
+
+
 # ComposedFunction
 function deduplicate_type(::Type{ComposedFunction{F1,F2}}) where {F1,F2}
 	deduplicate_type(F1) || deduplicate_type(F2)
