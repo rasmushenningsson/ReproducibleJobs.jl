@@ -3,7 +3,7 @@
 
 using Test
 using ReproducibleJobs
-using ReproducibleJobs: create_job, with_scheduler, Preprocess, Preprocessing, ProcessingException, cached
+using ReproducibleJobs: Preprocess, Preprocessing, ProcessingException, create_job, with_scheduler, fetched, prefetched, cached
 
 
 # All test functions must be at module scope (named, non-closure) so the

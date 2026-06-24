@@ -1,6 +1,6 @@
 using Test
 using ReproducibleJobs
-using ReproducibleJobs: create_job, with_scheduler, ROVec
+using ReproducibleJobs: ROVec, create_job, fetched, prefetched, with_scheduler
 
 
 function run_spec_tests()
