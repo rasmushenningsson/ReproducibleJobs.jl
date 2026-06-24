@@ -23,41 +23,41 @@ using StyledStrings: AnnotatedString, @styled_str # For Spec printing
 import Dates # for printing of timestamped paths
 
 export
-	Deduplicator,
-	Cache,
 	Scheduler,
 	Spec,
 	SpecRef,
 	Job,
-	CompoundResult,
-	AbstractPreprocess,
-	Preprocess,
 	TimestampedFilePath,
 	ChecksummedFilePath,
 	ProgressDisplay, # Experimental
 	WatchableLog, # Experimental
-	deduplicate!,
-	is_cancelled,
-	throw_if_cancelled,
 	print_spec,
 	fetch!,
 	forward!,
 	forward_once!,
 	fetched,
 	prefetched,
-	ifelse_job,
-	error_job,
-	checksummedfilepath_job,
+	is_cancelled,
+	throw_if_cancelled,
 	get_failed_job,
 	get_failed_spec,
-	set_progress_display! # Experimental
+	set_progress_display!, # Experimental
+	ifelse_job,
+	error_job,
+	checksummedfilepath_job
 
 # Use public keyword in Julia versions where it is available
 if VERSION >= v"1.11.0-DEV.469"
 	let str = """
 		public
+			Deduplicator,
+			Cache,
+			CompoundResult,
+			AbstractPreprocess,
+			Preprocess,
 			Preprocessing,
 			ProgressBar, # experimental
+			deduplicate!,
 			get_cache_path,
 			persist_cache_path!,
 			create_job,
