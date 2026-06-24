@@ -29,19 +29,12 @@ export
 	Job,
 	TimestampedFilePath,
 	ChecksummedFilePath,
-	ProgressDisplay, # Experimental
-	WatchableLog, # Experimental
 	print_spec,
 	fetch!,
 	forward!,
 	forward_once!,
-	fetched,
-	prefetched,
-	is_cancelled,
-	throw_if_cancelled,
 	get_failed_job,
 	get_failed_spec,
-	set_progress_display!, # Experimental
 	ifelse_job,
 	error_job,
 	checksummedfilepath_job
@@ -56,16 +49,23 @@ if VERSION >= v"1.11.0-DEV.469"
 			AbstractPreprocess,
 			Preprocess,
 			Preprocessing,
-			ProgressBar, # experimental
+			ProgressDisplay,
+			WatchableLog,
+			ProgressBar,
 			deduplicate!,
 			get_cache_path,
 			persist_cache_path!,
 			create_job,
+			fetched,
+			prefetched,
 			cached,
 			get_scheduler,
 			set_scheduler!,
 			with_scheduler,
-			register_function!
+			register_function!,
+			is_cancelled,
+			throw_if_cancelled,
+			set_progress_display!
 		"""
 		eval(Meta.parse(str))
 	end
@@ -126,7 +126,6 @@ include("preprocess.jl")
 include("processing_exception.jl")
 include("lru_cache.jl")
 include("scheduler.jl")
-include("scheduler_old.jl") # will be removed
 
 include("paths.jl")
 

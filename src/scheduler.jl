@@ -128,6 +128,9 @@ register_function!(f) = register_function!(get_scheduler(), f)
 Set the progress display used by the scheduler. The no-argument scheduler form uses the global
 scheduler.
 
+!!! note "Experimental"
+    This API is experimental and may change.
+
 # Examples
 ```julia
 set_progress_display!(ProgressDisplay(; io=WatchableLog("progress.log", 8)))

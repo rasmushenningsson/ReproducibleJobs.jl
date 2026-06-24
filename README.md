@@ -11,6 +11,6 @@ ReproducibleJobs.jl is a framework for reproducible analyses of scientific data,
 * Memoization/caching is a good strategy because while the raw data can be large, the computed results are in essence much smaller.
 * It is possible to create succinct specifications of how to perform analyses.
 
-More information and documentation to come.
+For more information, see the [documentation](https://rasmushenningsson.github.io/ReproducibleJobs.jl/dev/).
 
 Currently, the main use case for ReproducibleJobs.jl is [SingleCellProjections.jl](https://github.com/BioJulia/SingleCellProjections.jl).
