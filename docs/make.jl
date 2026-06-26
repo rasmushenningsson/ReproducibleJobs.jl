@@ -17,6 +17,7 @@ makedocs(;
 	pages=[
 		"Home" => "index.md",
 		"User Guide" => "userguide.md",
+		"Canonicalization" => "canonicalization.md",
 		"Interface" => "interface.md",
 	],
 )
