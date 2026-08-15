@@ -327,6 +327,48 @@ function run_deduplicator_tests()
 		end
 	end
 
+	# Numeric types are hashed by their raw bits, so arrays of different eltypes can have
+	# identical byte content: Int64(0)/Float64(0.0) are both all zeros, and UInt64/Int64 agree
+	# for every value. The eltype must therefore take part in the hash - otherwise deduplication
+	# returns an array of the wrong type for the second one.
+	@testset "Numeric eltype" begin
+		@testset "Int64 vs Float64" begin
+			d = Deduplicator()
+			x = [0, 0]
+			y = [0.0, 0.0]
+			@test deduplication_hash(d, x) != deduplication_hash(d, y)
+
+			x2 = @inferred deduplicate!(d, x)
+			y2 = @inferred deduplicate!(d, y)
+			@test x2 isa ROVec{Int}
+			@test y2 isa ROVec{Float64}
+			@test x2 !== y2
+			@test x2 == x
+			@test y2 == y
+
+			@test @inferred(deduplicate!(d, x)) === x2
+			@test @inferred(deduplicate!(d, y)) === y2
+		end
+
+		@testset "UInt64 vs Int64" begin
+			d = Deduplicator()
+			x = UInt64[1, 2]
+			y = Int64[1, 2]
+			@test deduplication_hash(d, x) != deduplication_hash(d, y)
+
+			x2 = @inferred deduplicate!(d, x)
+			y2 = @inferred deduplicate!(d, y)
+			@test x2 isa ROVec{UInt64}
+			@test y2 isa ROVec{Int64}
+			@test x2 !== y2
+			@test x2 == x
+			@test y2 == y
+
+			@test @inferred(deduplicate!(d, x)) === x2
+			@test @inferred(deduplicate!(d, y)) === y2
+		end
+	end
+
 	@testset "AbstractString" begin
 		d = Deduplicator()
 		for x in (String1("a"), String7("abc"))
