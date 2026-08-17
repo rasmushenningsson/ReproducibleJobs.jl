@@ -1,6 +1,6 @@
 name = "ReproducibleJobs"
 uuid = "aecc171b-6fa4-4f58-b49a-a8d1f07f0278"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Rasmus Henningsson <rasmus.henningsson@gmail.com>"]
 
 [workspace]
