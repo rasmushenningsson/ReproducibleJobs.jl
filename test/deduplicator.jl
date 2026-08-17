@@ -843,7 +843,7 @@ function run_deduplicator_tests()
 		         sparse([5,2]), sparse([5;2;;]),
 		         DataFrame(:a=>[5,2]), DataFrame(:a=>[5.0,2.0]), DataFrame(:b=>[5,2]),
 		         [nothing], [missing],
-		         [v"0.1.0"], [v"0.1.0-a"], [v"1.0.0"],
+		         [v"0.1.0"], [v"0.1.0-a"], [v"1.0.0"], ["0.1.0"],
 		         [r"abc"], [r"abc"i], ["abc"],
 		         [Int], [Int8], ["Int"], ["Int8"],
 		         ["A"], [:A], [Int('A')], ['A'], [("A",)], [('A',)],
