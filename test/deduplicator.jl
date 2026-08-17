@@ -40,7 +40,7 @@ function run_deduplicator_tests()
 	@testset "Simple types" begin
 		d = Deduplicator()
 
-		for x in (true, false, 2, 3.4, "hello", :hello, 'C', v"1.0.0", v"0.1.2-alpha.1", Float64, DataFrame, :, nothing, missing)
+		for x in (true, false, 2, UInt64(2), 3.4, "hello", :hello, 'C', v"1.0.0", v"0.1.2-alpha.1", Float64, DataFrame, :, nothing, missing)
 			@test @inferred(deduplicate!(d, x)) === x
 		end
 		@test isempty(d.pointer2obj)
@@ -574,6 +574,60 @@ function run_deduplicator_tests()
 		end
 	end
 
+	# Numeric types are hashed by their raw bits, so arrays of different eltypes can have
+	# identical byte content: Int64(0)/Float64(0.0) are both all zeros, and UInt64/Int64 agree
+	# for every value. The eltype must therefore take part in the hash - otherwise deduplication
+	# returns an array of the wrong type for the second one.
+	@testset "Numeric eltype" begin
+		@testset "Int64 vs Float64" begin
+			d = Deduplicator()
+			x = [0, 0]
+			y = [0.0, 0.0]
+			@test deduplication_hash(d, x) != deduplication_hash(d, y)
+
+			x2 = @inferred deduplicate!(d, x)
+			@test x2 isa ROVec{Int}
+			@test x2 == x
+
+			y2 = @inferred deduplicate!(d, y)
+			@test y2 isa ROVec{Float64}
+			@test y2 == y
+
+			@test @inferred(deduplicate!(d, x)) === x2
+			@test @inferred(deduplicate!(d, y)) === y2
+
+			for (K,V) in ((Int,Float64),(Float64,Int),(Float64,Float64))
+				z = Dict(0=>0)
+				w = Dict(K(0)=>V(0))
+				@test deduplication_hash(d, z) != deduplication_hash(d, w)
+			end
+		end
+
+		@testset "UInt64 vs Int64" begin
+			d = Deduplicator()
+			x = UInt64[1, 2]
+			y = Int64[1, 2]
+			@test deduplication_hash(d, x) != deduplication_hash(d, y)
+
+			x2 = @inferred deduplicate!(d, x)
+			@test x2 isa ROVec{UInt64}
+			@test x2 == x
+
+			y2 = @inferred deduplicate!(d, y)
+			@test y2 isa ROVec{Int64}
+			@test y2 == y
+
+			@test @inferred(deduplicate!(d, x)) === x2
+			@test @inferred(deduplicate!(d, y)) === y2
+
+			for (K,V) in ((Int,UInt64),(UInt64,Int),(UInt64,UInt64))
+				z = Dict(2=>3)
+				w = Dict(K(2)=>V(3))
+				@test deduplication_hash(d, z) != deduplication_hash(d, w)
+			end
+		end
+	end	
+
 	@testset "WeakRefs" begin
 		d = Deduplicator()
 		put_old_weakref!(d)
@@ -789,7 +843,7 @@ function run_deduplicator_tests()
 		         sparse([5,2]), sparse([5;2;;]),
 		         DataFrame(:a=>[5,2]), DataFrame(:a=>[5.0,2.0]), DataFrame(:b=>[5,2]),
 		         [nothing], [missing],
-		         [v"0.1.0"], [v"0.1.0-a"], [v"1.0.0"],
+		         [v"0.1.0"], [v"0.1.0-a"], [v"1.0.0"], ["0.1.0"],
 		         [r"abc"], [r"abc"i], ["abc"],
 		         [Int], [Int8], ["Int"], ["Int8"],
 		         ["A"], [:A], [Int('A')], ['A'], [("A",)], [('A',)],

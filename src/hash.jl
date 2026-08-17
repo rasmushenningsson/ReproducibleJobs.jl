@@ -41,6 +41,22 @@ DeduplicatorHashContext() = DeduplicatorHashContext(HashVersion{4}())
 
 StableHashTraits.parent_context(x::DeduplicatorHashContext) = x.parent
 
-function StableHashTraits.transformer(::Type{Char}, ::DeduplicatorHashContext)
-	StableHashTraits.Transformer(x->(nameof(Char), Int(x)))
+# StableHashTraits identifies a type by its StructTypes trait unless an explicit `transform_type`
+# method says otherwise, but hashes values as their raw contents. Types sharing a trait therefore
+# collide whenever their contents agree. Appending the concrete type name fixes that. (Upstream does
+# the same for Symbol, which would otherwise collide with String.)
+#
+# Handle Union{} edge case.
+function StableHashTraits.transform_type(::Type{Union{}}, c::DeduplicatorHashContext)
+	StableHashTraits.transform_type(Union{}, StableHashTraits.parent_context(c))
+end
+
+# NumberType: Int64[0,0] vs Float64[0.0,0.0], or UInt64 vs Int64 for *every* value.
+function StableHashTraits.transform_type(::Type{T}, c::DeduplicatorHashContext) where {T<:Number}
+	(StableHashTraits.transform_type(T, StableHashTraits.parent_context(c)), StableHashTraits.nameof_string(T))
+end
+
+# StringType: 'a' vs "a", and v"1.2.3" vs "1.2.3".
+function StableHashTraits.transform_type(::Type{T}, c::DeduplicatorHashContext) where {T<:Union{Char,String,VersionNumber}}
+	(StableHashTraits.transform_type(T, StableHashTraits.parent_context(c)), StableHashTraits.nameof_string(T))
 end
